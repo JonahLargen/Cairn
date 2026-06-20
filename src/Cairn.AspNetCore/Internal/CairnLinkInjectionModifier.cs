@@ -45,5 +45,11 @@ internal sealed class CairnLinkInjectionModifier(IHttpContextAccessor accessor)
     private static IReadOnlyDictionary<string, HalFormsTemplate>? ToTemplates(IReadOnlyDictionary<string, HalAction>? actions)
         => actions is null
             ? null
-            : actions.ToDictionary(a => a.Key, a => new HalFormsTemplate(a.Value.Method, a.Value.Href) { Title = a.Value.Title });
+            : actions.ToDictionary(
+                a => a.Key,
+                a => new HalFormsTemplate(a.Value.Method, a.Value.Href)
+                {
+                    Title = a.Value.Title,
+                    Properties = HalFormsSchema.For(a.Value.Input),
+                });
 }
