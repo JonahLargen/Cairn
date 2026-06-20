@@ -53,4 +53,17 @@ public static class CairnEndpointExtensions
 
         return builder.WithMetadata(new CursorLinkMetadata(cursorLink));
     }
+
+    /// <summary>
+    /// Forces the hypermedia <paramref name="format"/> for this endpoint or route group, overriding content
+    /// negotiation and the global default.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
+    public static TBuilder WithHypermediaFormat<TBuilder>(this TBuilder builder, HypermediaFormat format)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithMetadata(new HypermediaFormatMetadata(format));
+    }
 }

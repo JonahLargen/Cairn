@@ -14,6 +14,12 @@ public sealed class CairnOptions
     /// <summary>How unresolved link targets are handled (default <see cref="LinkResolutionMode.Lax"/>).</summary>
     public LinkResolutionMode Mode { get; set; } = LinkResolutionMode.Lax;
 
+    /// <summary>The wire format used when the request doesn't negotiate one (default <see cref="HypermediaFormat.Default"/>).</summary>
+    public HypermediaFormat DefaultFormat { get; set; } = HypermediaFormat.Default;
+
+    /// <summary>Whether a known hypermedia media type in the request's <c>Accept</c> header selects the format (default <see langword="true"/>).</summary>
+    public bool NegotiateFormat { get; set; } = true;
+
     /// <summary>The query string parameter swapped by the default offset pagination links (default <c>page</c>).</summary>
     public string PageQueryParameter { get; set; } = "page";
 
