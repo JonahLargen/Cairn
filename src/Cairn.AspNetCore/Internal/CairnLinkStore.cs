@@ -20,6 +20,15 @@ internal sealed record HalAction(string Href, string Method)
     public string? Title { get; init; }
 }
 
+/// <summary>An affordance projected into a HAL-FORMS <c>_templates</c> entry.</summary>
+internal sealed record HalFormsTemplate(string Method, string Target)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Title { get; init; }
+
+    public IReadOnlyList<object> Properties { get; init; } = [];
+}
+
 /// <summary>The serializable hypermedia computed for a single resource instance.</summary>
 internal sealed record ResourceHypermedia(
     IReadOnlyDictionary<string, HalLink>? Links,
@@ -29,6 +38,12 @@ internal sealed record ResourceHypermedia(
 internal static class CairnLinkStore
 {
     private const string ItemsKey = "Cairn.LinkStore";
+    private const string FormatKey = "Cairn.Format";
+
+    public static void SetFormat(HttpContext http, HypermediaFormat format) => http.Items[FormatKey] = format;
+
+    public static HypermediaFormat GetFormat(HttpContext http)
+        => http.Items[FormatKey] is HypermediaFormat format ? format : HypermediaFormat.Default;
 
     public static void Record(HttpContext http, object instance, ResourceHypermedia payload)
     {
