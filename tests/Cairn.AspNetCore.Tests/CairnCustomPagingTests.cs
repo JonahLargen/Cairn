@@ -75,7 +75,55 @@ public class CairnCustomPagingTests
         Assert.Equal("https://route/2", self);
     }
 
+    [Fact]
+    public async Task Custom_cursor_envelope_via_AddCursorPaging_and_per_route_links()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.AddLinks(new PagedOrderLinks());
+            o.AddCursorPaging<Feed<PagedOrder>>(f => new CursorView(f.Entries, f.After, f.Before));
+            o.CursorLink = (request, cursor) => $"https://global/{cursor}";
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new PagedOrder(id))).WithName("PagedOrderById");
+        app.MapGet("/feed", () => TypedResults.Ok(new Feed<PagedOrder>
+        {
+            Entries = [new PagedOrder(1), new PagedOrder(2)],
+            After = "AFTER",
+            Before = null,
+        }))
+        .WithLinks()
+        .WithCursorLinks((request, cursor) => $"https://route/{cursor}");
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var json = await client.GetStringAsync("/feed");
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var links = root.GetProperty("_links");
+        Assert.Equal("https://route/AFTER", links.GetProperty("next").GetProperty("href").GetString());
+        Assert.False(links.TryGetProperty("prev", out _));   // Before is null
+
+        var entries = root.GetProperty("entries").EnumerateArray().ToList();
+        Assert.Equal(2, entries.Count);
+        Assert.EndsWith("/orders/1", entries[0].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
+    }
+
     private sealed record PagedOrder(int Id);
+
+    private sealed class Feed<T>
+    {
+        public required IReadOnlyList<T> Entries { get; init; }
+
+        public string? After { get; init; }
+
+        public string? Before { get; init; }
+    }
 
     private sealed class CustomPage<T>
     {

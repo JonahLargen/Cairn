@@ -32,6 +32,14 @@ orders.MapGet("/paged", (int page = 1) => TypedResults.Ok(
             TotalCount: 25)))
     .WithLinks();
 
+// A cursor/keyset page — you supply the opaque cursors; Cairn emits self/next/prev and links each item.
+orders.MapGet("/cursor", () => TypedResults.Ok(
+        new CursorPage<OrderDto>(
+            [new OrderDto(3, OrderStatus.Pending), new OrderDto(4, OrderStatus.Shipped)],
+            Next: "eyJpZCI6NH0",
+            Previous: "eyJpZCI6Mn0")))
+    .WithLinks();
+
 // A Results<,> union — links are attached to the inner value when present.
 orders.MapGet("/find/{id:int}", Results<Ok<OrderDto>, NotFound> (int id) =>
         id > 0 ? TypedResults.Ok(new OrderDto(id, OrderStatus.Shipped)) : TypedResults.NotFound())
