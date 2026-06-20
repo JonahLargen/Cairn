@@ -23,4 +23,19 @@ public static class CairnEndpointExtensions
             return result;
         });
     }
+
+    /// <summary>
+    /// Sets how pagination links are built for this endpoint or route group, overriding the global default.
+    /// </summary>
+    /// <param name="builder">The endpoint or route group builder.</param>
+    /// <param name="pageLink">Builds the URL for a page number from the current request.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="pageLink"/> is <see langword="null"/>.</exception>
+    public static TBuilder WithPageLinks<TBuilder>(this TBuilder builder, Func<HttpRequest, int, string> pageLink)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(pageLink);
+
+        return builder.WithMetadata(new PageLinkMetadata(pageLink));
+    }
 }

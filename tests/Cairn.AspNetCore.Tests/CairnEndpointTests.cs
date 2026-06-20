@@ -42,6 +42,14 @@ public sealed class CairnEndpointTests : IAsyncLifetime
             }))
             .WithLinks();
 
+        orders.MapGet("/paged", (int page = 1) => TypedResults.Ok(
+                new PagedResource<TestOrder>(
+                    [new TestOrder(1, "Pending"), new TestOrder(2, "Shipped")],
+                    page,
+                    PageSize: 10,
+                    TotalCount: 25)))
+            .WithLinks();
+
         // Opted out: no .WithLinks() — must serialize unchanged.
         orders.MapGet("/plain/{id:int}", (int id) => TypedResults.Ok(new TestOrder(id, "Pending")));
 
@@ -117,6 +125,26 @@ public sealed class CairnEndpointTests : IAsyncLifetime
         // Item 1 is Pending (cancel offered); item 2 is Shipped (no actions).
         Assert.True(items[0].TryGetProperty("_actions", out _));
         Assert.False(items[1].TryGetProperty("_actions", out _));
+    }
+
+    [Fact]
+    public async Task Paged_envelope_gets_pagination_links_and_links_each_item()
+    {
+        var root = await GetJsonAsync("/orders/paged?page=2");
+
+        var links = root.GetProperty("_links");
+        Assert.EndsWith("page=2", links.GetProperty("self").GetProperty("href").GetString());
+        Assert.EndsWith("page=1", links.GetProperty("first").GetProperty("href").GetString());
+        Assert.EndsWith("page=1", links.GetProperty("prev").GetProperty("href").GetString());
+        Assert.EndsWith("page=3", links.GetProperty("next").GetProperty("href").GetString());
+        Assert.EndsWith("page=3", links.GetProperty("last").GetProperty("href").GetString());
+
+        Assert.Equal(2, root.GetProperty("page").GetInt32());
+        Assert.Equal(3, root.GetProperty("totalPages").GetInt32());
+
+        var items = root.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(2, items.Count);
+        Assert.EndsWith("/orders/1", items[0].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
     }
 
     [Fact]
