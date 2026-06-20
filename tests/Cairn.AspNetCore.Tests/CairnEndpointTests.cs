@@ -26,16 +26,23 @@ public sealed class CairnEndpointTests : IAsyncLifetime
 
         orders.MapGet("/{id:int}", (int id) => TypedResults.Ok(new TestOrder(id, "Pending")))
             .WithName("GetOrderById")
-            .WithLinks<TestOrder>();
+            .WithLinks();
 
         orders.MapGet("/shipped/{id:int}", (int id) => TypedResults.Ok(new TestOrder(id, "Shipped")))
-            .WithLinks<TestOrder>();
+            .WithLinks();
 
         orders.MapGet("/find/{id:int}", Results<Ok<TestOrder>, NotFound> (int id) =>
                 id > 0 ? TypedResults.Ok(new TestOrder(id, "Pending")) : TypedResults.NotFound())
-            .WithLinks<TestOrder>();
+            .WithLinks();
 
-        // Opted out: no .WithLinks<T>() — must serialize unchanged.
+        orders.MapGet("/", () => TypedResults.Ok(new[]
+            {
+                new TestOrder(1, "Pending"),
+                new TestOrder(2, "Shipped"),
+            }))
+            .WithLinks();
+
+        // Opted out: no .WithLinks() — must serialize unchanged.
         orders.MapGet("/plain/{id:int}", (int id) => TypedResults.Ok(new TestOrder(id, "Pending")));
 
         orders.MapPost("/{id:int}/cancel", (int id) => TypedResults.NoContent())
@@ -95,6 +102,21 @@ public sealed class CairnEndpointTests : IAsyncLifetime
         var response = await _client.GetAsync("/orders/find/0");
 
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Links_each_item_in_a_returned_collection()
+    {
+        var root = await GetJsonAsync("/orders");
+        var items = root.EnumerateArray().ToList();
+
+        Assert.Equal(2, items.Count);
+        Assert.EndsWith("/orders/1", items[0].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
+        Assert.EndsWith("/orders/2", items[1].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
+
+        // Item 1 is Pending (cancel offered); item 2 is Shipped (no actions).
+        Assert.True(items[0].TryGetProperty("_actions", out _));
+        Assert.False(items[1].TryGetProperty("_actions", out _));
     }
 
     [Fact]
