@@ -115,9 +115,20 @@ public class LinkEngineTests
     {
         var engine = EngineFor(new TestOrderLinks());
 
-        var set = await engine.BuildAsync<TestOrder?>(null, Context());
+        var set = await engine.BuildAsync(null!, Context());
 
         Assert.True(set.IsEmpty);
+    }
+
+    [Fact]
+    public async Task Dispatches_by_runtime_type_when_passed_as_object()
+    {
+        var engine = EngineFor(new TestOrderLinks());
+        object resource = new TestOrder(7, "Pending");
+
+        var set = await engine.BuildAsync(resource, Context());
+
+        Assert.Contains(set.Links, l => l.Relation.Value == "self");
     }
 
     private static LinkEngine EngineFor<T>(LinkConfig<T> config) => new(new LinkConfigRegistry().Add(config));

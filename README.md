@@ -12,7 +12,7 @@ A cairn is a small stack of stones a traveler leaves along a trail so the next t
 
 - **Clean DTOs.** Add links to a plain `record` — no base class, no marker interface, no required attributes. Links are projected at serialization time via a `System.Text.Json` contract modifier, so your models stay untouched.
 - **Opt-in by default.** Endpoints you don't opt in to serialize exactly as before, so Cairn is safe to add incrementally to an existing API.
-- **Minimal-API-first.** `app.MapGroup("/orders").AddCairn()` and `.WithLinks<T>()`, with MVC supported over the same engine.
+- **Minimal-API-first.** Register with `AddCairn()` and opt endpoints in with `.WithLinks()`.
 - **Affordances that authorize.** A `cancel` link can be advertised only when the resource is in a cancellable state **and** the caller satisfies an ASP.NET Core authorization policy — the same policy that guards the action.
 - **System.Text.Json-native and AOT-friendly.** No reflection on the hot path.
 - **Pragmatic formats.** A flat `{ href, rel, method }` shape and HAL by content negotiation, with HAL-FORMS planned — so links fit whatever your clients already expect.
@@ -36,9 +36,11 @@ public sealed class OrderLinks : LinkConfig<OrderDto>
     }
 }
 
-var orders = app.MapGroup("/orders").AddCairn();
-orders.MapGet("/{id:int}", (int id, IOrderRepo repo) => TypedResults.Ok(repo.Get(id)))
-      .WithLinks<OrderDto>();   // links projected at serialize time; .Produces<OrderDto>() stays intact
+builder.Services.AddCairn(o => o.AddLinks(new OrderLinks()));
+// ...
+app.MapGet("/orders/{id:int}", (int id, IOrderRepo repo) => TypedResults.Ok(repo.Get(id)))
+   .WithName("GetOrderById")
+   .WithLinks();   // links projected at serialization time; the DTO is never modified
 ```
 
 ## Packages
