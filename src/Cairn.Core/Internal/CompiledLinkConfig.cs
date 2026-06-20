@@ -38,7 +38,7 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
             if (await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false)
                 && Resolve(spec, typed, context) is { } href)
             {
-                affordances.Add(new Affordance(spec.Relation, href, spec.HttpMethod) { Title = spec.TitleText });
+                affordances.Add(new Affordance(spec.Relation, href, spec.HttpMethod) { Title = spec.TitleText, Input = spec.InputType });
             }
         }
 

@@ -43,6 +43,10 @@ public interface IAffordanceSpec<T>
     /// <summary>Sets the HTTP method used to invoke the action (default <c>POST</c>).</summary>
     IAffordanceSpec<T> Method(string httpMethod);
 
+    /// <summary>Declares the input type the action accepts, used to describe its form fields (e.g. HAL-FORMS).</summary>
+    /// <typeparam name="TInput">The request/body type the action accepts.</typeparam>
+    IAffordanceSpec<T> Accepts<TInput>();
+
     /// <summary>Sets a human-readable title.</summary>
     IAffordanceSpec<T> Title(string title);
 

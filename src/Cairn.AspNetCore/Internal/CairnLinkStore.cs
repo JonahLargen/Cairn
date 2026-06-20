@@ -18,6 +18,9 @@ internal sealed record HalAction(string Href, string Method)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
+
+    [JsonIgnore]
+    public Type? Input { get; init; }
 }
 
 /// <summary>An affordance projected into a HAL-FORMS <c>_templates</c> entry.</summary>
@@ -26,7 +29,29 @@ internal sealed record HalFormsTemplate(string Method, string Target)
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
-    public IReadOnlyList<object> Properties { get; init; } = [];
+    public IReadOnlyList<HalFormsProperty> Properties { get; init; } = [];
+}
+
+/// <summary>A field in a HAL-FORMS template, derived from an input type's data annotations.</summary>
+internal sealed record HalFormsProperty(string Name)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Required { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Type { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Regex { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxLength { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Min { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Max { get; init; }
 }
 
 /// <summary>The serializable hypermedia computed for a single resource instance.</summary>

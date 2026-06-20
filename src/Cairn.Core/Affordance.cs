@@ -33,4 +33,7 @@ public sealed record Affordance
 
     /// <summary>An optional human-readable title for the action.</summary>
     public string? Title { get; init; }
+
+    /// <summary>An optional input type the action accepts, used to describe its form fields.</summary>
+    public Type? Input { get; init; }
 }
