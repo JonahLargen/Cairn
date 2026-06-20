@@ -248,7 +248,7 @@ internal static class CairnLinkRecorder
             ? null
             : linkSet.Affordances.ToDictionary(
                 a => a.Name.Value,
-                a => new HalAction(a.Href, a.Method) { Title = a.Title });
+                a => new HalAction(a.Href, a.Method) { Title = a.Title, Input = a.Input });
 
         return new ResourceHypermedia(links, actions);
     }

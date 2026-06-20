@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using Cairn;
 using Cairn.AspNetCore;
@@ -79,6 +80,32 @@ public class CairnFormatTests
         Assert.Equal("application/prs.hal-forms+json", response.Content.Headers.ContentType?.MediaType);
     }
 
+    [Fact]
+    public async Task HalForms_template_derives_properties_from_data_annotations()
+    {
+        await using var app = await StartAsync(o => o.DefaultFormat = HypermediaFormat.HalForms);
+
+        var root = await GetJsonAsync(app.Client, "/o/42");
+        var properties = root.GetProperty("_templates").GetProperty("cancel").GetProperty("properties").EnumerateArray().ToList();
+        var byName = properties.ToDictionary(p => p.GetProperty("name").GetString()!);
+
+        var reason = byName["reason"];
+        Assert.True(reason.GetProperty("required").GetBoolean());
+        Assert.Equal("text", reason.GetProperty("type").GetString());
+        Assert.Equal(200, reason.GetProperty("maxLength").GetInt32());
+
+        var severity = byName["severity"];
+        Assert.Equal("number", severity.GetProperty("type").GetString());
+        Assert.Equal(1d, severity.GetProperty("min").GetDouble());
+        Assert.Equal(5d, severity.GetProperty("max").GetDouble());
+
+        Assert.Equal("email", byName["notifyEmail"].GetProperty("type").GetString());
+        Assert.Equal("checkbox", byName["notify"].GetProperty("type").GetString());
+
+        // 'reason' is required; 'notify' is not — required is omitted when false.
+        Assert.False(byName["notify"].TryGetProperty("required", out _));
+    }
+
     private static async Task<TestApp> StartAsync(Action<CairnOptions> configure, bool forceHalForms = false)
     {
         var builder = WebApplication.CreateBuilder();
@@ -121,8 +148,25 @@ public class CairnFormatTests
         public override void Configure(ILinkBuilder<FmtOrder> builder)
         {
             builder.Self(order => LinkTarget.Route("FmtOrderById", new { id = order.Id }));
-            builder.Affordance("cancel", order => LinkTarget.Route("FmtCancel", new { id = order.Id })).Method("POST");
+            builder.Affordance("cancel", order => LinkTarget.Route("FmtCancel", new { id = order.Id }))
+                .Method("POST")
+                .Accepts<CancelRequest>();
         }
+    }
+
+    private sealed class CancelRequest
+    {
+        [Required]
+        [StringLength(200)]
+        public string Reason { get; init; } = "";
+
+        [Range(1, 5)]
+        public int Severity { get; init; }
+
+        [EmailAddress]
+        public string? NotifyEmail { get; init; }
+
+        public bool Notify { get; init; }
     }
 
     private sealed class TestApp(WebApplication app, HttpClient client) : IAsyncDisposable

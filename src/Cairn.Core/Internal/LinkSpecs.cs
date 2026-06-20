@@ -41,9 +41,17 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
 {
     public string HttpMethod { get; private set; } = "POST";
 
+    public Type? InputType { get; private set; }
+
     public IAffordanceSpec<T> Method(string httpMethod)
     {
         HttpMethod = httpMethod;
+        return this;
+    }
+
+    public IAffordanceSpec<T> Accepts<TInput>()
+    {
+        InputType = typeof(TInput);
         return this;
     }
 
