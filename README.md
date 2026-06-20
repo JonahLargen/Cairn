@@ -1,8 +1,6 @@
-<h1 align="center">Cairn</h1>
+<h1>Cairn</h1>
 
-<p align="center"><em>Leave a marker. They'll find their way.</em></p>
-
-<p align="center">Opt-in HATEOAS for .NET — hypermedia you add only where it helps.</p>
+<p>Opt-in HATEOAS for .NET — hypermedia you add only where it helps.</p>
 
 ---
 
