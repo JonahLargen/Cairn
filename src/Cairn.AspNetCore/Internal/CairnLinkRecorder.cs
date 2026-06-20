@@ -5,8 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Cairn.AspNetCore.Internal;
 
 /// <summary>
-/// Compute stage: builds the hypermedia for an endpoint's returned value — paged envelopes get
-/// pagination links and each element of a collection is linked — recording it by reference for the
+/// Compute stage: builds the hypermedia for an endpoint's returned value — offset and cursor envelopes
+/// get pagination links and each element of a collection is linked — recording it by reference for the
 /// emit stage to serialize.
 /// </summary>
 internal static class CairnLinkRecorder
@@ -37,27 +37,29 @@ internal static class CairnLinkRecorder
             return;
         }
 
-        // Paged envelope (IPagedResource, or a type registered via AddPaging): pagination links on the
-        // envelope, then link each item.
-        IPagedResource? paged = value as IPagedResource;
-        if (paged is null && options.TryGetPagedView(value, out var view))
+        // Offset envelope (IPagedResource or AddPaging): page-number links, then link each item.
+        IPagedResource? offset = value as IPagedResource;
+        if (offset is null && options.TryGetPagedView(value, out var pagedView))
         {
-            paged = view;
+            offset = pagedView;
         }
 
-        if (paged is not null)
+        if (offset is { } paged)
         {
-            if (visited.Add(value))
-            {
-                var pageUrl = ResolvePageUrl(http, options);
-                CairnLinkStore.Record(http, value, new ResourceHypermedia(PaginationLinks.Build(paged, pageUrl), null));
-            }
+            await RecordEnvelopeAsync(http, value, paged.Items, () => PaginationLinks.BuildOffset(paged, ResolvePageUrl(http, options)), engine, context, options, visited);
+            return;
+        }
 
-            foreach (var item in paged.Items)
-            {
-                await RecordAsync(http, item, engine, context, options, visited);
-            }
+        // Cursor envelope (ICursorPagedResource or AddCursorPaging): cursor links, then link each item.
+        ICursorPagedResource? cursor = value as ICursorPagedResource;
+        if (cursor is null && options.TryGetCursorView(value, out var cursorView))
+        {
+            cursor = cursorView;
+        }
 
+        if (cursor is { } cursored)
+        {
+            await RecordEnvelopeAsync(http, value, cursored.Items, () => PaginationLinks.BuildCursor(http.Request, cursored, ResolveCursorUrl(http, options)), engine, context, options, visited);
             return;
         }
 
@@ -84,6 +86,20 @@ internal static class CairnLinkRecorder
         }
     }
 
+    // Shared: record the envelope's navigation links, then link each of its items.
+    private static async ValueTask RecordEnvelopeAsync(HttpContext http, object envelope, IEnumerable items, Func<IReadOnlyDictionary<string, HalLink>> buildLinks, ILinkEngine engine, LinkContext context, CairnOptions options, HashSet<object> visited)
+    {
+        if (visited.Add(envelope))
+        {
+            CairnLinkStore.Record(http, envelope, new ResourceHypermedia(buildLinks(), null));
+        }
+
+        foreach (var item in items)
+        {
+            await RecordAsync(http, item, engine, context, options, visited);
+        }
+    }
+
     // Per-route .WithPageLinks() wins over the global PageLink, which wins over the default query-swap.
     private static Func<int, string> ResolvePageUrl(HttpContext http, CairnOptions options)
     {
@@ -98,6 +114,22 @@ internal static class CairnLinkRecorder
         }
 
         return page => PaginationLinks.DefaultPageUrl(http.Request, page, options.PageQueryParameter);
+    }
+
+    // Per-route .WithCursorLinks() wins over the global CursorLink, which wins over the default query-swap.
+    private static Func<string, string> ResolveCursorUrl(HttpContext http, CairnOptions options)
+    {
+        if (http.GetEndpoint()?.Metadata.GetMetadata<CursorLinkMetadata>() is { } perRoute)
+        {
+            return cursor => perRoute.CursorLink(http.Request, cursor);
+        }
+
+        if (options.CursorLink is { } global)
+        {
+            return cursor => global(http.Request, cursor);
+        }
+
+        return cursor => PaginationLinks.SwapQueryParam(http.Request, options.CursorQueryParameter, cursor);
     }
 
     // Peel Results<T1,T2,...> unions down to the concrete result that carries the value.

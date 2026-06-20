@@ -50,6 +50,13 @@ public sealed class CairnEndpointTests : IAsyncLifetime
                     TotalCount: 25)))
             .WithLinks();
 
+        orders.MapGet("/cursor", () => TypedResults.Ok(
+                new CursorPage<TestOrder>(
+                    [new TestOrder(1, "Pending")],
+                    Next: "next-cur",
+                    Previous: "prev-cur")))
+            .WithLinks();
+
         // Opted out: no .WithLinks() — must serialize unchanged.
         orders.MapGet("/plain/{id:int}", (int id) => TypedResults.Ok(new TestOrder(id, "Pending")));
 
@@ -144,6 +151,25 @@ public sealed class CairnEndpointTests : IAsyncLifetime
 
         var items = root.GetProperty("items").EnumerateArray().ToList();
         Assert.Equal(2, items.Count);
+        Assert.EndsWith("/orders/1", items[0].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
+    }
+
+    [Fact]
+    public async Task Cursor_envelope_emits_self_next_prev_and_links_items()
+    {
+        var root = await GetJsonAsync("/orders/cursor");
+
+        var links = root.GetProperty("_links");
+        Assert.True(links.TryGetProperty("self", out _));
+        Assert.EndsWith("cursor=next-cur", links.GetProperty("next").GetProperty("href").GetString());
+        Assert.EndsWith("cursor=prev-cur", links.GetProperty("prev").GetProperty("href").GetString());
+        Assert.False(links.TryGetProperty("first", out _));   // offset-only rels are absent for cursor
+
+        // Raw cursors are not leaked as data properties.
+        Assert.False(root.TryGetProperty("next", out _));
+        Assert.False(root.TryGetProperty("previous", out _));
+
+        var items = root.GetProperty("items").EnumerateArray().ToList();
         Assert.EndsWith("/orders/1", items[0].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
     }
 
