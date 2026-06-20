@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Description>Core hypermedia model for Cairn — an opt-in, low-friction HATEOAS library for .NET. Transport-agnostic links, link relations, and affordances. No ASP.NET dependency.</Description>
+  </PropertyGroup>
+
+</Project>
