@@ -5,8 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Cairn.AspNetCore.Internal;
 
 /// <summary>
-/// Compute stage: builds the hypermedia for an endpoint's returned value — and each element of a
-/// returned collection — recording it by reference for the emit stage to serialize.
+/// Compute stage: builds the hypermedia for an endpoint's returned value — paged envelopes get
+/// pagination links and each element of a collection is linked — recording it by reference for the
+/// emit stage to serialize.
 /// </summary>
 internal static class CairnLinkRecorder
 {
@@ -26,22 +27,46 @@ internal static class CairnLinkRecorder
             options.Mode);
 
         var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        await RecordAsync(http, value, engine, context, visited);
+        await RecordAsync(http, value, engine, context, options, visited);
     }
 
-    private static async ValueTask RecordAsync(HttpContext http, object? value, ILinkEngine engine, LinkContext context, HashSet<object> visited)
+    private static async ValueTask RecordAsync(HttpContext http, object? value, ILinkEngine engine, LinkContext context, CairnOptions options, HashSet<object> visited)
     {
         if (value is null)
         {
             return;
         }
 
-        // Walk collections so each element is linked; the array/list itself carries no _links.
+        // Paged envelope (IPagedResource, or a type registered via AddPaging): pagination links on the
+        // envelope, then link each item.
+        IPagedResource? paged = value as IPagedResource;
+        if (paged is null && options.TryGetPagedView(value, out var view))
+        {
+            paged = view;
+        }
+
+        if (paged is not null)
+        {
+            if (visited.Add(value))
+            {
+                var pageUrl = ResolvePageUrl(http, options);
+                CairnLinkStore.Record(http, value, new ResourceHypermedia(PaginationLinks.Build(paged, pageUrl), null));
+            }
+
+            foreach (var item in paged.Items)
+            {
+                await RecordAsync(http, item, engine, context, options, visited);
+            }
+
+            return;
+        }
+
+        // Plain collection: each element is linked; the array/list itself carries no _links.
         if (value is IEnumerable enumerable and not string)
         {
             foreach (var item in enumerable)
             {
-                await RecordAsync(http, item, engine, context, visited);
+                await RecordAsync(http, item, engine, context, options, visited);
             }
 
             return;
@@ -57,6 +82,22 @@ internal static class CairnLinkRecorder
         {
             CairnLinkStore.Record(http, value, ToPayload(linkSet));
         }
+    }
+
+    // Per-route .WithPageLinks() wins over the global PageLink, which wins over the default query-swap.
+    private static Func<int, string> ResolvePageUrl(HttpContext http, CairnOptions options)
+    {
+        if (http.GetEndpoint()?.Metadata.GetMetadata<PageLinkMetadata>() is { } perRoute)
+        {
+            return page => perRoute.PageLink(http.Request, page);
+        }
+
+        if (options.PageLink is { } global)
+        {
+            return page => global(http.Request, page);
+        }
+
+        return page => PaginationLinks.DefaultPageUrl(http.Request, page, options.PageQueryParameter);
     }
 
     // Peel Results<T1,T2,...> unions down to the concrete result that carries the value.

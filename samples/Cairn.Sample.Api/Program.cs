@@ -23,6 +23,15 @@ orders.MapGet("/", () => TypedResults.Ok(new[]
     }))
     .WithLinks();
 
+// A paged envelope — the page gets self/first/prev/next/last links; each item its own.
+orders.MapGet("/paged", (int page = 1) => TypedResults.Ok(
+        new PagedResource<OrderDto>(
+            [new OrderDto(1, OrderStatus.Pending), new OrderDto(2, OrderStatus.Shipped)],
+            page,
+            PageSize: 10,
+            TotalCount: 25)))
+    .WithLinks();
+
 // A Results<,> union — links are attached to the inner value when present.
 orders.MapGet("/find/{id:int}", Results<Ok<OrderDto>, NotFound> (int id) =>
         id > 0 ? TypedResults.Ok(new OrderDto(id, OrderStatus.Shipped)) : TypedResults.NotFound())
