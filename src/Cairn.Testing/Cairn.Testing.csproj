@@ -9,4 +9,8 @@
     <ProjectReference Include="..\Cairn.Core\Cairn.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="AwesomeAssertions" />
+  </ItemGroup>
+
 </Project>
