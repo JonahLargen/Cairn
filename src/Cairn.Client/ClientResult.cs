@@ -22,6 +22,9 @@ public sealed class ClientResult<T>
     /// <summary>The HTTP status code.</summary>
     public int Status { get; }
 
+    /// <summary>Whether the server returned <c>304 Not Modified</c> (in response to a conditional GET).</summary>
+    public bool IsNotModified => Status == 304;
+
     /// <summary>The resource and its hypermedia, when <see cref="IsSuccess"/>.</summary>
     public Resource<T>? Resource { get; }
 
