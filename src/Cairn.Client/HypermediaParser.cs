@@ -96,6 +96,10 @@ internal static class HypermediaParser
             {
                 Title = GetString(element, "title"),
                 Type = GetString(element, "type"),
+                Name = GetString(element, "name"),
+                Deprecation = GetString(element, "deprecation"),
+                Hreflang = GetString(element, "hreflang"),
+                Profile = GetString(element, "profile"),
             }
             : null;
 

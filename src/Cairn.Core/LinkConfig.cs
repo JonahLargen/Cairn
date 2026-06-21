@@ -55,6 +55,18 @@ public interface ILinkSpec<T>
     /// <summary>Sets a media type hint for the link's destination (the RFC 8288 <c>type</c> attribute).</summary>
     ILinkSpec<T> Type(string mediaType);
 
+    /// <summary>Sets a secondary key for selecting between links that share a relation (HAL/RFC 8288 <c>name</c>).</summary>
+    ILinkSpec<T> Name(string name);
+
+    /// <summary>Marks the link deprecated; <paramref name="url"/> should point at information about the deprecation.</summary>
+    ILinkSpec<T> Deprecated(string url);
+
+    /// <summary>Sets a language hint for the link's destination (RFC 8288 <c>hreflang</c>).</summary>
+    ILinkSpec<T> Hreflang(string language);
+
+    /// <summary>Sets a profile URI describing the link's destination (RFC 6906 <c>profile</c>).</summary>
+    ILinkSpec<T> Profile(string profileUri);
+
     /// <summary>Includes the link only when the predicate holds for the resource.</summary>
     ILinkSpec<T> When(Func<T, bool> condition);
 

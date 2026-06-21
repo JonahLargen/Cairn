@@ -31,4 +31,16 @@ public sealed record Link
 
     /// <summary>An optional media type hint for the link's destination.</summary>
     public string? Type { get; init; }
+
+    /// <summary>An optional secondary key for selecting between links that share a relation (HAL/RFC 8288 <c>name</c>).</summary>
+    public string? Name { get; init; }
+
+    /// <summary>An optional URL whose presence marks the link deprecated; it should describe the deprecation.</summary>
+    public string? Deprecation { get; init; }
+
+    /// <summary>An optional language hint for the link's destination (RFC 8288 <c>hreflang</c>).</summary>
+    public string? Hreflang { get; init; }
+
+    /// <summary>An optional profile URI describing the link's destination (RFC 6906 <c>profile</c>).</summary>
+    public string? Profile { get; init; }
 }
