@@ -45,17 +45,32 @@ public sealed class CairnClient
 
     /// <summary>Follows a link to another resource. Does not throw on an HTTP error status.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="link"/> is null.</exception>
-    /// <exception cref="NotSupportedException"><paramref name="link"/> is a URI template (<see cref="Link.Templated"/>).</exception>
+    /// <exception cref="NotSupportedException"><paramref name="link"/> is a URI template (<see cref="Link.Templated"/>); supply variables to expand it.</exception>
     /// <exception cref="InvalidOperationException">The link target is rejected by the configured link policy.</exception>
-    public async Task<ClientResult<T>> FollowAsync<T>(Link link, CancellationToken cancellationToken = default)
+    public Task<ClientResult<T>> FollowAsync<T>(Link link, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(link);
         if (link.Templated)
         {
-            throw new NotSupportedException($"The '{link.Relation}' link is a URI template; expanding templated links is not supported.");
+            throw new NotSupportedException($"The '{link.Relation}' link is a URI template; supply variables to expand it.");
         }
 
-        using var response = await _http.GetAsync(Authorize(link.Href), cancellationToken).ConfigureAwait(false);
+        return FollowResolvedAsync<T>(link.Href, cancellationToken);
+    }
+
+    /// <summary>Follows a link, expanding it as an RFC 6570 URI template with <paramref name="variables"/> (an anonymous object or dictionary). Does not throw on an HTTP error status.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="link"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The link target is rejected by the configured link policy.</exception>
+    public Task<ClientResult<T>> FollowAsync<T>(Link link, object? variables, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+        var href = link.Templated ? UriTemplate.Expand(link.Href, variables) : link.Href;
+        return FollowResolvedAsync<T>(href, cancellationToken);
+    }
+
+    private async Task<ClientResult<T>> FollowResolvedAsync<T>(string href, CancellationToken cancellationToken)
+    {
+        using var response = await _http.GetAsync(Authorize(href), cancellationToken).ConfigureAwait(false);
         return await ReadResultAsync<T>(response, cancellationToken).ConfigureAwait(false);
     }
 
