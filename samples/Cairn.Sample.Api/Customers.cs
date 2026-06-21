@@ -9,8 +9,10 @@ public record CustomerDto(int Id, string Name);
 /// <summary>Declares the hypermedia for <see cref="CustomerDto"/> — the same config drives controllers and minimal APIs.</summary>
 public sealed class CustomerLinks : LinkConfig<CustomerDto>
 {
+    // Routes.GetCustomerById is generated from the controller's [HttpGet(Name = "GetCustomerById")] — same
+    // compile-checked catalog as minimal-API routes.
     public override void Configure(ILinkBuilder<CustomerDto> builder)
-        => builder.Self(customer => LinkTarget.Route("GetCustomerById", new { id = customer.Id }));
+        => builder.Self(customer => Routes.GetCustomerById(customer.Id));
 }
 
 /// <summary>An MVC controller — the same opt-in model as minimal APIs, via <c>[CairnLinks]</c>.</summary>

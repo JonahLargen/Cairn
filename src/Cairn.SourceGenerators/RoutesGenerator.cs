@@ -24,18 +24,140 @@ public sealed class RoutesGenerator : IIncrementalGenerator
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var routes = context.SyntaxProvider.CreateSyntaxProvider(
+        // Minimal-API endpoints: .WithName("name") in a Map* fluent chain.
+        var fromEndpoints = context.SyntaxProvider.CreateSyntaxProvider(
                 predicate: static (node, _) => IsWithNameInvocation(node),
                 transform: static (syntaxContext, _) => Extract((InvocationExpressionSyntax)syntaxContext.Node))
             .Where(static route => route is not null)
             .Select(static (route, _) => route!.Value)
             .Collect();
 
-        context.RegisterSourceOutput(routes, static (production, collected) => Generate(production, collected));
+        // Controllers: [HttpGet(Name = "name")] / [Route("...", Name = "name")] attributes.
+        var fromControllers = context.SyntaxProvider.CreateSyntaxProvider(
+                predicate: static (node, _) => IsNamedRouteAttribute(node),
+                transform: static (syntaxContext, _) => ExtractFromAttribute((AttributeSyntax)syntaxContext.Node))
+            .Where(static route => route is not null)
+            .Select(static (route, _) => route!.Value)
+            .Collect();
+
+        context.RegisterSourceOutput(
+            fromEndpoints.Combine(fromControllers),
+            static (production, pair) => Generate(production, pair.Left.AddRange(pair.Right)));
     }
 
     private static bool IsWithNameInvocation(SyntaxNode node)
         => node is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "WithName" } };
+
+    private static bool IsNamedRouteAttribute(SyntaxNode node)
+        => node is AttributeSyntax attribute
+            && IsRouteAttribute(SimpleName(attribute.Name))
+            && attribute.ArgumentList is { } arguments
+            && arguments.Arguments.Any(static argument => argument.NameEquals?.Name.Identifier.ValueText == "Name");
+
+    private static RouteInfo? ExtractFromAttribute(AttributeSyntax attribute)
+    {
+        if (NamedArgument(attribute, "Name") is not { } name)
+        {
+            return null;
+        }
+
+        var actionTemplate = FirstAttributeStringArgument(attribute) ?? string.Empty;
+        var prefix = attribute.FirstAncestorOrSelf<MethodDeclarationSyntax>() is not null ? ControllerRoutePrefix(attribute) : null;
+        return new RouteInfo(name, ParseParameters(CombineController(prefix, actionTemplate)));
+    }
+
+    // The controller's own [Route("prefix")] template, if any (a non-absolute action template hangs off it).
+    private static string? ControllerRoutePrefix(AttributeSyntax attribute)
+    {
+        if (attribute.FirstAncestorOrSelf<TypeDeclarationSyntax>() is not { } type)
+        {
+            return null;
+        }
+
+        foreach (var list in type.AttributeLists)
+        {
+            foreach (var candidate in list.Attributes)
+            {
+                if (SimpleName(candidate.Name) is "Route" or "RouteAttribute")
+                {
+                    return FirstAttributeStringArgument(candidate);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string CombineController(string? prefix, string actionTemplate)
+    {
+        // An action template that starts with '/' is absolute and overrides the controller prefix.
+        if (actionTemplate.StartsWith("/", System.StringComparison.Ordinal))
+        {
+            return actionTemplate;
+        }
+
+        var builder = new StringBuilder();
+        AppendSegment(builder, prefix ?? string.Empty);
+        AppendSegment(builder, actionTemplate);
+        return builder.ToString();
+    }
+
+    private static string? NamedArgument(AttributeSyntax attribute, string name)
+    {
+        if (attribute.ArgumentList is not { } arguments)
+        {
+            return null;
+        }
+
+        foreach (var argument in arguments.Arguments)
+        {
+            if (argument.NameEquals?.Name.Identifier.ValueText == name
+                && argument.Expression is LiteralExpressionSyntax literal
+                && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                return literal.Token.ValueText;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? FirstAttributeStringArgument(AttributeSyntax attribute)
+    {
+        if (attribute.ArgumentList is not { } arguments)
+        {
+            return null;
+        }
+
+        foreach (var argument in arguments.Arguments)
+        {
+            if (argument.NameEquals is null && argument.NameColon is null
+                && argument.Expression is LiteralExpressionSyntax literal
+                && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                return literal.Token.ValueText;
+            }
+        }
+
+        return null;
+    }
+
+    private static string SimpleName(NameSyntax name) => name switch
+    {
+        IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+        QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
+        _ => name.ToString(),
+    };
+
+    private static bool IsRouteAttribute(string name)
+    {
+        if (name.EndsWith("Attribute", System.StringComparison.Ordinal))
+        {
+            name = name.Substring(0, name.Length - "Attribute".Length);
+        }
+
+        return name is "Route" or "HttpGet" or "HttpPost" or "HttpPut" or "HttpDelete" or "HttpPatch" or "HttpHead" or "HttpOptions";
+    }
 
     private static RouteInfo? Extract(InvocationExpressionSyntax withName)
     {
