@@ -22,9 +22,11 @@ internal static class PaginationLinks
             links["last"] = new(pageUrl(paged.TotalPages));
         }
 
-        if (paged.Page > 1)
+        // Clamp prev to the last valid page so an over-range request (Page > TotalPages) still points back
+        // into range rather than to a non-existent page.
+        if (paged.Page > 1 && paged.TotalPages > 0)
         {
-            links["prev"] = new(pageUrl(paged.Page - 1));
+            links["prev"] = new(pageUrl(Math.Min(paged.Page - 1, paged.TotalPages)));
         }
 
         if (paged.Page < paged.TotalPages)
