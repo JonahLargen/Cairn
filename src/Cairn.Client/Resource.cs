@@ -88,6 +88,13 @@ public sealed class Resource<T>
             ? _client.FollowAsync<TNext>(link, cancellationToken)
             : throw new InvalidOperationException($"The resource has no '{relation}' link.");
 
+    /// <summary>Follows the link with the given relation, expanding it as an RFC 6570 URI template with <paramref name="variables"/> (e.g. <c>new { status = "open", page = 2 }</c>).</summary>
+    /// <exception cref="InvalidOperationException">The resource has no link with that relation.</exception>
+    public Task<ClientResult<TNext>> FollowAsync<TNext>(string relation, object? variables, CancellationToken cancellationToken = default)
+        => Links.TryGetValue(relation, out var link)
+            ? _client.FollowAsync<TNext>(link, variables, cancellationToken)
+            : throw new InvalidOperationException($"The resource has no '{relation}' link.");
+
     /// <summary>Invokes the named affordance, optionally with a request body and an <c>ifMatch</c> ETag for optimistic concurrency.</summary>
     /// <exception cref="InvalidOperationException">The resource has no affordance with that name.</exception>
     public Task<ClientResult> InvokeAsync(string name, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
