@@ -289,7 +289,7 @@ internal static class CairnLinkRecorder
             links = new Dictionary<string, HalLink>(StringComparer.Ordinal);
             foreach (var link in linkSet.Links)
             {
-                links[link.Relation.Value] = new HalLink(link.Href) { Title = link.Title, Templated = link.Templated ? true : null };
+                links[link.Relation.Value] = new HalLink(link.Href) { Title = link.Title, Templated = link.Templated ? true : null, Type = link.Type };
             }
         }
 
