@@ -90,6 +90,12 @@ public sealed class RoutesGenerator : IIncrementalGenerator
 
     private static string CombineController(string? prefix, string actionTemplate)
     {
+        // A '~/'-rooted action template is application-root-relative and overrides the controller prefix.
+        if (actionTemplate.StartsWith("~/", System.StringComparison.Ordinal))
+        {
+            return actionTemplate.Substring(1);
+        }
+
         // An action template that starts with '/' is absolute and overrides the controller prefix.
         if (actionTemplate.StartsWith("/", System.StringComparison.Ordinal))
         {
@@ -235,6 +241,9 @@ public sealed class RoutesGenerator : IIncrementalGenerator
     private static string ParseParameters(string template)
     {
         var parameters = new List<string>();
+        // Route parameter names are case-insensitive and unique; a repeat (e.g. a group prefix and an endpoint
+        // both using {id}) must not produce a duplicate C# parameter — keep the first occurrence.
+        var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
         var index = 0;
 
         while (index < template.Length)
@@ -276,7 +285,7 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             }
 
             name = name.TrimEnd('?');
-            if (IsIdentifier(name))
+            if (IsIdentifier(name) && seen.Add(name))
             {
                 parameters.Add(name + " " + type);
             }
