@@ -11,6 +11,9 @@ internal sealed record HalLink(string Href)
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Templated { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Type { get; init; }
 }
 
 /// <summary>An affordance (action) in the emitted hypermedia payload.</summary>

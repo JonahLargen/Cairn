@@ -38,6 +38,9 @@ public interface ILinkSpec<T>
     /// <summary>Sets a human-readable title.</summary>
     ILinkSpec<T> Title(string title);
 
+    /// <summary>Sets a media type hint for the link's destination (the RFC 8288 <c>type</c> attribute).</summary>
+    ILinkSpec<T> Type(string mediaType);
+
     /// <summary>Includes the link only when the predicate holds for the resource.</summary>
     ILinkSpec<T> When(Func<T, bool> condition);
 
