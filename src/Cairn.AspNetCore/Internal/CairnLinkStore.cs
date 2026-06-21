@@ -92,7 +92,8 @@ internal sealed record HalFormsProperty(string Name)
 /// <summary>The serializable hypermedia computed for a single resource instance.</summary>
 internal sealed record ResourceHypermedia(
     IReadOnlyDictionary<string, HalLinkValue>? Links,
-    IReadOnlyDictionary<string, HalAction>? Actions);
+    IReadOnlyDictionary<string, HalAction>? Actions,
+    IReadOnlyDictionary<string, object>? Embedded = null);
 
 /// <summary>Per-request map from a serializable instance to its computed hypermedia (by reference).</summary>
 internal static class CairnLinkStore
