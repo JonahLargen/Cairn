@@ -49,4 +49,21 @@ public class LinkTests
     {
         Assert.Throws<ArgumentException>(() => new LinkRelation("  "));
     }
+
+    [Theory]
+    [InlineData("related")]
+    [InlineData("edit-form")]
+    [InlineData("create-form")]
+    [InlineData("describedby")]
+    [InlineData("latest-version")]
+    public void Iana_relations_use_their_registered_wire_value(string expected)
+    {
+        var relations = new[]
+        {
+            IanaLinkRelations.Related, IanaLinkRelations.EditForm, IanaLinkRelations.CreateForm,
+            IanaLinkRelations.DescribedBy, IanaLinkRelations.LatestVersion,
+        };
+
+        Assert.Contains(relations, r => r.Value == expected);
+    }
 }
