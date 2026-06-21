@@ -36,7 +36,15 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
                 if (ResolveHref(spec.Relation, target, context) is { } href)
                 {
                     var templated = target is ExplicitLinkTarget { Templated: true };
-                    links.Add(new Link(spec.Relation, href, templated) { Title = spec.TitleText, Type = spec.TypeText });
+                    links.Add(new Link(spec.Relation, href, templated)
+                    {
+                        Title = spec.TitleText,
+                        Type = spec.TypeText,
+                        Name = spec.NameText,
+                        Deprecation = spec.DeprecationText,
+                        Hreflang = spec.HreflangText,
+                        Profile = spec.ProfileText,
+                    });
                 }
             }
         }
