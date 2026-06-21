@@ -33,6 +33,10 @@ public sealed class Resource<T>
     /// <summary>The deserialized resource body, or <see langword="null"/> if the body could not be deserialized to <typeparamref name="T"/>.</summary>
     public T? Value { get; }
 
+    /// <summary>The deserialized body, or throws if it is null (an empty body, or one that could not be deserialized to <typeparamref name="T"/>).</summary>
+    /// <exception cref="InvalidOperationException"><see cref="Value"/> is null.</exception>
+    public T RequireValue() => Value ?? throw new InvalidOperationException($"The resource has no deserialized '{typeof(T).Name}' value (the body was empty or could not be deserialized).");
+
     /// <summary>The response's <c>ETag</c>, if any — pass it as <c>ifMatch</c> to an action for optimistic concurrency.</summary>
     public string? ETag { get; }
 
