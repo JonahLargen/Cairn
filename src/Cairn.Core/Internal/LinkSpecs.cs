@@ -12,6 +12,8 @@ internal abstract class HypermediaSpec<T>
     public string? Policy { get; set; }
 
     public string? TitleText { get; set; }
+
+    public string? TypeText { get; set; }
 }
 
 /// <summary>A recorded link declaration.</summary>
@@ -20,6 +22,12 @@ internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
     public ILinkSpec<T> Title(string title)
     {
         TitleText = title;
+        return this;
+    }
+
+    public ILinkSpec<T> Type(string mediaType)
+    {
+        TypeText = mediaType;
         return this;
     }
 

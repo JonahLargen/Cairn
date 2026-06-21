@@ -25,18 +25,29 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         var links = new List<Link>(_builder.Links.Count);
         foreach (var spec in _builder.Links)
         {
-            if (await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false)
-                && await ResolveAsync(spec, typed, context).ConfigureAwait(false) is { } href)
+            if (!await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false))
             {
-                links.Add(new Link(spec.Relation, href) { Title = spec.TitleText });
+                continue;
+            }
+
+            var (target, href) = await ResolveAsync(spec, typed, context).ConfigureAwait(false);
+            if (href is not null)
+            {
+                var templated = target is ExplicitLinkTarget { Templated: true };
+                links.Add(new Link(spec.Relation, href, templated) { Title = spec.TitleText, Type = spec.TypeText });
             }
         }
 
         var affordances = new List<Affordance>(_builder.Affordances.Count);
         foreach (var spec in _builder.Affordances)
         {
-            if (await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false)
-                && await ResolveAsync(spec, typed, context).ConfigureAwait(false) is { } href)
+            if (!await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            var (_, href) = await ResolveAsync(spec, typed, context).ConfigureAwait(false);
+            if (href is not null)
             {
                 affordances.Add(new Affordance(spec.Relation, href, spec.HttpMethod) { Title = spec.TitleText, Input = spec.InputType });
             }
@@ -60,16 +71,24 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         return true;
     }
 
-    private static async ValueTask<string?> ResolveAsync(HypermediaSpec<T> spec, T resource, LinkContext context)
+    private static async ValueTask<(LinkTarget Target, string? Href)> ResolveAsync(HypermediaSpec<T> spec, T resource, LinkContext context)
     {
         var target = await spec.Target(resource, context).ConfigureAwait(false);
         var href = context.UrlResolver.Resolve(target);
 
-        if (href is null && context.Mode == LinkResolutionMode.Strict)
+        // Treat null-or-whitespace as unresolved: Strict throws a clear LinkResolutionException; Lax drops the
+        // link (rather than letting the Link/Affordance constructor throw a raw ArgumentException, which would
+        // abort serialization and defeat Lax mode).
+        if (string.IsNullOrWhiteSpace(href))
         {
-            throw new LinkResolutionException($"Could not resolve a URL for relation '{spec.Relation}'.");
+            if (context.Mode == LinkResolutionMode.Strict)
+            {
+                throw new LinkResolutionException($"Could not resolve a URL for relation '{spec.Relation}'.");
+            }
+
+            return (target, null);
         }
 
-        return href;
+        return (target, href);
     }
 }

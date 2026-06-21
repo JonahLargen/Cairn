@@ -25,6 +25,7 @@ internal static class HypermediaParser
                     links[entry.Name] = new Link(entry.Name, href, GetBool(entry.Value, "templated") ?? false)
                     {
                         Title = GetString(entry.Value, "title"),
+                        Type = GetString(entry.Value, "type"),
                     };
                 }
             }
