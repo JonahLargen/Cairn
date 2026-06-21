@@ -14,7 +14,7 @@ public sealed class Resource<T>
         Affordances = affordances;
     }
 
-    /// <summary>The deserialized resource body.</summary>
+    /// <summary>The deserialized resource body, or <see langword="null"/> if the body could not be deserialized to <typeparamref name="T"/>.</summary>
     public T? Value { get; }
 
     /// <summary>The resource's links, keyed by relation.</summary>

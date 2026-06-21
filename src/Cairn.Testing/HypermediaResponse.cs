@@ -81,6 +81,7 @@ public sealed class HypermediaResponse
 public static class HypermediaResponseExtensions
 {
     /// <summary>Parses a hypermedia response from a JSON string.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="json"/> is null.</exception>
     public static HypermediaResponse Hypermedia(this string json) => HypermediaResponse.Parse(json);
 
     /// <summary>Reads and parses a hypermedia response from an <see cref="HttpResponseMessage"/> body.</summary>

@@ -6,6 +6,7 @@ namespace Cairn;
 public interface ICompiledLinkConfig
 {
     /// <summary>Builds the links and affordances for <paramref name="resource"/>.</summary>
+    /// <exception cref="LinkResolutionException">A link target cannot be resolved and <paramref name="context"/> is in strict mode (<see cref="LinkResolutionMode.Strict"/>).</exception>
     ValueTask<LinkSet> BuildAsync(object resource, LinkContext context, CancellationToken cancellationToken = default);
 }
 

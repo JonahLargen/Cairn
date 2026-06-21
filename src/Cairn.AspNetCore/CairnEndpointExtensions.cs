@@ -8,18 +8,21 @@ namespace Cairn.AspNetCore;
 public static class CairnEndpointExtensions
 {
     /// <summary>
-    /// Projects hypermedia links and affordances onto this endpoint's response. The returned value — and
-    /// each element of a returned collection — is linked according to its runtime type's configuration.
+    /// Projects hypermedia links and affordances onto this endpoint's (or route group's) responses. The
+    /// returned value — and each element of a returned collection — is linked according to its runtime
+    /// type's configuration.
     /// </summary>
+    /// <param name="builder">The endpoint or route group builder.</param>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-    public static RouteHandlerBuilder WithLinks(this RouteHandlerBuilder builder)
+    public static TBuilder WithLinks<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        return builder.AddEndpointFilter(async (context, next) =>
+        return builder.AddEndpointFilterFactory((_, next) => async invocation =>
         {
-            var result = await next(context);
-            await CairnLinkRecorder.RecordAsync(context.HttpContext, result);
+            var result = await next(invocation);
+            await CairnLinkRecorder.RecordAsync(invocation.HttpContext, result);
             return result;
         });
     }

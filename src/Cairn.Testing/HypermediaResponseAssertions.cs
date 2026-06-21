@@ -50,14 +50,14 @@ public sealed class HypermediaResponseAssertions
     }
 
     /// <summary>Asserts the response exposes the named affordance, returning assertions for it.</summary>
-    public HypermediaAffordanceAssertions ExposeAffordance(string name)
+    public HypermediaAffordanceAssertions HaveAffordance(string name)
     {
         _subject.Affordances.ContainsKey(name).Should().BeTrue("the response should expose the '{0}' affordance", name);
         return new HypermediaAffordanceAssertions(this, name, _subject.Affordances[name]);
     }
 
     /// <summary>Asserts the response does not expose the named affordance.</summary>
-    public HypermediaResponseAssertions NotExposeAffordance(string name)
+    public HypermediaResponseAssertions NotHaveAffordance(string name)
     {
         _subject.Affordances.ContainsKey(name).Should().BeFalse("the response should not expose the '{0}' affordance", name);
         return this;
