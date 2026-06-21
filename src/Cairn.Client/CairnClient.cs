@@ -171,9 +171,9 @@ public sealed class CairnClient
         var root = document.RootElement;
 
         // A bare array carries no collection-level links; an envelope's links live on its root object.
-        var (links, affordances, _) = root.ValueKind == JsonValueKind.Object
+        var (links, affordances, _, _) = root.ValueKind == JsonValueKind.Object
             ? HypermediaParser.Parse(root)
-            : (Empty<IReadOnlyList<Link>>(), Empty<Affordance>(), Empty<IReadOnlyList<AffordanceField>>());
+            : (Empty<IReadOnlyList<Link>>(), Empty<Affordance>(), Empty<IReadOnlyList<AffordanceField>>(), default);
 
         var elements = root.ValueKind == JsonValueKind.Array ? root
             : root.ValueKind == JsonValueKind.Object && root.TryGetProperty(itemsProperty, out var array) && array.ValueKind == JsonValueKind.Array ? array
@@ -184,8 +184,7 @@ public sealed class CairnClient
         {
             foreach (var element in elements.EnumerateArray())
             {
-                var (itemLinks, itemAffordances, itemFields) = HypermediaParser.Parse(element);
-                items.Add(new Resource<TItem>(this, element.Deserialize<TItem>(_json), itemLinks, itemAffordances, itemFields));
+                items.Add(BuildResource<TItem>(element));
             }
         }
 
@@ -219,9 +218,15 @@ public sealed class CairnClient
         }
 
         using var document = JsonDocument.Parse(bytes);
-        var value = document.RootElement.Deserialize<T>(_json);
-        var (links, affordances, fields) = HypermediaParser.Parse(document.RootElement);
-        return new Resource<T>(this, value, links, affordances, fields, etag);
+        return BuildResource<T>(document.RootElement, etag);
+    }
+
+    // Builds a resource from a parsed element: binds the typed value and its links/affordances/fields/embedded.
+    internal Resource<T> BuildResource<T>(JsonElement element, string? etag = null)
+    {
+        var value = element.Deserialize<T>(_json);
+        var (links, affordances, fields, embedded) = HypermediaParser.Parse(element);
+        return new Resource<T>(this, value, links, affordances, fields, etag, embedded);
     }
 
     private static async Task<Problem> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)
