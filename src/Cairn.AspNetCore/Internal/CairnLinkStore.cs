@@ -8,6 +8,9 @@ namespace Cairn.AspNetCore.Internal;
 internal sealed record HalLink(string Href)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -19,9 +22,12 @@ internal sealed record HalLink(string Href)
 
 /// <summary>The value of a <c>_links</c> relation: a single link object, or a JSON array when several share a rel.</summary>
 [JsonConverter(typeof(HalLinkValueJsonConverter))]
-internal sealed class HalLinkValue(IReadOnlyList<HalLink> links)
+internal sealed class HalLinkValue(IReadOnlyList<HalLink> links, bool alwaysArray = false)
 {
     public IReadOnlyList<HalLink> Links { get; } = links;
+
+    // curies are always an array, even with a single entry.
+    public bool AlwaysArray { get; } = alwaysArray;
 }
 
 /// <summary>Writes a single-element relation as a HAL link object and a multi-element relation as a HAL link array.</summary>
@@ -32,7 +38,7 @@ internal sealed class HalLinkValueJsonConverter : JsonConverter<HalLinkValue>
 
     public override void Write(Utf8JsonWriter writer, HalLinkValue value, JsonSerializerOptions options)
     {
-        if (value.Links.Count == 1)
+        if (!value.AlwaysArray && value.Links.Count == 1)
         {
             JsonSerializer.Serialize(writer, value.Links[0], options);
             return;

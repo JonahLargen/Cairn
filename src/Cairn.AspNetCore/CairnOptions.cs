@@ -8,8 +8,11 @@ public sealed class CairnOptions
 {
     private readonly Dictionary<Type, Func<object, IPagedResource>> _paging = [];
     private readonly Dictionary<Type, Func<object, ICursorPagedResource>> _cursorPaging = [];
+    private readonly Dictionary<string, string> _curies = new(StringComparer.Ordinal);
 
     internal LinkConfigRegistry Registry { get; } = new();
+
+    internal IReadOnlyDictionary<string, string> Curies => _curies;
 
     /// <summary>How unresolved link targets are handled (default <see cref="LinkResolutionMode.Lax"/>).</summary>
     public LinkResolutionMode Mode { get; set; } = LinkResolutionMode.Lax;
@@ -51,6 +54,19 @@ public sealed class CairnOptions
     public CairnOptions AddLinks<T>(LinkConfig<T> config)
     {
         Registry.Add(config);
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a CURIE: a documentation <paramref name="prefix"/> and a templated <paramref name="hrefTemplate"/>.
+    /// When a resource uses a custom relation with the prefix (e.g. <c>acme:widget</c>), Cairn surfaces the
+    /// matching curie in <c>_links.curies</c> so clients can resolve the relation's documentation.
+    /// </summary>
+    public CairnOptions AddCurie(string prefix, string hrefTemplate)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+        ArgumentException.ThrowIfNullOrWhiteSpace(hrefTemplate);
+        _curies[prefix] = hrefTemplate;
         return this;
     }
 
