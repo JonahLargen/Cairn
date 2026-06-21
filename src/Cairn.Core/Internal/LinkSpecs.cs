@@ -5,9 +5,9 @@ internal abstract class HypermediaSpec<T>
 {
     public required LinkRelation Relation { get; init; }
 
-    public required Func<T, LinkTarget> Target { get; init; }
+    public required Func<T, LinkContext, ValueTask<LinkTarget>> Target { get; init; }
 
-    public Func<T, bool>? Condition { get; set; }
+    public Func<T, LinkContext, ValueTask<bool>>? Condition { get; set; }
 
     public string? Policy { get; set; }
 
@@ -25,6 +25,13 @@ internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
 
     public ILinkSpec<T> When(Func<T, bool> condition)
     {
+        ArgumentNullException.ThrowIfNull(condition);
+        return When((resource, _) => new ValueTask<bool>(condition(resource)));
+    }
+
+    public ILinkSpec<T> When(Func<T, LinkContext, ValueTask<bool>> condition)
+    {
+        ArgumentNullException.ThrowIfNull(condition);
         Condition = condition;
         return this;
     }
@@ -63,6 +70,13 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
 
     public IAffordanceSpec<T> When(Func<T, bool> condition)
     {
+        ArgumentNullException.ThrowIfNull(condition);
+        return When((resource, _) => new ValueTask<bool>(condition(resource)));
+    }
+
+    public IAffordanceSpec<T> When(Func<T, LinkContext, ValueTask<bool>> condition)
+    {
+        ArgumentNullException.ThrowIfNull(condition);
         Condition = condition;
         return this;
     }
@@ -83,7 +97,15 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
 
     public ILinkSpec<T> Self(Func<T, LinkTarget> target) => Link(IanaLinkRelations.Self, target);
 
+    public ILinkSpec<T> Self(Func<T, LinkContext, ValueTask<LinkTarget>> target) => Link(IanaLinkRelations.Self, target);
+
     public ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkTarget> target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        return Link(relation, (resource, _) => new ValueTask<LinkTarget>(target(resource)));
+    }
+
+    public ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkContext, ValueTask<LinkTarget>> target)
     {
         ArgumentNullException.ThrowIfNull(target);
         var spec = new LinkSpec<T> { Relation = relation, Target = target };
@@ -92,6 +114,12 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
     }
 
     public IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkTarget> target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        return Affordance(name, (resource, _) => new ValueTask<LinkTarget>(target(resource)));
+    }
+
+    public IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkContext, ValueTask<LinkTarget>> target)
     {
         ArgumentNullException.ThrowIfNull(target);
         var spec = new AffordanceSpec<T> { Relation = name, Target = target };

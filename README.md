@@ -56,6 +56,29 @@ public class OrdersController(IOrderRepo repo) : ControllerBase
 }
 ```
 
+## Service-aware links
+
+When a link or affordance depends on something not on the DTO — a service, or a field you didn't project — use the async overloads, which give you the request's services:
+
+```csharp
+b.Affordance("cancel", o => Routes.CancelOrder(o.Id))
+ .RequireAuthorization("CanCancel")
+ .When(async (o, ctx) =>
+     await ctx.Services.GetRequiredService<IOrderService>().IsCancelableAsync(o.Id, ctx.CancellationToken));
+```
+
+For collections, don't query per item — that's an N+1. Load the facts once in your handler into a scoped holder, then have the condition read it:
+
+```csharp
+app.MapGet("/orders", (IOrderService svc, OrderFacts facts) =>
+{
+    facts.Cancelable = svc.GetCancelable(ids);   // one batch query
+    return TypedResults.Ok(orders);
+}).WithLinks();
+
+// in the config: .When((o, ctx) => new(ctx.Services.GetRequiredService<OrderFacts>().Cancelable.Contains(o.Id)))
+```
+
 ## API versioning
 
 Cairn composes with `Asp.Versioning`. Because links resolve through the standard `LinkGenerator`, **URL-segment versioning works automatically** — the current request's version flows into links (a `/v1` request links to `/v1/...`). For **query-string** versioning, carry the version onto links with `TransformUrl`:
