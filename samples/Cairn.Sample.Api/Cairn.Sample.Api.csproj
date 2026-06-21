@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cairn.AspNetCore\Cairn.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\Cairn.Analyzers\Cairn.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <PropertyGroup>
