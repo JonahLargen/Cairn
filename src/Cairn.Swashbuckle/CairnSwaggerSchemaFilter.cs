@@ -15,23 +15,36 @@ internal sealed class CairnSwaggerSchemaFilter(ILinkConfigProvider provider) : I
 
         concrete.Properties ??= new Dictionary<string, IOpenApiSchema>();
         concrete.Properties["_links"] = LinksSchema();
+        concrete.Properties["_embedded"] = EmbeddedSchema();
         concrete.Properties["_actions"] = ActionsSchema();
     }
 
     private static OpenApiSchema LinksSchema() => new()
     {
         Type = JsonSchemaType.Object,
-        Description = "Hypermedia links keyed by relation.",
+        Description = "Hypermedia links keyed by relation; a relation with several links is a JSON array of these objects.",
         AdditionalProperties = new OpenApiSchema
         {
             Type = JsonSchemaType.Object,
             Properties = new Dictionary<string, IOpenApiSchema>
             {
                 ["href"] = new OpenApiSchema { Type = JsonSchemaType.String },
-                ["title"] = new OpenApiSchema { Type = JsonSchemaType.String },
                 ["templated"] = new OpenApiSchema { Type = JsonSchemaType.Boolean },
+                ["title"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                ["type"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                ["name"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                ["deprecation"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                ["hreflang"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                ["profile"] = new OpenApiSchema { Type = JsonSchemaType.String },
             },
         },
+    };
+
+    private static OpenApiSchema EmbeddedSchema() => new()
+    {
+        Type = JsonSchemaType.Object,
+        Description = "Embedded resources keyed by relation (HAL _embedded); each value is a resource or an array of resources.",
+        AdditionalProperties = new OpenApiSchema(),
     };
 
     private static OpenApiSchema ActionsSchema() => new()
