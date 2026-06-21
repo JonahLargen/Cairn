@@ -124,9 +124,19 @@ public sealed class CairnClient
     {
         var uri = _http.BaseAddress is { } baseAddress ? new Uri(baseAddress, href) : new Uri(href, UriKind.RelativeOrAbsolute);
 
-        if (_allowLink is not null && uri.IsAbsoluteUri && !_allowLink(uri))
+        if (_allowLink is not null)
         {
-            throw new InvalidOperationException($"The link target '{uri}' is not permitted by the configured link policy.");
+            // Fail closed: a configured policy must not be silently skipped just because the target stayed
+            // relative (no BaseAddress), which would let a relative link through unchecked.
+            if (!uri.IsAbsoluteUri)
+            {
+                throw new InvalidOperationException($"The link target '{href}' could not be resolved to an absolute URI, so the link policy cannot be enforced — set HttpClient.BaseAddress.");
+            }
+
+            if (!_allowLink(uri))
+            {
+                throw new InvalidOperationException($"The link target '{uri}' is not permitted by the configured link policy.");
+            }
         }
 
         return uri;
@@ -152,6 +162,11 @@ public sealed class CairnClient
         }
 
         var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        if (IsBlank(bytes))
+        {
+            return CollectionResult<TItem>.Success(status, new CollectionResource<TItem>(this, [], Empty<Link>(), Empty<Affordance>()));
+        }
+
         using var document = JsonDocument.Parse(bytes);
         var root = document.RootElement;
 
@@ -179,14 +194,34 @@ public sealed class CairnClient
 
     private static IReadOnlyDictionary<string, TValue> Empty<TValue>() => new Dictionary<string, TValue>();
 
+    // An empty or whitespace-only body (e.g. 204 No Content, or a 200 with no payload) is not JSON.
+    private static bool IsBlank(byte[] bytes)
+    {
+        foreach (var b in bytes)
+        {
+            if (b is not ((byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // Parse the body once: a single JsonDocument binds the typed value and the hypermedia.
     private async Task<Resource<T>> ReadAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        var etag = response.Headers.ETag?.ToString();
+        if (IsBlank(bytes))
+        {
+            return new Resource<T>(this, default, Empty<Link>(), Empty<Affordance>(), Empty<IReadOnlyList<AffordanceField>>(), etag);
+        }
+
         using var document = JsonDocument.Parse(bytes);
         var value = document.RootElement.Deserialize<T>(_json);
         var (links, affordances, fields) = HypermediaParser.Parse(document.RootElement);
-        return new Resource<T>(this, value, links, affordances, fields, response.Headers.ETag?.ToString());
+        return new Resource<T>(this, value, links, affordances, fields, etag);
     }
 
     private static async Task<Problem> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)
