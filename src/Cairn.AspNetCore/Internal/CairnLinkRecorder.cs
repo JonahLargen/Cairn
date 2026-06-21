@@ -366,7 +366,7 @@ internal static class CairnLinkRecorder
             actions = new Dictionary<string, HalAction>(StringComparer.Ordinal);
             foreach (var affordance in linkSet.Affordances)
             {
-                actions[affordance.Name.Value] = new HalAction(affordance.Href, affordance.Method) { Title = affordance.Title, Input = affordance.Input };
+                actions[affordance.Name.Value] = new HalAction(affordance.Href, affordance.Method) { Title = affordance.Title, Input = affordance.Input, ContentType = affordance.ContentType };
             }
         }
 

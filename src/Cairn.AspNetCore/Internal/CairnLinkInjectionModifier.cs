@@ -61,6 +61,7 @@ internal sealed class CairnLinkInjectionModifier(IHttpContextAccessor accessor)
                 a => new HalFormsTemplate(a.Value.Method, a.Value.Href)
                 {
                     Title = a.Value.Title,
+                    ContentType = a.Value.ContentType ?? "application/json",
                     Properties = HalFormsSchema.For(a.Value.Input),
                 });
 }
