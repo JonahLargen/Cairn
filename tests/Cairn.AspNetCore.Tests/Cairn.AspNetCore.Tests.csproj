@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- Microsoft.AspNetCore.OpenApi's XML-comment source generator emits interceptors. -->
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cairn.AspNetCore\Cairn.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Cairn.Testing\Cairn.Testing.csproj" />
+    <ProjectReference Include="..\..\src\Cairn.OpenApi\Cairn.OpenApi.csproj" />
   </ItemGroup>
 
 </Project>
