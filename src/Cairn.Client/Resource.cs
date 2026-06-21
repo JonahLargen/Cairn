@@ -5,10 +5,17 @@ namespace Cairn.Client;
 public sealed class Resource<T>
 {
     private readonly CairnClient _client;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> _fields;
 
-    internal Resource(CairnClient client, T? value, IReadOnlyDictionary<string, Link> links, IReadOnlyDictionary<string, Affordance> affordances)
+    internal Resource(
+        CairnClient client,
+        T? value,
+        IReadOnlyDictionary<string, Link> links,
+        IReadOnlyDictionary<string, Affordance> affordances,
+        IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> fields)
     {
         _client = client;
+        _fields = fields;
         Value = value;
         Links = links;
         Affordances = affordances;
@@ -28,6 +35,10 @@ public sealed class Resource<T>
 
     /// <summary>Whether the resource exposes the named affordance.</summary>
     public bool HasAffordance(string name) => Affordances.ContainsKey(name);
+
+    /// <summary>The input fields the named affordance accepts (from its HAL-FORMS template), or empty if none are described.</summary>
+    public IReadOnlyList<AffordanceField> Fields(string name)
+        => _fields.TryGetValue(name, out var fields) ? fields : [];
 
     /// <summary>Follows the link with the given relation to another resource.</summary>
     /// <exception cref="InvalidOperationException">The resource has no link with that relation.</exception>
