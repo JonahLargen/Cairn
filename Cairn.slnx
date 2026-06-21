@@ -9,6 +9,7 @@
     <Project Path="src/Cairn.Core/Cairn.Core.csproj" />
     <Project Path="src/Cairn.OpenApi/Cairn.OpenApi.csproj" />
     <Project Path="src/Cairn.SourceGenerators/Cairn.SourceGenerators.csproj" />
+    <Project Path="src/Cairn.Swashbuckle/Cairn.Swashbuckle.csproj" />
     <Project Path="src/Cairn.Testing/Cairn.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/">
