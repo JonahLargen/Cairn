@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Cairn.Client;
 
 /// <summary>The outcome of a request that returns a resource: a <see cref="Resource{T}"/> on success, or a <see cref="Client.Problem"/> on an HTTP error status.</summary>
@@ -12,7 +14,9 @@ public sealed class ClientResult<T>
         Problem = problem;
     }
 
-    /// <summary>Whether the response had a success (2xx) status.</summary>
+    /// <summary>Whether the response had a success (2xx) status. When <see langword="true"/>, <see cref="Resource"/> is non-null; otherwise <see cref="Problem"/> is non-null.</summary>
+    [MemberNotNullWhen(true, nameof(Resource))]
+    [MemberNotNullWhen(false, nameof(Problem))]
     public bool IsSuccess { get; }
 
     /// <summary>The HTTP status code.</summary>
@@ -44,7 +48,8 @@ public sealed class ClientResult
         Problem = problem;
     }
 
-    /// <summary>Whether the response had a success (2xx) status.</summary>
+    /// <summary>Whether the response had a success (2xx) status. When <see langword="false"/>, <see cref="Problem"/> is non-null.</summary>
+    [MemberNotNullWhen(false, nameof(Problem))]
     public bool IsSuccess { get; }
 
     /// <summary>The HTTP status code.</summary>
