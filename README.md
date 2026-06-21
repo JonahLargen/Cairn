@@ -28,9 +28,9 @@ public sealed class OrderLinks : LinkConfig<OrderDto>
 {
     public override void Configure(ILinkBuilder<OrderDto> b)
     {
-        b.Self(o => Route.GetOrderById(o.Id));
-        b.Affordance("cancel", o => Route.CancelOrder(o.Id))
-         .Method(HttpMethod.Post)
+        b.Self(o => Routes.GetOrderById(o.Id));         // Routes.* generated from named endpoints
+        b.Affordance("cancel", o => Routes.CancelOrder(o.Id))
+         .Method("POST")
          .When(o => o.Status == OrderStatus.Pending)   // advertise only when applicable
          .RequireAuthorization("CanCancelOrders");      // ASP.NET Core authorization policy
     }

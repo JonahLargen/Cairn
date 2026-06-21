@@ -7,6 +7,7 @@
     <Project Path="src/Cairn.AspNetCore/Cairn.AspNetCore.csproj" />
     <Project Path="src/Cairn.CodeFixes/Cairn.CodeFixes.csproj" />
     <Project Path="src/Cairn.Core/Cairn.Core.csproj" />
+    <Project Path="src/Cairn.SourceGenerators/Cairn.SourceGenerators.csproj" />
     <Project Path="src/Cairn.Testing/Cairn.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/">

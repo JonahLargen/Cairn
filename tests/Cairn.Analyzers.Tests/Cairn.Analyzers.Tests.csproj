@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cairn.Analyzers\Cairn.Analyzers.csproj" />
     <ProjectReference Include="..\..\src\Cairn.CodeFixes\Cairn.CodeFixes.csproj" />
+    <ProjectReference Include="..\..\src\Cairn.SourceGenerators\Cairn.SourceGenerators.csproj" />
   </ItemGroup>
 
 </Project>

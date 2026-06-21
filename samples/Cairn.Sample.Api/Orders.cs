@@ -16,9 +16,10 @@ public sealed class OrderLinks : LinkConfig<OrderDto>
 {
     public override void Configure(ILinkBuilder<OrderDto> builder)
     {
-        builder.Self(order => LinkTarget.Route("GetOrderById", new { id = order.Id }));
+        // Routes.* is generated from the named endpoints — compile-checked, no magic strings.
+        builder.Self(order => Routes.GetOrderById(order.Id));
 
-        builder.Affordance("cancel", order => LinkTarget.Route("CancelOrder", new { id = order.Id }))
+        builder.Affordance("cancel", order => Routes.CancelOrder(order.Id))
             .Method("POST")
             .When(order => order.Status == OrderStatus.Pending);
     }
