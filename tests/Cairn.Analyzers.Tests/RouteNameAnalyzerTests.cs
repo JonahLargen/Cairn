@@ -61,6 +61,24 @@ class Config
         Assert.Empty(diagnostics);
     }
 
+    [Fact]
+    public async Task Does_not_flag_a_name_declared_by_a_controller_route_attribute()
+    {
+        const string source = @"
+namespace Cairn { public static class LinkTarget { public static object Route(string name, object values = null) => name; } }
+class HttpGetAttribute : System.Attribute { public HttpGetAttribute(string template) {} public string Name { get; set; } }
+class OrdersController
+{
+    [HttpGet(""orders/{id}"", Name = ""GetOrder"")]
+    public object Get() => null;
+    object Link() => Cairn.LinkTarget.Route(""GetOrder"");
+}";
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        Assert.Empty(diagnostics);
+    }
+
     private static async Task<ImmutableArray<Diagnostic>> AnalyzeAsync(string source)
     {
         var tree = CSharpSyntaxTree.ParseText(source);

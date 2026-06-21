@@ -43,12 +43,25 @@ app.MapGet("/orders/{id:int}", (int id, IOrderRepo repo) => TypedResults.Ok(repo
    .WithLinks();   // links projected at serialization time; the DTO is never modified
 ```
 
+Controllers work the same way — opt in with `[CairnLinks]`, using the same `LinkConfig<T>`:
+
+```csharp
+[ApiController]
+[Route("orders")]
+public class OrdersController(IOrderRepo repo) : ControllerBase
+{
+    [HttpGet("{id:int}", Name = "GetOrderById")]
+    [CairnLinks]
+    public OrderDto Get(int id) => repo.Get(id);
+}
+```
+
 ## Packages
 
 | Package | Purpose |
 | --- | --- |
 | `Cairn.Core` | Transport-agnostic hypermedia model (links, relations, affordances). No ASP.NET dependency. |
-| `Cairn.AspNetCore` | Minimal-API-first ASP.NET Core integration. |
+| `Cairn.AspNetCore` | ASP.NET Core integration for both minimal APIs (`.WithLinks()`) and MVC controllers (`[CairnLinks]`). |
 | `Cairn.Testing` | Test assertion helpers for links and affordances. |
 
 ## Building

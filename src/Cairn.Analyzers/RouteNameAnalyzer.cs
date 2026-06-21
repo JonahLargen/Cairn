@@ -22,11 +22,11 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = new(
         DiagnosticId,
         title: "Link route name does not match any endpoint",
-        messageFormat: "No endpoint is named '{0}' via WithName{1}, so the link will not resolve at runtime",
+        messageFormat: "No endpoint or controller route is named '{0}'{1}, so the link will not resolve at runtime",
         category: "Cairn",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "A LinkTarget.Route name should match an endpoint registered with WithName.",
+        description: "A LinkTarget.Route name should match an endpoint named with WithName or a controller route attribute such as [HttpGet(Name = \"...\")].",
         customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     /// <inheritdoc />
@@ -48,6 +48,10 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
         context.RegisterSyntaxNodeAction(
             nodeContext => Collect((InvocationExpressionSyntax)nodeContext.Node, routeNames, references),
             SyntaxKind.InvocationExpression);
+
+        context.RegisterSyntaxNodeAction(
+            nodeContext => CollectAttribute((AttributeSyntax)nodeContext.Node, routeNames),
+            SyntaxKind.Attribute);
 
         context.RegisterCompilationEndAction(endContext => Report(endContext, routeNames, references));
     }
@@ -78,6 +82,42 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
                 references.Add((route.Value, route.Location));
             }
         }
+    }
+
+    // Collect named controller routes: [HttpGet(Name = "...")], [Route("...", Name = "...")], etc.
+    private static void CollectAttribute(AttributeSyntax attribute, ConcurrentDictionary<string, byte> routeNames)
+    {
+        if (!IsRouteAttribute(SimpleName(attribute.Name)) || attribute.ArgumentList is not { } arguments)
+        {
+            return;
+        }
+
+        foreach (var argument in arguments.Arguments)
+        {
+            if (argument.NameEquals?.Name.Identifier.ValueText == "Name"
+                && argument.Expression is LiteralExpressionSyntax literal
+                && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                routeNames.TryAdd(literal.Token.ValueText, 0);
+            }
+        }
+    }
+
+    private static string SimpleName(NameSyntax name) => name switch
+    {
+        IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+        QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
+        _ => name.ToString(),
+    };
+
+    private static bool IsRouteAttribute(string name)
+    {
+        if (name.EndsWith("Attribute", System.StringComparison.Ordinal))
+        {
+            name = name.Substring(0, name.Length - "Attribute".Length);
+        }
+
+        return name is "Route" or "HttpGet" or "HttpPost" or "HttpPut" or "HttpDelete" or "HttpPatch" or "HttpHead" or "HttpOptions";
     }
 
     private static void Report(
