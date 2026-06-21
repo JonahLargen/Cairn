@@ -117,6 +117,28 @@ public class CairnClientTests
     }
 
     [Fact]
+    public async Task Is_success_narrows_resource_and_problem_nullability()
+    {
+        await using var app = await StartProblemAppAsync();
+        using var httpClient = app.GetTestClient();
+        var client = new CairnClient(httpClient);
+
+        var success = await client.InvokeAsync<ClientOrder>(new Affordance("ship", "/ship", "POST"));
+        if (success.IsSuccess)
+        {
+            // No '!' on Resource: [MemberNotNullWhen(true, nameof(Resource))] narrows it. (Value is still T?.)
+            Assert.Equal(99, success.Resource.Value!.Id);
+        }
+
+        var failure = await client.GetAsync<ClientOrder>("/missing");
+        if (!failure.IsSuccess)
+        {
+            // No '!' on Problem: [MemberNotNullWhen(false, nameof(Problem))] narrows it.
+            Assert.Equal(404, failure.Problem.Status);
+        }
+    }
+
+    [Fact]
     public async Task Following_a_missing_relation_throws()
     {
         var builder = WebApplication.CreateBuilder();
