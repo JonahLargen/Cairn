@@ -89,8 +89,4 @@ internal static class CairnLinkStore
             && store.TryGetValue(instance, out var payload)
                 ? payload
                 : null;
-
-    /// <summary>Whether any hypermedia was recorded for this request (i.e. the response was actually decorated).</summary>
-    public static bool HasRecorded(HttpContext http)
-        => http.Items[ItemsKey] is Dictionary<object, ResourceHypermedia> { Count: > 0 };
 }
