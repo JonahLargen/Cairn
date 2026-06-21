@@ -1,3 +1,4 @@
+using System.Reflection;
 using Cairn.Internal;
 
 namespace Cairn;
@@ -29,6 +30,35 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
         ArgumentNullException.ThrowIfNull(config);
         _configs[typeof(T)] = CompiledLinkConfig<T>.Compile(config);
         return this;
+    }
+
+    /// <summary>Registers a <see cref="LinkConfig{T}"/> instance whose resource type is known only at runtime (e.g. from assembly scanning).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="config"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="config"/> does not derive from <see cref="LinkConfig{T}"/>.</exception>
+    public LinkConfigRegistry Add(object config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        var resourceType = ResourceTypeOf(config.GetType())
+            ?? throw new ArgumentException($"'{config.GetType().Name}' does not derive from LinkConfig<T>.", nameof(config));
+
+        _configs[resourceType] = (ICompiledLinkConfig)typeof(CompiledLinkConfig<>)
+            .MakeGenericType(resourceType)
+            .GetMethod(nameof(CompiledLinkConfig<object>.Compile), BindingFlags.Public | BindingFlags.Static)!
+            .Invoke(null, [config])!;
+        return this;
+    }
+
+    private static Type? ResourceTypeOf(Type configType)
+    {
+        for (var type = configType; type is not null; type = type.BaseType)
+        {
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(LinkConfig<>))
+            {
+                return type.GetGenericArguments()[0];
+            }
+        }
+
+        return null;
     }
 
     /// <inheritdoc />

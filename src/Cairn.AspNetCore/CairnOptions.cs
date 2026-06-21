@@ -1,3 +1,4 @@
+using System.Reflection;
 using Cairn.AspNetCore.Internal;
 using Microsoft.AspNetCore.Http;
 
@@ -55,6 +56,40 @@ public sealed class CairnOptions
     {
         Registry.Add(config);
         return this;
+    }
+
+    /// <summary>Discovers and registers every non-abstract <see cref="LinkConfig{T}"/> with a public parameterless constructor in <paramref name="assembly"/>.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="assembly"/> is null.</exception>
+    public CairnOptions AddLinksFromAssembly(Assembly assembly)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        foreach (var type in assembly.GetTypes())
+        {
+            if (type is { IsAbstract: false, IsInterface: false, IsGenericTypeDefinition: false }
+                && IsLinkConfig(type)
+                && type.GetConstructor(Type.EmptyTypes) is not null)
+            {
+                Registry.Add(Activator.CreateInstance(type)!);
+            }
+        }
+
+        return this;
+    }
+
+    /// <summary>Discovers and registers every <see cref="LinkConfig{T}"/> in the assembly that contains <typeparamref name="T"/>.</summary>
+    public CairnOptions AddLinksFromAssemblyContaining<T>() => AddLinksFromAssembly(typeof(T).Assembly);
+
+    private static bool IsLinkConfig(Type type)
+    {
+        for (var current = type.BaseType; current is not null; current = current.BaseType)
+        {
+            if (current.IsGenericType && current.GetGenericTypeDefinition() == typeof(LinkConfig<>))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

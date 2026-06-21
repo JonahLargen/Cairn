@@ -143,6 +143,20 @@ public class LinkEngineTests
             async () => await engine.BuildAsync(new TestOrder(1, "Pending"), context, cts.Token));
     }
 
+    [Fact]
+    public void Non_generic_add_registers_by_runtime_resource_type()
+    {
+        var registry = new LinkConfigRegistry();
+
+        registry.Add((object)new TestOrderLinks());
+
+        Assert.NotNull(registry.GetConfig(typeof(TestOrder)));
+    }
+
+    [Fact]
+    public void Non_generic_add_rejects_a_type_that_is_not_a_link_config()
+        => Assert.Throws<ArgumentException>(() => new LinkConfigRegistry().Add("not a config"));
+
     private static LinkEngine EngineFor<T>(LinkConfig<T> config) => new(new LinkConfigRegistry().Add(config));
 
     private static LinkContext Context(
