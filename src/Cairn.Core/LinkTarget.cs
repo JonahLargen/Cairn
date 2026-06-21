@@ -11,7 +11,7 @@ public abstract record LinkTarget
     public static LinkTarget Route(string routeName, object? routeValues = null) => new RouteLinkTarget(routeName, routeValues);
 
     /// <summary>Targets an explicit URI (or URI template).</summary>
-    public static LinkTarget Uri(string uri, bool templated = false) => new ExplicitLinkTarget(uri, templated);
+    public static LinkTarget Uri(string href, bool templated = false) => new ExplicitLinkTarget(href, templated);
 }
 
 /// <summary>A target identified by a named route and optional route values.</summary>

@@ -68,6 +68,22 @@ public class CairnRuntimeCorrectnessTests
         Assert.False(links.TryGetProperty("next", out _));
     }
 
+    [Fact]
+    public async Task WithLinks_applies_to_an_entire_route_group()
+    {
+        await using var app = await StartAsync(
+            services => services.AddCairn(o => o.AddLinks(new GroupWidgetLinks())),
+            endpoints =>
+            {
+                var group = endpoints.MapGroup("/widgets").WithLinks();   // group-level opt-in, not per endpoint
+                group.MapGet("/{id:int}", (int id) => TypedResults.Ok(new Widget(id))).WithName("GroupWidget");
+            });
+
+        var root = await GetJsonAsync(app, "/widgets/7");
+
+        Assert.EndsWith("/widgets/7", root.GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
+    }
+
     private static async Task<WebApplication> StartAsync(Action<IServiceCollection> configureServices, Action<WebApplication> configureEndpoints)
     {
         var builder = WebApplication.CreateBuilder();
@@ -115,5 +131,11 @@ public class CairnRuntimeCorrectnessTests
     {
         public override void Configure(ILinkBuilder<HandRolled> builder)
             => builder.Self(h => LinkTarget.Route("HandRolledById", new { id = h.Id }));
+    }
+
+    private sealed class GroupWidgetLinks : LinkConfig<Widget>
+    {
+        public override void Configure(ILinkBuilder<Widget> builder)
+            => builder.Self(w => LinkTarget.Route("GroupWidget", new { id = w.Id }));
     }
 }

@@ -9,5 +9,5 @@ internal sealed class CursorPagedViewAdapter(CursorView view) : ICursorPagedReso
 
     public string? Next => view.Next;
 
-    public string? Previous => view.Previous;
+    public string? Prev => view.Prev;
 }
