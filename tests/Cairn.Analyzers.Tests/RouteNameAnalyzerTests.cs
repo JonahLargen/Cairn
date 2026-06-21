@@ -79,6 +79,26 @@ class OrdersController
         Assert.Empty(diagnostics);
     }
 
+    [Fact]
+    public async Task Does_not_flag_non_literal_route_names()
+    {
+        const string source = @"
+namespace Cairn { public static class LinkTarget { public static object Route(string name, object values = null) => name; } }
+public static class EndpointExtensions { public static T WithName<T>(this T builder, string name) => builder; }
+class Config
+{
+    const string Name = ""GetOrder"";
+    void Endpoints() { new object().WithName(""GetOrder""); }
+    object Interpolated(int id) => Cairn.LinkTarget.Route($""GetOrder{id}"");
+    object Constant() => Cairn.LinkTarget.Route(Name);
+}";
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        // The analyzer only validates string-literal route names; interpolated/const names are out of scope.
+        Assert.Empty(diagnostics);
+    }
+
     private static async Task<ImmutableArray<Diagnostic>> AnalyzeAsync(string source)
     {
         var tree = CSharpSyntaxTree.ParseText(source);
