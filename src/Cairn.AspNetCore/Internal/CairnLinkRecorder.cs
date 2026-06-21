@@ -115,7 +115,26 @@ internal static class CairnLinkRecorder
         if (!linkSet.IsEmpty)
         {
             WarnIfValueType(scope, value);
-            CairnLinkStore.Record(http, value, ToPayload(linkSet));
+
+            // Record each embedded child first (recursing so it gets its own _links), then capture the map.
+            IReadOnlyDictionary<string, object>? embedded = null;
+            if (linkSet.Embedded.Count > 0)
+            {
+                var map = new Dictionary<string, object>(StringComparer.Ordinal);
+                foreach (var group in linkSet.Embedded)
+                {
+                    foreach (var child in group.Resources)
+                    {
+                        await RecordAsync(http, child, scope);
+                    }
+
+                    map[group.Relation.Value] = group.Single ? group.Resources[0] : group.Resources;
+                }
+
+                embedded = map;
+            }
+
+            CairnLinkStore.Record(http, value, ToPayload(linkSet, embedded));
         }
     }
 
@@ -315,7 +334,7 @@ internal static class CairnLinkRecorder
 
     // Links are grouped by relation: a single link for a rel emits as a HAL link object, several as a HAL link
     // array. Insertion order (the declaration order) is preserved within a relation.
-    private static ResourceHypermedia ToPayload(LinkSet linkSet)
+    private static ResourceHypermedia ToPayload(LinkSet linkSet, IReadOnlyDictionary<string, object>? embedded = null)
     {
         Dictionary<string, HalLinkValue>? links = null;
         if (linkSet.Links.Count > 0)
@@ -349,7 +368,7 @@ internal static class CairnLinkRecorder
             }
         }
 
-        return new ResourceHypermedia(links, actions);
+        return new ResourceHypermedia(links, actions, embedded);
     }
 
     private sealed record RecordScope(

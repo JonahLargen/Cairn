@@ -18,6 +18,7 @@ internal sealed class CairnLinkInjectionModifier(IHttpContextAccessor accessor)
         }
 
         AddProperty(typeInfo, "_links", static (payload, _) => payload.Links);
+        AddProperty(typeInfo, "_embedded", static (payload, _) => payload.Embedded);
         AddProperty(typeInfo, "_actions", static (payload, format) => format == HypermediaFormat.Default ? payload.Actions : null);
         AddProperty(typeInfo, "_templates", static (payload, format) => format == HypermediaFormat.HalForms ? ToTemplates(payload.Actions) : null);
     }

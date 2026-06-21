@@ -98,12 +98,24 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
     }
 }
 
-/// <summary>Records link and affordance declarations from a <see cref="LinkConfig{T}"/>.</summary>
+/// <summary>A recorded embedded-resource declaration; resolves the child instance(s) to embed.</summary>
+internal sealed class EmbedSpec<T>
+{
+    public required LinkRelation Relation { get; init; }
+
+    public required bool Single { get; init; }
+
+    public required Func<T, IReadOnlyList<object>> Resolve { get; init; }
+}
+
+/// <summary>Records link, affordance, and embed declarations from a <see cref="LinkConfig{T}"/>.</summary>
 internal sealed class LinkBuilder<T> : ILinkBuilder<T>
 {
     public List<LinkSpec<T>> LinkSpecs { get; } = [];
 
     public List<AffordanceSpec<T>> AffordanceSpecs { get; } = [];
+
+    public List<EmbedSpec<T>> EmbedSpecs { get; } = [];
 
     public ILinkSpec<T> Self(Func<T, LinkTarget> target) => Link(IanaLinkRelations.Self, target);
 
@@ -149,5 +161,39 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
         var spec = new AffordanceSpec<T> { Relation = name, Target = target };
         AffordanceSpecs.Add(spec);
         return spec;
+    }
+
+    public void Embed<TChild>(LinkRelation relation, Func<T, TChild?> resource) where TChild : class
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        EmbedSpecs.Add(new EmbedSpec<T> { Relation = relation, Single = true, Resolve = t => resource(t) is { } child ? new object[] { child } : [] });
+    }
+
+    public void EmbedMany<TChild>(LinkRelation relation, Func<T, IEnumerable<TChild>?> resources)
+    {
+        ArgumentNullException.ThrowIfNull(resources);
+        EmbedSpecs.Add(new EmbedSpec<T>
+        {
+            Relation = relation,
+            Single = false,
+            Resolve = t =>
+            {
+                if (resources(t) is not { } items)
+                {
+                    return [];
+                }
+
+                var list = new List<object>();
+                foreach (var item in items)
+                {
+                    if (item is not null)
+                    {
+                        list.Add(item);
+                    }
+                }
+
+                return list;
+            },
+        });
     }
 }

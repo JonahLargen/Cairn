@@ -56,7 +56,21 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
             }
         }
 
-        return links.Count == 0 && affordances.Count == 0 ? LinkSet.Empty : new LinkSet(links, affordances);
+        List<EmbeddedResource>? embedded = null;
+        foreach (var spec in _builder.EmbedSpecs)
+        {
+            var resources = spec.Resolve(typed);
+            if (spec.Single && resources.Count == 0)
+            {
+                continue;   // a null single embed contributes nothing
+            }
+
+            (embedded ??= []).Add(new EmbeddedResource(spec.Relation, resources, spec.Single));
+        }
+
+        return links.Count == 0 && affordances.Count == 0 && (embedded is null || embedded.Count == 0)
+            ? LinkSet.Empty
+            : new LinkSet(links, affordances, embedded);
     }
 
     private static async ValueTask<bool> IncludeAsync(HypermediaSpec<T> spec, T resource, LinkContext context, CancellationToken cancellationToken)
