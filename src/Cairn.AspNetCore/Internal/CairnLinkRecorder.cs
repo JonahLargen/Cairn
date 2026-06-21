@@ -134,7 +134,7 @@ internal static class CairnLinkRecorder
                 embedded = map;
             }
 
-            CairnLinkStore.Record(http, value, ToPayload(linkSet, embedded));
+            CairnLinkStore.Record(http, value, ToPayload(linkSet, embedded, scope.Options.Curies));
         }
     }
 
@@ -334,7 +334,7 @@ internal static class CairnLinkRecorder
 
     // Links are grouped by relation: a single link for a rel emits as a HAL link object, several as a HAL link
     // array. Insertion order (the declaration order) is preserved within a relation.
-    private static ResourceHypermedia ToPayload(LinkSet linkSet, IReadOnlyDictionary<string, object>? embedded = null)
+    private static ResourceHypermedia ToPayload(LinkSet linkSet, IReadOnlyDictionary<string, object>? embedded, IReadOnlyDictionary<string, string> curies)
     {
         Dictionary<string, HalLinkValue>? links = null;
         if (linkSet.Links.Count > 0)
@@ -356,6 +356,8 @@ internal static class CairnLinkRecorder
             {
                 links[relation] = new HalLinkValue(list);
             }
+
+            AddCuries(links, curies);
         }
 
         Dictionary<string, HalAction>? actions = null;
@@ -369,6 +371,31 @@ internal static class CairnLinkRecorder
         }
 
         return new ResourceHypermedia(links, actions, embedded);
+    }
+
+    // Surface a curies array for every registered prefix actually used by a relation (e.g. "acme:widget").
+    private static void AddCuries(Dictionary<string, HalLinkValue> links, IReadOnlyDictionary<string, string> curies)
+    {
+        if (curies.Count == 0)
+        {
+            return;
+        }
+
+        var used = new List<HalLink>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var relation in links.Keys)
+        {
+            var colon = relation.IndexOf(':');
+            if (colon > 0 && curies.TryGetValue(relation.Substring(0, colon), out var href) && seen.Add(relation.Substring(0, colon)))
+            {
+                used.Add(new HalLink(href) { Name = relation.Substring(0, colon), Templated = true });
+            }
+        }
+
+        if (used.Count > 0)
+        {
+            links["curies"] = new HalLinkValue(used, alwaysArray: true);
+        }
     }
 
     private sealed record RecordScope(
