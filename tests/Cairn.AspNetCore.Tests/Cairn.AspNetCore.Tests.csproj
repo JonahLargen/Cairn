@@ -28,6 +28,7 @@
     <ProjectReference Include="..\..\src\Cairn.Testing\Cairn.Testing.csproj" />
     <ProjectReference Include="..\..\src\Cairn.OpenApi\Cairn.OpenApi.csproj" />
     <ProjectReference Include="..\..\src\Cairn.Swashbuckle\Cairn.Swashbuckle.csproj" />
+    <ProjectReference Include="..\..\src\Cairn.Client\Cairn.Client.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Description>A typed client for consuming Cairn hypermedia APIs — read a resource's value, links, and affordances; navigate by relation; invoke affordances.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cairn.Core\Cairn.Core.csproj" />
+  </ItemGroup>
+
+</Project>
