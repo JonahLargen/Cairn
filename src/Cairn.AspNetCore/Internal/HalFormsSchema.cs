@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Reflection;
@@ -34,16 +35,42 @@ internal static class HalFormsSchema
     {
         var underlying = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
         var range = property.GetCustomAttribute<RangeAttribute>();
+        var display = property.GetCustomAttribute<DisplayAttribute>();
 
         return new HalFormsProperty(JsonNamingPolicy.CamelCase.ConvertName(property.Name))
         {
+            Prompt = display?.GetName(),
             Required = property.GetCustomAttribute<RequiredAttribute>() is not null ? true : null,
+            ReadOnly = IsReadOnly(property) ? true : null,
             Type = property.GetCustomAttribute<EmailAddressAttribute>() is not null ? "email" : MapType(underlying),
+            Placeholder = display?.GetPrompt(),
             Regex = property.GetCustomAttribute<RegularExpressionAttribute>()?.Pattern,
             MaxLength = property.GetCustomAttribute<StringLengthAttribute>()?.MaximumLength ?? MaxLengthOf(property),
             Min = ToDouble(range?.Minimum),
             Max = ToDouble(range?.Maximum),
+            Options = BuildOptions(underlying),
         };
+    }
+
+    private static bool IsReadOnly(PropertyInfo property)
+        => property.GetCustomAttribute<EditableAttribute>() is { AllowEdit: false }
+            || property.GetCustomAttribute<ReadOnlyAttribute>() is { IsReadOnly: true };
+
+    // An enum-typed property becomes a fixed list of selectable values.
+    private static HalFormsOptions? BuildOptions(Type underlying)
+    {
+        if (!underlying.IsEnum)
+        {
+            return null;
+        }
+
+        var options = new List<HalFormsOption>();
+        foreach (var name in Enum.GetNames(underlying))
+        {
+            options.Add(new HalFormsOption(name, name));
+        }
+
+        return options.Count > 0 ? new HalFormsOptions(options) : null;
     }
 
     private static string? MapType(Type type)

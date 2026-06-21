@@ -36,4 +36,7 @@ public sealed record Affordance
 
     /// <summary>An optional input type the action accepts, used to describe its form fields.</summary>
     public Type? Input { get; init; }
+
+    /// <summary>An optional content type the action's input is submitted as (HAL-FORMS <c>contentType</c>); defaults to <c>application/json</c>.</summary>
+    public string? ContentType { get; init; }
 }
