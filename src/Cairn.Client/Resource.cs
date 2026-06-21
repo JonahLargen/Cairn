@@ -6,19 +6,21 @@ public sealed class Resource<T>
 {
     private readonly CairnClient _client;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> _fields;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<Link>> _linksByRelation;
 
     internal Resource(
         CairnClient client,
         T? value,
-        IReadOnlyDictionary<string, Link> links,
+        IReadOnlyDictionary<string, IReadOnlyList<Link>> links,
         IReadOnlyDictionary<string, Affordance> affordances,
         IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> fields,
         string? etag = null)
     {
         _client = client;
         _fields = fields;
+        _linksByRelation = links;
         Value = value;
-        Links = links;
+        Links = LinkMap.Flatten(links);
         Affordances = affordances;
         ETag = etag;
     }
@@ -29,11 +31,14 @@ public sealed class Resource<T>
     /// <summary>The response's <c>ETag</c>, if any — pass it as <c>ifMatch</c> to an action for optimistic concurrency.</summary>
     public string? ETag { get; }
 
-    /// <summary>The resource's links, keyed by relation.</summary>
+    /// <summary>The resource's links, keyed by relation. When a relation has several links (a HAL link array), this exposes the first; use <see cref="LinksFor"/> for all.</summary>
     public IReadOnlyDictionary<string, Link> Links { get; }
 
     /// <summary>The resource's affordances (available actions), keyed by name.</summary>
     public IReadOnlyDictionary<string, Affordance> Affordances { get; }
+
+    /// <summary>All links sharing the given relation (a HAL link array exposes more than one), or empty if none.</summary>
+    public IReadOnlyList<Link> LinksFor(string relation) => _linksByRelation.TryGetValue(relation, out var list) ? list : [];
 
     /// <summary>Whether the resource exposes a link with the given relation.</summary>
     public bool HasLink(string relation) => Links.ContainsKey(relation);

@@ -35,17 +35,18 @@ public class CairnClientRobustnessTests
     }
 
     [Fact]
-    public async Task An_array_or_scalar_link_entry_is_skipped_not_thrown_on()
+    public async Task An_array_relation_is_read_as_a_link_array_and_a_scalar_is_skipped()
     {
-        const string body = @"{""id"":1,""_links"":{""self"":{""href"":""/x""},""items"":[{""href"":""/a""}],""weird"":""/y""}}";
+        const string body = @"{""id"":1,""_links"":{""self"":{""href"":""/x""},""item"":[{""href"":""/a""},{""href"":""/b""}],""weird"":""/y""}}";
         await using var app = await StartAsync(a => a.MapGet("/raw", () => Results.Text(body, "application/json")));
         using var httpClient = app.GetTestClient();
 
         var resource = (await new CairnClient(httpClient).GetAsync<ClientThing>("/raw")).EnsureSuccess();
 
-        Assert.True(resource.HasLink("self"));     // valid object entry parsed
-        Assert.False(resource.HasLink("items"));   // array entry skipped, not thrown on
-        Assert.False(resource.HasLink("weird"));   // scalar entry skipped
+        Assert.True(resource.HasLink("self"));
+        Assert.Equal(2, resource.LinksFor("item").Count);   // a HAL link array exposes all of them
+        Assert.Equal("/a", resource.Links["item"].Href);    // the flat view exposes the first
+        Assert.False(resource.HasLink("weird"));            // a scalar entry is still skipped, not thrown on
     }
 
     [Fact]

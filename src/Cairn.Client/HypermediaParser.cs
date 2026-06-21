@@ -5,9 +5,9 @@ namespace Cairn.Client;
 /// <summary>Parses Cairn hypermedia (<c>_links</c>, <c>_actions</c>, HAL-FORMS <c>_templates</c>) from a resource body.</summary>
 internal static class HypermediaParser
 {
-    public static (IReadOnlyDictionary<string, Link> Links, IReadOnlyDictionary<string, Affordance> Affordances, IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> Fields) Parse(JsonElement root)
+    public static (IReadOnlyDictionary<string, IReadOnlyList<Link>> Links, IReadOnlyDictionary<string, Affordance> Affordances, IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> Fields) Parse(JsonElement root)
     {
-        var links = new Dictionary<string, Link>(StringComparer.Ordinal);
+        var links = new Dictionary<string, IReadOnlyList<Link>>(StringComparer.Ordinal);
         var affordances = new Dictionary<string, Affordance>(StringComparer.Ordinal);
         var fields = new Dictionary<string, IReadOnlyList<AffordanceField>>(StringComparer.Ordinal);
 
@@ -20,13 +20,16 @@ internal static class HypermediaParser
         {
             foreach (var entry in linksElement.EnumerateObject())
             {
-                if (IsUsable(entry.Name) && GetString(entry.Value, "href") is { } href && IsUsable(href))
+                if (!IsUsable(entry.Name))
                 {
-                    links[entry.Name] = new Link(entry.Name, href, GetBool(entry.Value, "templated") ?? false)
-                    {
-                        Title = GetString(entry.Value, "title"),
-                        Type = GetString(entry.Value, "type"),
-                    };
+                    continue;
+                }
+
+                // A relation's value is a single link object, or a HAL link array of them.
+                var parsed = ParseLinks(entry.Name, entry.Value);
+                if (parsed.Count > 0)
+                {
+                    links[entry.Name] = parsed;
                 }
             }
         }
@@ -62,6 +65,34 @@ internal static class HypermediaParser
 
         return (links, affordances, fields);
     }
+
+    private static IReadOnlyList<Link> ParseLinks(string relation, JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            var list = new List<Link>();
+            foreach (var element in value.EnumerateArray())
+            {
+                if (ParseLink(relation, element) is { } link)
+                {
+                    list.Add(link);
+                }
+            }
+
+            return list;
+        }
+
+        return ParseLink(relation, value) is { } single ? [single] : [];
+    }
+
+    private static Link? ParseLink(string relation, JsonElement element)
+        => element.ValueKind == JsonValueKind.Object && GetString(element, "href") is { } href && IsUsable(href)
+            ? new Link(relation, href, GetBool(element, "templated") ?? false)
+            {
+                Title = GetString(element, "title"),
+                Type = GetString(element, "type"),
+            }
+            : null;
 
     private static IReadOnlyList<AffordanceField> ParseFields(JsonElement template)
     {

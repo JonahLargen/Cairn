@@ -164,7 +164,7 @@ public sealed class CairnClient
         var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
         if (IsBlank(bytes))
         {
-            return CollectionResult<TItem>.Success(status, new CollectionResource<TItem>(this, [], Empty<Link>(), Empty<Affordance>()));
+            return CollectionResult<TItem>.Success(status, new CollectionResource<TItem>(this, [], Empty<IReadOnlyList<Link>>(), Empty<Affordance>()));
         }
 
         using var document = JsonDocument.Parse(bytes);
@@ -173,7 +173,7 @@ public sealed class CairnClient
         // A bare array carries no collection-level links; an envelope's links live on its root object.
         var (links, affordances, _) = root.ValueKind == JsonValueKind.Object
             ? HypermediaParser.Parse(root)
-            : (Empty<Link>(), Empty<Affordance>(), Empty<IReadOnlyList<AffordanceField>>());
+            : (Empty<IReadOnlyList<Link>>(), Empty<Affordance>(), Empty<IReadOnlyList<AffordanceField>>());
 
         var elements = root.ValueKind == JsonValueKind.Array ? root
             : root.ValueKind == JsonValueKind.Object && root.TryGetProperty(itemsProperty, out var array) && array.ValueKind == JsonValueKind.Array ? array
@@ -215,7 +215,7 @@ public sealed class CairnClient
         var etag = response.Headers.ETag?.ToString();
         if (IsBlank(bytes))
         {
-            return new Resource<T>(this, default, Empty<Link>(), Empty<Affordance>(), Empty<IReadOnlyList<AffordanceField>>(), etag);
+            return new Resource<T>(this, default, Empty<IReadOnlyList<Link>>(), Empty<Affordance>(), Empty<IReadOnlyList<AffordanceField>>(), etag);
         }
 
         using var document = JsonDocument.Parse(bytes);
