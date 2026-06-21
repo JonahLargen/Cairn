@@ -33,7 +33,6 @@ internal static class CairnLinkRecorder
 
         var format = ResolveFormat(http, options);
         CairnLinkStore.SetFormat(http, format);
-        ApplyContentType(http, format);
 
         var scope = new RecordScope(
             services.GetRequiredService<ILinkEngine>(),
@@ -49,6 +48,14 @@ internal static class CairnLinkRecorder
             new HashSet<object>(ReferenceEqualityComparer.Instance));
 
         await RecordAsync(http, value, scope);
+
+        // Only relabel the response media type when we actually injected hypermedia — i.e. the body was a
+        // resource representation (a configured type). Problem documents and uncovered bodies, whatever their
+        // status code, keep their original content type per RFC 9457.
+        if (CairnLinkStore.HasRecorded(http))
+        {
+            ApplyContentType(http, format);
+        }
     }
 
     private static async ValueTask RecordAsync(HttpContext http, object? value, RecordScope scope)
