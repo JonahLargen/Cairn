@@ -142,9 +142,9 @@ public sealed class CairnClient
         var root = document.RootElement;
 
         // A bare array carries no collection-level links; an envelope's links live on its root object.
-        var (links, affordances) = root.ValueKind == JsonValueKind.Object
+        var (links, affordances, _) = root.ValueKind == JsonValueKind.Object
             ? HypermediaParser.Parse(root)
-            : (Empty<Link>(), Empty<Affordance>());
+            : (Empty<Link>(), Empty<Affordance>(), Empty<IReadOnlyList<AffordanceField>>());
 
         var elements = root.ValueKind == JsonValueKind.Array ? root
             : root.ValueKind == JsonValueKind.Object && root.TryGetProperty(itemsProperty, out var array) && array.ValueKind == JsonValueKind.Array ? array
@@ -155,8 +155,8 @@ public sealed class CairnClient
         {
             foreach (var element in elements.EnumerateArray())
             {
-                var (itemLinks, itemAffordances) = HypermediaParser.Parse(element);
-                items.Add(new Resource<TItem>(this, element.Deserialize<TItem>(_json), itemLinks, itemAffordances));
+                var (itemLinks, itemAffordances, itemFields) = HypermediaParser.Parse(element);
+                items.Add(new Resource<TItem>(this, element.Deserialize<TItem>(_json), itemLinks, itemAffordances, itemFields));
             }
         }
 
@@ -171,8 +171,8 @@ public sealed class CairnClient
         var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
         using var document = JsonDocument.Parse(bytes);
         var value = document.RootElement.Deserialize<T>(_json);
-        var (links, affordances) = HypermediaParser.Parse(document.RootElement);
-        return new Resource<T>(this, value, links, affordances);
+        var (links, affordances, fields) = HypermediaParser.Parse(document.RootElement);
+        return new Resource<T>(this, value, links, affordances, fields);
     }
 
     private static async Task<Problem> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)

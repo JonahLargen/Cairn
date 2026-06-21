@@ -5,14 +5,15 @@ namespace Cairn.Client;
 /// <summary>Parses Cairn hypermedia (<c>_links</c>, <c>_actions</c>, HAL-FORMS <c>_templates</c>) from a resource body.</summary>
 internal static class HypermediaParser
 {
-    public static (IReadOnlyDictionary<string, Link> Links, IReadOnlyDictionary<string, Affordance> Affordances) Parse(JsonElement root)
+    public static (IReadOnlyDictionary<string, Link> Links, IReadOnlyDictionary<string, Affordance> Affordances, IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> Fields) Parse(JsonElement root)
     {
         var links = new Dictionary<string, Link>(StringComparer.Ordinal);
         var affordances = new Dictionary<string, Affordance>(StringComparer.Ordinal);
+        var fields = new Dictionary<string, IReadOnlyList<AffordanceField>>(StringComparer.Ordinal);
 
         if (root.ValueKind != JsonValueKind.Object)
         {
-            return (links, affordances);
+            return (links, affordances, fields);
         }
 
         if (root.TryGetProperty("_links", out var linksElement) && linksElement.ValueKind == JsonValueKind.Object)
@@ -53,11 +54,39 @@ internal static class HypermediaParser
                     {
                         Title = GetString(entry.Value, "title"),
                     };
+                    fields[entry.Name] = ParseFields(entry.Value);
                 }
             }
         }
 
-        return (links, affordances);
+        return (links, affordances, fields);
+    }
+
+    private static IReadOnlyList<AffordanceField> ParseFields(JsonElement template)
+    {
+        if (!template.TryGetProperty("properties", out var properties) || properties.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var fields = new List<AffordanceField>();
+        foreach (var property in properties.EnumerateArray())
+        {
+            if (property.ValueKind == JsonValueKind.Object && GetString(property, "name") is { } name && IsUsable(name))
+            {
+                fields.Add(new AffordanceField(name)
+                {
+                    Required = GetBool(property, "required") ?? false,
+                    Type = GetString(property, "type"),
+                    Regex = GetString(property, "regex"),
+                    MaxLength = GetInt(property, "maxLength"),
+                    Min = GetDouble(property, "min"),
+                    Max = GetDouble(property, "max"),
+                });
+            }
+        }
+
+        return fields;
     }
 
     // A malformed entry (null/whitespace relation or href) is skipped rather than throwing from the
@@ -71,4 +100,10 @@ internal static class HypermediaParser
         => element.TryGetProperty(property, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
             ? value.GetBoolean()
             : null;
+
+    private static int? GetInt(JsonElement element, string property)
+        => element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : null;
+
+    private static double? GetDouble(JsonElement element, string property)
+        => element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) ? number : null;
 }
