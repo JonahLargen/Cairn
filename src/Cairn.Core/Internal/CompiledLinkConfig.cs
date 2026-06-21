@@ -107,7 +107,9 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         {
             if (context.Mode == LinkResolutionMode.Strict)
             {
-                throw new LinkResolutionException($"Could not resolve a URL for relation '{relation}'.");
+                throw new LinkResolutionException(
+                    $"Could not resolve a URL for relation '{relation}' targeting {Describe(target)}. " +
+                    "Ensure the endpoint is named (WithName / [Http*(Name=...)]) and all route values are supplied.");
             }
 
             return null;
@@ -115,4 +117,11 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
 
         return href;
     }
+
+    private static string Describe(LinkTarget target) => target switch
+    {
+        RouteLinkTarget route => $"route '{route.RouteName}'",
+        ExplicitLinkTarget uri => $"URI '{uri.Href}'",
+        _ => "the target",
+    };
 }

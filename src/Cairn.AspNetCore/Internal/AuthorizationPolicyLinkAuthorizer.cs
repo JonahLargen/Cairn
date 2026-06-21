@@ -17,8 +17,19 @@ internal sealed class AuthorizationPolicyLinkAuthorizer(IHttpContextAccessor acc
 
         var authorization = http.RequestServices.GetService<IAuthorizationService>()
             ?? throw new InvalidOperationException(
-                $"A hypermedia link requires the authorization policy '{policy}', but authorization services are " +
+                "A hypermedia link requires an authorization policy, but authorization services are " +
                 "not registered. Call IServiceCollection.AddAuthorization() in startup.");
+
+        // An empty policy name means "the host's default policy" (RequireAuthorization() with no argument).
+        if (string.IsNullOrEmpty(policy))
+        {
+            var provider = http.RequestServices.GetService<IAuthorizationPolicyProvider>();
+            var defaultPolicy = provider is null ? null : await provider.GetDefaultPolicyAsync();
+            var defaultResult = defaultPolicy is not null
+                ? await authorization.AuthorizeAsync(http.User, defaultPolicy)
+                : http.User?.Identity?.IsAuthenticated == true ? AuthorizationResult.Success() : AuthorizationResult.Failed();
+            return defaultResult.Succeeded;
+        }
 
         var result = await authorization.AuthorizeAsync(http.User, policy);
         return result.Succeeded;

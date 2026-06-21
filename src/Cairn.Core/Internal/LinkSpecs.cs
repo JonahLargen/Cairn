@@ -3,6 +3,9 @@ namespace Cairn.Internal;
 /// <summary>Common, mutable state shared by link and affordance specifications.</summary>
 internal abstract class HypermediaSpec<T>
 {
+    /// <summary>The policy sentinel meaning "the host's default authorization policy".</summary>
+    public const string DefaultPolicy = "";
+
     public required LinkRelation Relation { get; init; }
 
     public Func<T, LinkContext, ValueTask<bool>>? Condition { get; set; }
@@ -69,6 +72,12 @@ internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
         return When((resource, _) => new ValueTask<bool>(condition(resource)));
     }
 
+    public ILinkSpec<T> When(Func<T, LinkContext, bool> condition)
+    {
+        ArgumentNullException.ThrowIfNull(condition);
+        return When((resource, context) => new ValueTask<bool>(condition(resource, context)));
+    }
+
     public ILinkSpec<T> When(Func<T, LinkContext, ValueTask<bool>> condition)
     {
         ArgumentNullException.ThrowIfNull(condition);
@@ -81,6 +90,8 @@ internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
         Policy = policy;
         return this;
     }
+
+    public ILinkSpec<T> RequireAuthorization() => RequireAuthorization(HypermediaSpec<T>.DefaultPolicy);
 }
 
 /// <summary>A recorded affordance declaration.</summary>
@@ -99,6 +110,16 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
         HttpMethod = httpMethod;
         return this;
     }
+
+    public IAffordanceSpec<T> Get() => Method("GET");
+
+    public IAffordanceSpec<T> Post() => Method("POST");
+
+    public IAffordanceSpec<T> Put() => Method("PUT");
+
+    public IAffordanceSpec<T> Patch() => Method("PATCH");
+
+    public IAffordanceSpec<T> Delete() => Method("DELETE");
 
     public IAffordanceSpec<T> Accepts<TInput>()
     {
@@ -124,6 +145,12 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
         return When((resource, _) => new ValueTask<bool>(condition(resource)));
     }
 
+    public IAffordanceSpec<T> When(Func<T, LinkContext, bool> condition)
+    {
+        ArgumentNullException.ThrowIfNull(condition);
+        return When((resource, context) => new ValueTask<bool>(condition(resource, context)));
+    }
+
     public IAffordanceSpec<T> When(Func<T, LinkContext, ValueTask<bool>> condition)
     {
         ArgumentNullException.ThrowIfNull(condition);
@@ -136,6 +163,8 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
         Policy = policy;
         return this;
     }
+
+    public IAffordanceSpec<T> RequireAuthorization() => RequireAuthorization(HypermediaSpec<T>.DefaultPolicy);
 }
 
 /// <summary>A recorded embedded-resource declaration; resolves the child instance(s) to embed.</summary>
@@ -159,12 +188,20 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
 
     public ILinkSpec<T> Self(Func<T, LinkTarget> target) => Link(IanaLinkRelations.Self, target);
 
+    public ILinkSpec<T> Self(Func<T, LinkContext, LinkTarget> target) => Link(IanaLinkRelations.Self, target);
+
     public ILinkSpec<T> Self(Func<T, LinkContext, ValueTask<LinkTarget>> target) => Link(IanaLinkRelations.Self, target);
 
     public ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkTarget> target)
     {
         ArgumentNullException.ThrowIfNull(target);
         return Link(relation, (resource, _) => new ValueTask<LinkTarget>(target(resource)));
+    }
+
+    public ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkContext, LinkTarget> target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        return Link(relation, (resource, context) => new ValueTask<LinkTarget>(target(resource, context)));
     }
 
     public ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkContext, ValueTask<LinkTarget>> target)
@@ -193,6 +230,12 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
     {
         ArgumentNullException.ThrowIfNull(target);
         return Affordance(name, (resource, _) => new ValueTask<LinkTarget>(target(resource)));
+    }
+
+    public IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkContext, LinkTarget> target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        return Affordance(name, (resource, context) => new ValueTask<LinkTarget>(target(resource, context)));
     }
 
     public IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkContext, ValueTask<LinkTarget>> target)
