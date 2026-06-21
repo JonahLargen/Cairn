@@ -26,7 +26,7 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         foreach (var spec in _builder.Links)
         {
             if (await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false)
-                && Resolve(spec, typed, context) is { } href)
+                && await ResolveAsync(spec, typed, context).ConfigureAwait(false) is { } href)
             {
                 links.Add(new Link(spec.Relation, href) { Title = spec.TitleText });
             }
@@ -36,7 +36,7 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         foreach (var spec in _builder.Affordances)
         {
             if (await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false)
-                && Resolve(spec, typed, context) is { } href)
+                && await ResolveAsync(spec, typed, context).ConfigureAwait(false) is { } href)
             {
                 affordances.Add(new Affordance(spec.Relation, href, spec.HttpMethod) { Title = spec.TitleText, Input = spec.InputType });
             }
@@ -47,7 +47,7 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
 
     private static async ValueTask<bool> IncludeAsync(HypermediaSpec<T> spec, T resource, LinkContext context, CancellationToken cancellationToken)
     {
-        if (spec.Condition is not null && !spec.Condition(resource))
+        if (spec.Condition is not null && !await spec.Condition(resource, context).ConfigureAwait(false))
         {
             return false;
         }
@@ -60,9 +60,10 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         return true;
     }
 
-    private static string? Resolve(HypermediaSpec<T> spec, T resource, LinkContext context)
+    private static async ValueTask<string?> ResolveAsync(HypermediaSpec<T> spec, T resource, LinkContext context)
     {
-        var href = context.UrlResolver.Resolve(spec.Target(resource));
+        var target = await spec.Target(resource, context).ConfigureAwait(false);
+        var href = context.UrlResolver.Resolve(target);
 
         if (href is null && context.Mode == LinkResolutionMode.Strict)
         {

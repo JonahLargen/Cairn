@@ -37,7 +37,12 @@ internal static class CairnLinkRecorder
 
         var scope = new RecordScope(
             services.GetRequiredService<ILinkEngine>(),
-            new LinkContext(services.GetRequiredService<ILinkUrlResolver>(), services.GetRequiredService<ILinkAuthorizer>(), options.Mode),
+            new LinkContext(
+                services.GetRequiredService<ILinkUrlResolver>(),
+                services.GetRequiredService<ILinkAuthorizer>(),
+                options.Mode,
+                services,
+                http.RequestAborted),
             options,
             format,
             services.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore"),
