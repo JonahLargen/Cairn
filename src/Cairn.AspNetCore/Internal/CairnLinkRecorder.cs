@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Net.Http.Headers;
 
 namespace Cairn.AspNetCore.Internal;
 
@@ -187,10 +188,16 @@ internal static class CairnLinkRecorder
 
         http.Response.OnStarting(static state =>
         {
-            var (response, contentType) = ((HttpResponse, string))state;
-            if (response.ContentType is { } existing && existing.StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+            var (response, target) = ((HttpResponse, string))state;
+
+            // Swap only the media type, keeping any parameters (a media-type API version `v`, a charset, ...),
+            // and only for plain application/json — problem+json and explicit vendor types are left untouched.
+            if (response.ContentType is { } existing
+                && MediaTypeHeaderValue.TryParse(existing, out var parsed)
+                && parsed.MediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase))
             {
-                response.ContentType = contentType;
+                parsed.MediaType = target;
+                response.ContentType = parsed.ToString();
             }
 
             return Task.CompletedTask;
