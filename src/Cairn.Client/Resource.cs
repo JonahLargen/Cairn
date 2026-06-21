@@ -1,12 +1,15 @@
+using System.Text.Json;
+
 namespace Cairn.Client;
 
-/// <summary>A resource fetched from a Cairn hypermedia API: its typed value plus its links and affordances.</summary>
+/// <summary>A resource fetched from a Cairn hypermedia API: its typed value plus its links, affordances, and embedded resources.</summary>
 /// <typeparam name="T">The resource body type.</typeparam>
 public sealed class Resource<T>
 {
     private readonly CairnClient _client;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> _fields;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<Link>> _linksByRelation;
+    private readonly JsonElement _embedded;
 
     internal Resource(
         CairnClient client,
@@ -14,11 +17,13 @@ public sealed class Resource<T>
         IReadOnlyDictionary<string, IReadOnlyList<Link>> links,
         IReadOnlyDictionary<string, Affordance> affordances,
         IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> fields,
-        string? etag = null)
+        string? etag = null,
+        JsonElement embedded = default)
     {
         _client = client;
         _fields = fields;
         _linksByRelation = links;
+        _embedded = embedded;
         Value = value;
         Links = LinkMap.Flatten(links);
         Affordances = affordances;
@@ -49,6 +54,32 @@ public sealed class Resource<T>
     /// <summary>The input fields the named affordance accepts (from its HAL-FORMS template), or empty if none are described.</summary>
     public IReadOnlyList<AffordanceField> Fields(string name)
         => _fields.TryGetValue(name, out var fields) ? fields : [];
+
+    /// <summary>The resources embedded under the given relation (HAL <c>_embedded</c>), each as a navigable resource; empty if none.</summary>
+    /// <typeparam name="TChild">The embedded resource body type.</typeparam>
+    public IReadOnlyList<Resource<TChild>> Embedded<TChild>(string relation)
+    {
+        if (_embedded.ValueKind != JsonValueKind.Object || !_embedded.TryGetProperty(relation, out var value))
+        {
+            return [];
+        }
+
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            var list = new List<Resource<TChild>>();
+            foreach (var element in value.EnumerateArray())
+            {
+                if (element.ValueKind == JsonValueKind.Object)
+                {
+                    list.Add(_client.BuildResource<TChild>(element));
+                }
+            }
+
+            return list;
+        }
+
+        return value.ValueKind == JsonValueKind.Object ? [_client.BuildResource<TChild>(value)] : [];
+    }
 
     /// <summary>Follows the link with the given relation to another resource.</summary>
     /// <exception cref="InvalidOperationException">The resource has no link with that relation.</exception>

@@ -50,6 +50,25 @@ public class CairnClientRobustnessTests
     }
 
     [Fact]
+    public async Task Reads_embedded_resources_as_navigable_resources()
+    {
+        const string body = @"{""id"":5,""_links"":{""self"":{""href"":""/orders/5""}},""_embedded"":{""customer"":{""id"":99,""_links"":{""self"":{""href"":""/customers/99""}}},""item"":[{""id"":1,""_links"":{""self"":{""href"":""/items/1""}}},{""id"":2,""_links"":{""self"":{""href"":""/items/2""}}}]}}";
+        await using var app = await StartAsync(a => a.MapGet("/raw", () => Results.Text(body, "application/json")));
+        using var httpClient = app.GetTestClient();
+
+        var order = (await new CairnClient(httpClient).GetAsync<ClientThing>("/raw")).EnsureSuccess();
+
+        var customer = Assert.Single(order.Embedded<ClientThing>("customer"));
+        Assert.Equal(99, customer.Value!.Id);
+        Assert.Equal("/customers/99", customer.Links["self"].Href);
+
+        var items = order.Embedded<ClientThing>("item");
+        Assert.Equal(2, items.Count);
+        Assert.Equal(1, items[0].Value!.Id);
+        Assert.Equal("/items/2", items[1].Links["self"].Href);
+    }
+
+    [Fact]
     public async Task A_configured_link_policy_is_not_silently_skipped_for_a_relative_target()
     {
         using var http = new HttpClient();   // no BaseAddress, so a relative href stays relative
