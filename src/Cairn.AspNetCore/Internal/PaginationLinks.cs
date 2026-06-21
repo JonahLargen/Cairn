@@ -50,9 +50,9 @@ internal static class PaginationLinks
             links["next"] = new(cursorUrl(next));
         }
 
-        if (cursor.Previous is { Length: > 0 } previous)
+        if (cursor.Prev is { Length: > 0 } prev)
         {
-            links["prev"] = new(cursorUrl(previous));
+            links["prev"] = new(cursorUrl(prev));
         }
 
         return links;

@@ -54,7 +54,7 @@ public sealed class CairnEndpointTests : IAsyncLifetime
                 new CursorPage<TestOrder>(
                     [new TestOrder(1, "Pending")],
                     Next: "next-cur",
-                    Previous: "prev-cur")))
+                    Prev: "prev-cur")))
             .WithLinks();
 
         // Opted out: no .WithLinks() — must serialize unchanged.

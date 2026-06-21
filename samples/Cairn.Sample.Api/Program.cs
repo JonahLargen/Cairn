@@ -37,7 +37,7 @@ orders.MapGet("/cursor", () => TypedResults.Ok(
         new CursorPage<OrderDto>(
             [new OrderDto(3, OrderStatus.Pending), new OrderDto(4, OrderStatus.Shipped)],
             Next: "eyJpZCI6NH0",
-            Previous: "eyJpZCI6Mn0")))
+            Prev: "eyJpZCI6Mn0")))
     .WithLinks();
 
 // A Results<,> union — links are attached to the inner value when present.

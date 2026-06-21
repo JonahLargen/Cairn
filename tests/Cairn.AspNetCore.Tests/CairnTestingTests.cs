@@ -20,7 +20,7 @@ public class CairnTestingTests
 
         json.Hypermedia().Should()
             .HaveLink("self", "/o/1")
-            .And.ExposeAffordance("cancel").WithMethod(HttpMethod.Post).WithHref("/o/1/cancel");
+            .And.HaveAffordance("cancel").WithMethod(HttpMethod.Post).WithHref("/o/1/cancel");
     }
 
     [Fact]
@@ -44,8 +44,8 @@ public class CairnTestingTests
 
         hypermedia.Should()
             .HaveSelfLink()
-            .And.ExposeAffordance("cancel").WithMethod(HttpMethod.Post)
-            .And.NotExposeAffordance("delete")
+            .And.HaveAffordance("cancel").WithMethod(HttpMethod.Post)
+            .And.NotHaveAffordance("delete")
             .And.NotHaveLink("parent");
     }
 
