@@ -10,6 +10,7 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
   </ItemGroup>
 
   <ItemGroup>
@@ -18,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cairn.Analyzers\Cairn.Analyzers.csproj" />
+    <ProjectReference Include="..\..\src\Cairn.CodeFixes\Cairn.CodeFixes.csproj" />
   </ItemGroup>
 
 </Project>

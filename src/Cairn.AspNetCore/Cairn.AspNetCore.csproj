@@ -13,4 +13,16 @@
     <ProjectReference Include="..\Cairn.Core\Cairn.Core.csproj" />
   </ItemGroup>
 
+  <!-- Ship the analyzers/code fixes inside this package (build-order only; not a runtime dependency). -->
+  <ItemGroup>
+    <ProjectReference Include="..\Cairn.Analyzers\Cairn.Analyzers.csproj" PrivateAssets="all" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Cairn.CodeFixes\Cairn.CodeFixes.csproj" PrivateAssets="all" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\Cairn.Analyzers\bin\$(Configuration)\netstandard2.0\Cairn.Analyzers.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="..\Cairn.CodeFixes\bin\$(Configuration)\netstandard2.0\Cairn.CodeFixes.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+
 </Project>
+
