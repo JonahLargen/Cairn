@@ -4,9 +4,17 @@ using Microsoft.AspNetCore.Http.HttpResults;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddCairn(options => options.AddLinks(new OrderLinks()));
+builder.Services.AddControllers();
+builder.Services.AddCairn(options =>
+{
+    options.AddLinks(new OrderLinks());
+    options.AddLinks(new CustomerLinks());
+});
 
 var app = builder.Build();
+
+// Controllers opt in the same way — see CustomersController and its [CairnLinks].
+app.MapControllers();
 
 var orders = app.MapGroup("/orders");
 

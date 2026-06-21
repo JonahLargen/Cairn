@@ -28,10 +28,21 @@ public static class CairnServiceCollectionExtensions
         services.AddScoped<ILinkAuthorizer, AuthorizationPolicyLinkAuthorizer>();
 
         var modifier = new CairnLinkInjectionModifier(new HttpContextAccessor());
+
+        // Minimal APIs (and WriteAsJsonAsync) serialize through Http.Json options.
         services.ConfigureHttpJsonOptions(json =>
         {
             json.SerializerOptions.TypeInfoResolver =
                 (json.SerializerOptions.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver())
+                    .WithAddedModifier(modifier.Modify);
+        });
+
+        // MVC controllers serialize through the System.Text.Json output formatter, which reads Mvc.JsonOptions.
+        // Configuring it is harmless when MVC is not in use.
+        services.Configure<Microsoft.AspNetCore.Mvc.JsonOptions>(mvc =>
+        {
+            mvc.JsonSerializerOptions.TypeInfoResolver =
+                (mvc.JsonSerializerOptions.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver())
                     .WithAddedModifier(modifier.Modify);
         });
 

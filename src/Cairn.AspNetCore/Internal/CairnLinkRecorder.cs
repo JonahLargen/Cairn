@@ -16,9 +16,14 @@ internal static class CairnLinkRecorder
     private static readonly ConcurrentDictionary<Type, byte> WarnedHalActionTypes = new();
     private static readonly ConcurrentDictionary<Type, byte> WarnedValueTypes = new();
 
-    public static async ValueTask RecordAsync(HttpContext http, object? result)
+    // Minimal-API entry point: peel the IResult to its value, then record it.
+    public static ValueTask RecordResultAsync(HttpContext http, object? result)
+        => Unwrap(result) is IValueHttpResult { Value: { } value } ? RecordValueAsync(http, value) : ValueTask.CompletedTask;
+
+    // MVC entry point: the resource value (e.g. ObjectResult.Value) is recorded directly.
+    public static async ValueTask RecordValueAsync(HttpContext http, object? value)
     {
-        if (Unwrap(result) is not IValueHttpResult { Value: { } value })
+        if (value is null)
         {
             return;
         }

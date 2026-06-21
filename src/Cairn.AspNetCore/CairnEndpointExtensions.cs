@@ -22,7 +22,7 @@ public static class CairnEndpointExtensions
         return builder.AddEndpointFilterFactory((_, next) => async invocation =>
         {
             var result = await next(invocation);
-            await CairnLinkRecorder.RecordAsync(invocation.HttpContext, result);
+            await CairnLinkRecorder.RecordResultAsync(invocation.HttpContext, result);
             return result;
         });
     }
