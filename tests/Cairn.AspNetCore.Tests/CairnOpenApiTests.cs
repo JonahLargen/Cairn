@@ -38,7 +38,15 @@ public class CairnOpenApiTests
 
         Assert.True(properties.TryGetProperty("_links", out var links));
         Assert.True(properties.TryGetProperty("_actions", out _));
+        Assert.True(properties.TryGetProperty("_embedded", out _));
         Assert.Equal("object", links.GetProperty("type").GetString());
+
+        // The link object documents the full set of link members Cairn can emit.
+        var linkObject = links.GetProperty("additionalProperties").GetProperty("properties");
+        foreach (var member in new[] { "href", "templated", "title", "type", "name", "deprecation", "hreflang", "profile" })
+        {
+            Assert.True(linkObject.TryGetProperty(member, out _), $"link schema missing '{member}'");
+        }
     }
 
     private sealed record DocOrder(int Id);
