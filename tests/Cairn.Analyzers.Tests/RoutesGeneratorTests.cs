@@ -84,6 +84,30 @@ class Program
     }
 
     [Fact]
+    public void Generates_route_methods_from_controller_attributes()
+    {
+        const string source = @"
+class RouteAttribute : System.Attribute { public RouteAttribute(string template) {} public string Name { get; set; } }
+class HttpGetAttribute : System.Attribute { public HttpGetAttribute() {} public HttpGetAttribute(string template) {} public string Name { get; set; } }
+
+[Route(""customers"")]
+class CustomersController
+{
+    [HttpGet(""{id:int}"", Name = ""GetCustomerById"")]
+    public object Get(int id) => null;
+
+    [HttpGet(Name = ""ListCustomers"")]
+    public object List() => null;
+}";
+
+        var generated = Run(source);
+
+        Assert.Contains("public static global::Cairn.LinkTarget GetCustomerById(int id)", generated);
+        Assert.Contains(@"Route(""GetCustomerById"", new { id })", generated);
+        Assert.Contains("public static global::Cairn.LinkTarget ListCustomers()", generated);
+    }
+
+    [Fact]
     public void Reports_diagnostic_when_two_route_names_reduce_to_the_same_method()
     {
         const string source = @"
