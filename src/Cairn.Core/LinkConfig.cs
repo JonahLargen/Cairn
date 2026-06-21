@@ -35,6 +35,14 @@ public interface ILinkBuilder<T>
 
     /// <summary>Adds an affordance with the given name, computing its target with access to the request's services.</summary>
     IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkContext, ValueTask<LinkTarget>> target);
+
+    /// <summary>Embeds a related resource under the given relation in HAL <c>_embedded</c>, decorated with its own links. A null result embeds nothing.</summary>
+    /// <typeparam name="TChild">The embedded resource type.</typeparam>
+    void Embed<TChild>(LinkRelation relation, Func<T, TChild?> resource) where TChild : class;
+
+    /// <summary>Embeds a collection of related resources under the given relation in HAL <c>_embedded</c> (always an array), each decorated with its own links.</summary>
+    /// <typeparam name="TChild">The embedded item type.</typeparam>
+    void EmbedMany<TChild>(LinkRelation relation, Func<T, IEnumerable<TChild>?> resources);
 }
 
 /// <summary>Configures a single link.</summary>
