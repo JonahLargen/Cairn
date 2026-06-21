@@ -42,11 +42,11 @@ public sealed class CollectionResource<TItem>
             ? _client.FollowCollectionAsync<TItem>(link, itemsProperty, cancellationToken)
             : throw new InvalidOperationException($"The collection has no '{relation}' link.");
 
-    /// <summary>Invokes a collection-level affordance, optionally with a request body.</summary>
+    /// <summary>Invokes a collection-level affordance, optionally with a request body and an <c>ifMatch</c> ETag.</summary>
     /// <exception cref="InvalidOperationException">The collection has no affordance with that name.</exception>
-    public Task<ClientResult> InvokeAsync(string name, object? body = null, CancellationToken cancellationToken = default)
+    public Task<ClientResult> InvokeAsync(string name, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
         => Affordances.TryGetValue(name, out var affordance)
-            ? _client.InvokeAsync(affordance, body, cancellationToken)
+            ? _client.InvokeAsync(affordance, body, ifMatch, cancellationToken)
             : throw new InvalidOperationException($"The collection has no '{name}' affordance.");
 }
 

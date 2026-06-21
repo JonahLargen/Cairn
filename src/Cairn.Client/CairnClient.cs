@@ -27,10 +27,19 @@ public sealed class CairnClient
         _allowLink = allowLink;
     }
 
-    /// <summary>Gets a resource and its hypermedia from <paramref name="url"/>. Does not throw on an HTTP error status.</summary>
-    public async Task<ClientResult<T>> GetAsync<T>(string url, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Gets a resource and its hypermedia from <paramref name="url"/>. Pass <paramref name="ifNoneMatch"/> (an ETag) for a
+    /// conditional GET — a <c>304</c> response surfaces as <see cref="ClientResult{T}.IsNotModified"/>. Does not throw on an HTTP error status.
+    /// </summary>
+    public async Task<ClientResult<T>> GetAsync<T>(string url, string? ifNoneMatch = null, CancellationToken cancellationToken = default)
     {
-        using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        if (ifNoneMatch is not null)
+        {
+            request.Headers.TryAddWithoutValidation("If-None-Match", ifNoneMatch);
+        }
+
+        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         return await ReadResultAsync<T>(response, cancellationToken).ConfigureAwait(false);
     }
 
@@ -71,12 +80,12 @@ public sealed class CairnClient
         return await ReadCollectionResultAsync<TItem>(response, itemsProperty, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Invokes an affordance, optionally with a request body. Does not throw on an HTTP error status.</summary>
+    /// <summary>Invokes an affordance, optionally with a request body and an <paramref name="ifMatch"/> ETag (optimistic concurrency). Does not throw on an HTTP error status.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="affordance"/> is null.</exception>
     /// <exception cref="InvalidOperationException">The affordance target is rejected by the configured link policy.</exception>
-    public async Task<ClientResult> InvokeAsync(Affordance affordance, object? body = null, CancellationToken cancellationToken = default)
+    public async Task<ClientResult> InvokeAsync(Affordance affordance, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
     {
-        using var response = await SendAsync(affordance, body, cancellationToken).ConfigureAwait(false);
+        using var response = await SendAsync(affordance, body, ifMatch, cancellationToken).ConfigureAwait(false);
         if (response.IsSuccessStatusCode)
         {
             return ClientResult.Success((int)response.StatusCode);
@@ -85,22 +94,27 @@ public sealed class CairnClient
         return ClientResult.Failure((int)response.StatusCode, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
     }
 
-    /// <summary>Invokes an affordance and reads its returned resource. Does not throw on an HTTP error status.</summary>
+    /// <summary>Invokes an affordance and reads its returned resource, optionally with an <paramref name="ifMatch"/> ETag. Does not throw on an HTTP error status.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="affordance"/> is null.</exception>
     /// <exception cref="InvalidOperationException">The affordance target is rejected by the configured link policy.</exception>
-    public async Task<ClientResult<TResult>> InvokeAsync<TResult>(Affordance affordance, object? body = null, CancellationToken cancellationToken = default)
+    public async Task<ClientResult<TResult>> InvokeAsync<TResult>(Affordance affordance, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
     {
-        using var response = await SendAsync(affordance, body, cancellationToken).ConfigureAwait(false);
+        using var response = await SendAsync(affordance, body, ifMatch, cancellationToken).ConfigureAwait(false);
         return await ReadResultAsync<TResult>(response, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<HttpResponseMessage> SendAsync(Affordance affordance, object? body, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(Affordance affordance, object? body, string? ifMatch, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(affordance);
         using var request = new HttpRequestMessage(new HttpMethod(affordance.Method), Authorize(affordance.Href));
         if (body is not null)
         {
             request.Content = JsonContent.Create(body, options: _json);
+        }
+
+        if (ifMatch is not null)
+        {
+            request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
         }
 
         return await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -172,7 +186,7 @@ public sealed class CairnClient
         using var document = JsonDocument.Parse(bytes);
         var value = document.RootElement.Deserialize<T>(_json);
         var (links, affordances, fields) = HypermediaParser.Parse(document.RootElement);
-        return new Resource<T>(this, value, links, affordances, fields);
+        return new Resource<T>(this, value, links, affordances, fields, response.Headers.ETag?.ToString());
     }
 
     private static async Task<Problem> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)
