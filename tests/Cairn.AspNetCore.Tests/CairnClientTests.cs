@@ -69,6 +69,57 @@ public class CairnClientTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => order.FollowAsync<ClientOrder>("next"));
     }
 
+    [Fact]
+    public async Task Skips_malformed_link_entries_instead_of_aborting_the_parse()
+    {
+        const string body = @"{""id"":1,""_links"":{""self"":{""href"":""/x""},"" "":{""href"":""/y""},""bad"":{""href"":"" ""}}}";
+        await using var app = await StartRawAsync(body);
+        using var httpClient = app.GetTestClient();
+
+        var resource = await new CairnClient(httpClient).GetAsync<ClientOrder>("/raw");
+
+        Assert.Equal(1, resource.Value!.Id);
+        Assert.True(resource.HasLink("self"));
+        Assert.Single(resource.Links);   // whitespace key and whitespace href are skipped, not thrown on
+    }
+
+    [Fact]
+    public async Task Following_a_templated_link_is_not_supported()
+    {
+        const string body = @"{""id"":1,""_links"":{""next"":{""href"":""/users{?page}"",""templated"":true}}}";
+        await using var app = await StartRawAsync(body);
+        using var httpClient = app.GetTestClient();
+
+        var resource = await new CairnClient(httpClient).GetAsync<ClientOrder>("/raw");
+
+        Assert.True(resource.Links["next"].Templated);
+        await Assert.ThrowsAsync<NotSupportedException>(() => resource.FollowAsync<ClientOrder>("next"));
+    }
+
+    [Fact]
+    public async Task Link_policy_rejects_a_disallowed_host()
+    {
+        const string body = @"{""id"":1,""_links"":{""evil"":{""href"":""http://169.254.169.254/latest""}}}";
+        await using var app = await StartRawAsync(body);
+        using var httpClient = app.GetTestClient();
+        var client = new CairnClient(httpClient, allowLink: uri => uri.Host == "localhost");
+
+        var resource = await client.GetAsync<ClientOrder>("/raw");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => resource.FollowAsync<ClientOrder>("evil"));
+    }
+
+    private static async Task<WebApplication> StartRawAsync(string json)
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+
+        var app = builder.Build();
+        app.MapGet("/raw", () => Results.Text(json, "application/json"));
+        await app.StartAsync();
+        return app;
+    }
+
     private sealed record ClientOrder(int Id, string Status);
 
     private sealed class ClientOrderLinks : LinkConfig<ClientOrder>
