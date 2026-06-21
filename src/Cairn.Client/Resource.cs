@@ -31,15 +31,22 @@ public sealed class Resource<T>
 
     /// <summary>Follows the link with the given relation to another resource.</summary>
     /// <exception cref="InvalidOperationException">The resource has no link with that relation.</exception>
-    public Task<Resource<TNext>> FollowAsync<TNext>(string relation, CancellationToken cancellationToken = default)
+    public Task<ClientResult<TNext>> FollowAsync<TNext>(string relation, CancellationToken cancellationToken = default)
         => Links.TryGetValue(relation, out var link)
             ? _client.FollowAsync<TNext>(link, cancellationToken)
             : throw new InvalidOperationException($"The resource has no '{relation}' link.");
 
-    /// <summary>Invokes the named affordance, optionally with a request body, returning the raw response.</summary>
+    /// <summary>Invokes the named affordance, optionally with a request body.</summary>
     /// <exception cref="InvalidOperationException">The resource has no affordance with that name.</exception>
-    public Task<HttpResponseMessage> InvokeAsync(string name, object? body = null, CancellationToken cancellationToken = default)
+    public Task<ClientResult> InvokeAsync(string name, object? body = null, CancellationToken cancellationToken = default)
         => Affordances.TryGetValue(name, out var affordance)
             ? _client.InvokeAsync(affordance, body, cancellationToken)
+            : throw new InvalidOperationException($"The resource has no '{name}' affordance.");
+
+    /// <summary>Invokes the named affordance and reads its returned resource.</summary>
+    /// <exception cref="InvalidOperationException">The resource has no affordance with that name.</exception>
+    public Task<ClientResult<TResult>> InvokeAsync<TResult>(string name, object? body = null, CancellationToken cancellationToken = default)
+        => Affordances.TryGetValue(name, out var affordance)
+            ? _client.InvokeAsync<TResult>(affordance, body, cancellationToken)
             : throw new InvalidOperationException($"The resource has no '{name}' affordance.");
 }

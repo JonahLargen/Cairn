@@ -35,18 +35,85 @@ public class CairnClientTests
         using var httpClient = app.GetTestClient();
         var client = new CairnClient(httpClient);
 
-        var order = await client.GetAsync<ClientOrder>("/orders/42");
+        var order = (await client.GetAsync<ClientOrder>("/orders/42")).EnsureSuccess();
 
         Assert.Equal(42, order.Value!.Id);
         Assert.True(order.HasLink("self"));
         Assert.True(order.HasAffordance("cancel"));
 
-        var response = await order.InvokeAsync("cancel");
-        Assert.True(response.IsSuccessStatusCode);
+        var result = await order.InvokeAsync("cancel");
+        Assert.True(result.IsSuccess);
         Assert.True(cancelled);
 
-        var followed = await order.FollowAsync<ClientOrder>("self");
+        var followed = (await order.FollowAsync<ClientOrder>("self")).EnsureSuccess();
         Assert.Equal(42, followed.Value!.Id);
+    }
+
+    [Fact]
+    public async Task Get_returns_a_problem_on_an_error_status()
+    {
+        await using var app = await StartProblemAppAsync();
+        using var httpClient = app.GetTestClient();
+
+        var result = await new CairnClient(httpClient).GetAsync<ClientOrder>("/invalid");
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(400, result.Status);
+        Assert.Equal(400, result.Problem!.Status);
+        Assert.Equal("Invalid order", result.Problem.Title);
+        Assert.Equal("id is required", result.Problem.Detail);
+        Assert.True(result.Problem.Extensions.ContainsKey("errors"));   // problem+json extension
+    }
+
+    [Fact]
+    public async Task Get_synthesizes_a_problem_for_a_bodyless_error()
+    {
+        await using var app = await StartProblemAppAsync();
+        using var httpClient = app.GetTestClient();
+
+        var result = await new CairnClient(httpClient).GetAsync<ClientOrder>("/missing");
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(404, result.Status);
+        Assert.Equal(404, result.Problem!.Status);   // synthesized from the status code
+    }
+
+    [Fact]
+    public async Task EnsureSuccess_throws_a_client_exception_carrying_the_problem()
+    {
+        await using var app = await StartProblemAppAsync();
+        using var httpClient = app.GetTestClient();
+
+        var result = await new CairnClient(httpClient).GetAsync<ClientOrder>("/invalid");
+        var exception = Assert.Throws<CairnClientException>(() => result.EnsureSuccess());
+
+        Assert.Equal(400, exception.Status);
+        Assert.Equal("Invalid order", exception.Problem!.Title);
+    }
+
+    [Fact]
+    public async Task Invoke_returns_a_problem_when_the_action_fails()
+    {
+        await using var app = await StartProblemAppAsync();
+        using var httpClient = app.GetTestClient();
+
+        var result = await new CairnClient(httpClient).InvokeAsync(new Affordance("reject", "/reject", "POST"));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(409, result.Status);
+        Assert.Equal("Cannot reject", result.Problem!.Title);
+    }
+
+    [Fact]
+    public async Task Typed_invoke_reads_the_returned_resource()
+    {
+        await using var app = await StartProblemAppAsync();
+        using var httpClient = app.GetTestClient();
+
+        var result = await new CairnClient(httpClient).InvokeAsync<ClientOrder>(new Affordance("ship", "/ship", "POST"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(99, result.Resource!.Value!.Id);
     }
 
     [Fact]
@@ -63,7 +130,7 @@ public class CairnClientTests
 
         await app.StartAsync();
         using var httpClient = app.GetTestClient();
-        var order = await new CairnClient(httpClient).GetAsync<ClientOrder>("/orders/7");
+        var order = (await new CairnClient(httpClient).GetAsync<ClientOrder>("/orders/7")).EnsureSuccess();
 
         Assert.False(order.HasLink("next"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => order.FollowAsync<ClientOrder>("next"));
@@ -76,7 +143,7 @@ public class CairnClientTests
         await using var app = await StartRawAsync(body);
         using var httpClient = app.GetTestClient();
 
-        var resource = await new CairnClient(httpClient).GetAsync<ClientOrder>("/raw");
+        var resource = (await new CairnClient(httpClient).GetAsync<ClientOrder>("/raw")).EnsureSuccess();
 
         Assert.Equal(1, resource.Value!.Id);
         Assert.True(resource.HasLink("self"));
@@ -90,7 +157,7 @@ public class CairnClientTests
         await using var app = await StartRawAsync(body);
         using var httpClient = app.GetTestClient();
 
-        var resource = await new CairnClient(httpClient).GetAsync<ClientOrder>("/raw");
+        var resource = (await new CairnClient(httpClient).GetAsync<ClientOrder>("/raw")).EnsureSuccess();
 
         Assert.True(resource.Links["next"].Templated);
         await Assert.ThrowsAsync<NotSupportedException>(() => resource.FollowAsync<ClientOrder>("next"));
@@ -104,9 +171,28 @@ public class CairnClientTests
         using var httpClient = app.GetTestClient();
         var client = new CairnClient(httpClient, allowLink: uri => uri.Host == "localhost");
 
-        var resource = await client.GetAsync<ClientOrder>("/raw");
+        var resource = (await client.GetAsync<ClientOrder>("/raw")).EnsureSuccess();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => resource.FollowAsync<ClientOrder>("evil"));
+    }
+
+    private static async Task<WebApplication> StartProblemAppAsync()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+
+        var app = builder.Build();
+        app.MapGet("/invalid", () => Results.Problem(
+            title: "Invalid order",
+            detail: "id is required",
+            statusCode: 400,
+            extensions: new Dictionary<string, object?> { ["errors"] = new { id = new[] { "required" } } }));
+        app.MapGet("/missing", () => Results.NotFound());
+        app.MapPost("/reject", () => Results.Problem(title: "Cannot reject", statusCode: 409));
+        app.MapPost("/ship", () => Results.Ok(new ClientOrder(99, "Shipped")));
+
+        await app.StartAsync();
+        return app;
     }
 
     private static async Task<WebApplication> StartRawAsync(string json)
