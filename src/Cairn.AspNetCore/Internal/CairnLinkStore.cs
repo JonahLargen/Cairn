@@ -62,6 +62,9 @@ internal sealed record HalAction(string Href, string Method)
 
     [JsonIgnore]
     public Type? Input { get; init; }
+
+    [JsonIgnore]
+    public string? ContentType { get; init; }
 }
 
 /// <summary>An affordance projected into a HAL-FORMS <c>_templates</c> entry.</summary>
@@ -70,6 +73,8 @@ internal sealed record HalFormsTemplate(string Method, string Target)
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
+    public string ContentType { get; init; } = "application/json";
+
     public IReadOnlyList<HalFormsProperty> Properties { get; init; } = [];
 }
 
@@ -77,10 +82,19 @@ internal sealed record HalFormsTemplate(string Method, string Target)
 internal sealed record HalFormsProperty(string Name)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Prompt { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Required { get; init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ReadOnly { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Type { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Placeholder { get; init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Regex { get; init; }
@@ -93,7 +107,16 @@ internal sealed record HalFormsProperty(string Name)
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? Max { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HalFormsOptions? Options { get; init; }
 }
+
+/// <summary>A HAL-FORMS <c>options</c> block enumerating a field's selectable values.</summary>
+internal sealed record HalFormsOptions(IReadOnlyList<HalFormsOption> Inline);
+
+/// <summary>One selectable value in a HAL-FORMS <c>options.inline</c> list.</summary>
+internal sealed record HalFormsOption(string Prompt, string Value);
 
 /// <summary>The serializable hypermedia computed for a single resource instance.</summary>
 internal sealed record ResourceHypermedia(

@@ -60,6 +60,8 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
 
     public Type? InputType { get; private set; }
 
+    public string? ContentTypeText { get; private set; }
+
     public IAffordanceSpec<T> Method(string httpMethod)
     {
         HttpMethod = httpMethod;
@@ -69,6 +71,12 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
     public IAffordanceSpec<T> Accepts<TInput>()
     {
         InputType = typeof(TInput);
+        return this;
+    }
+
+    public IAffordanceSpec<T> ContentType(string contentType)
+    {
+        ContentTypeText = contentType;
         return this;
     }
 

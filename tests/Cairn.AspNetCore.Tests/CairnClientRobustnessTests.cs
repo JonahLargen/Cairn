@@ -69,6 +69,21 @@ public class CairnClientRobustnessTests
     }
 
     [Fact]
+    public async Task Parses_hal_forms_field_prompt_options_and_readonly()
+    {
+        const string body = @"{""id"":1,""_templates"":{""update"":{""method"":""POST"",""target"":""/x"",""properties"":[{""name"":""status"",""prompt"":""Order status"",""options"":{""inline"":[{""prompt"":""Pending"",""value"":""Pending""},{""prompt"":""Shipped"",""value"":""Shipped""}]}},{""name"":""id"",""readOnly"":true}]}}}";
+        await using var app = await StartAsync(a => a.MapGet("/raw", () => Results.Text(body, "application/json")));
+        using var httpClient = app.GetTestClient();
+
+        var fields = (await new CairnClient(httpClient).GetAsync<ClientThing>("/raw")).EnsureSuccess().Fields("update");
+
+        var status = fields.Single(f => f.Name == "status");
+        Assert.Equal("Order status", status.Prompt);
+        Assert.Equal(["Pending", "Shipped"], status.Options);
+        Assert.True(fields.Single(f => f.Name == "id").ReadOnly);
+    }
+
+    [Fact]
     public async Task A_configured_link_policy_is_not_silently_skipped_for_a_relative_target()
     {
         using var http = new HttpClient();   // no BaseAddress, so a relative href stays relative

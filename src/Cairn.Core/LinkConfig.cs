@@ -76,6 +76,9 @@ public interface IAffordanceSpec<T>
     /// <typeparam name="TInput">The request/body type the action accepts.</typeparam>
     IAffordanceSpec<T> Accepts<TInput>();
 
+    /// <summary>Sets the content type the action's input is submitted as (HAL-FORMS <c>contentType</c>, e.g. <c>multipart/form-data</c>).</summary>
+    IAffordanceSpec<T> ContentType(string contentType);
+
     /// <summary>Sets a human-readable title.</summary>
     IAffordanceSpec<T> Title(string title);
 

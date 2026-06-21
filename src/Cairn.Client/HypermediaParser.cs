@@ -113,17 +113,43 @@ internal static class HypermediaParser
             {
                 fields.Add(new AffordanceField(name)
                 {
+                    Prompt = GetString(property, "prompt"),
                     Required = GetBool(property, "required") ?? false,
+                    ReadOnly = GetBool(property, "readOnly") ?? false,
                     Type = GetString(property, "type"),
+                    Placeholder = GetString(property, "placeholder"),
                     Regex = GetString(property, "regex"),
                     MaxLength = GetInt(property, "maxLength"),
                     Min = GetDouble(property, "min"),
                     Max = GetDouble(property, "max"),
+                    Options = ParseOptions(property),
                 });
             }
         }
 
         return fields;
+    }
+
+    private static IReadOnlyList<string> ParseOptions(JsonElement property)
+    {
+        if (!property.TryGetProperty("options", out var options) || options.ValueKind != JsonValueKind.Object
+            || !options.TryGetProperty("inline", out var inline) || inline.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var values = new List<string>();
+        foreach (var option in inline.EnumerateArray())
+        {
+            // An inline option is either a string or an object with a "value".
+            var value = option.ValueKind == JsonValueKind.String ? option.GetString() : GetString(option, "value");
+            if (IsUsable(value))
+            {
+                values.Add(value!);
+            }
+        }
+
+        return values;
     }
 
     // A malformed entry (null/whitespace relation or href) is skipped rather than throwing from the
