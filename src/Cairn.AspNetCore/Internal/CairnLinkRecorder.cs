@@ -14,6 +14,7 @@ namespace Cairn.AspNetCore.Internal;
 internal static class CairnLinkRecorder
 {
     private static readonly ConcurrentDictionary<Type, byte> WarnedHalActionTypes = new();
+    private static readonly ConcurrentDictionary<Type, byte> WarnedValueTypes = new();
 
     public static async ValueTask RecordAsync(HttpContext http, object? result)
     {
@@ -94,6 +95,7 @@ internal static class CairnLinkRecorder
 
         if (!linkSet.IsEmpty)
         {
+            WarnIfValueType(scope, value);
             CairnLinkStore.Record(http, value, ToPayload(linkSet));
         }
     }
@@ -193,6 +195,23 @@ internal static class CairnLinkRecorder
         }
     }
 
+    // Hypermedia is correlated by reference between the compute and emit stages; a boxed value type is a
+    // different instance at each stage, so its links can never be emitted. Warn once rather than fail silently.
+    private static void WarnIfValueType(RecordScope scope, object value)
+    {
+        if (!value.GetType().IsValueType || scope.Logger is not { } logger)
+        {
+            return;
+        }
+
+        if (WarnedValueTypes.TryAdd(value.GetType(), 0))
+        {
+            logger.LogWarning(
+                "Cairn: hypermedia cannot be attached to value type {ResourceType} (links are correlated by reference); use a class or record. No links will be emitted for it.",
+                value.GetType().Name);
+        }
+    }
+
     // Per-route .WithPageLinks() wins over the global PageLink, which wins over the default query-swap.
     private static Func<int, string> ResolvePageUrl(HttpContext http, CairnOptions options)
     {
@@ -236,19 +255,29 @@ internal static class CairnLinkRecorder
         return result;
     }
 
+    // A repeated relation overwrites: the last declaration wins. This keeps a duplicate rel from crashing
+    // serialization (the wire model is keyed by relation) rather than throwing on a configuration mistake.
     private static ResourceHypermedia ToPayload(LinkSet linkSet)
     {
-        IReadOnlyDictionary<string, HalLink>? links = linkSet.Links.Count == 0
-            ? null
-            : linkSet.Links.ToDictionary(
-                l => l.Relation.Value,
-                l => new HalLink(l.Href) { Title = l.Title, Templated = l.Templated ? true : null });
+        Dictionary<string, HalLink>? links = null;
+        if (linkSet.Links.Count > 0)
+        {
+            links = new Dictionary<string, HalLink>(StringComparer.Ordinal);
+            foreach (var link in linkSet.Links)
+            {
+                links[link.Relation.Value] = new HalLink(link.Href) { Title = link.Title, Templated = link.Templated ? true : null };
+            }
+        }
 
-        IReadOnlyDictionary<string, HalAction>? actions = linkSet.Affordances.Count == 0
-            ? null
-            : linkSet.Affordances.ToDictionary(
-                a => a.Name.Value,
-                a => new HalAction(a.Href, a.Method) { Title = a.Title, Input = a.Input });
+        Dictionary<string, HalAction>? actions = null;
+        if (linkSet.Affordances.Count > 0)
+        {
+            actions = new Dictionary<string, HalAction>(StringComparer.Ordinal);
+            foreach (var affordance in linkSet.Affordances)
+            {
+                actions[affordance.Name.Value] = new HalAction(affordance.Href, affordance.Method) { Title = affordance.Title, Input = affordance.Input };
+            }
+        }
 
         return new ResourceHypermedia(links, actions);
     }

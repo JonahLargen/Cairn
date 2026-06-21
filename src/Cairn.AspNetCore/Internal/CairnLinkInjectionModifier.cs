@@ -24,6 +24,16 @@ internal sealed class CairnLinkInjectionModifier(IHttpContextAccessor accessor)
 
     private void AddProperty(JsonTypeInfo typeInfo, string name, Func<ResourceHypermedia, HypermediaFormat, object?> selector)
     {
+        // Don't collide with a DTO that already declares a property of this JSON name — System.Text.Json
+        // rejects duplicate property names when the contract is finalized, which would fail serialization.
+        foreach (var existing in typeInfo.Properties)
+        {
+            if (string.Equals(existing.Name, name, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+
         var property = typeInfo.CreateJsonPropertyInfo(typeof(object), name);
 
         property.Get = instance =>
