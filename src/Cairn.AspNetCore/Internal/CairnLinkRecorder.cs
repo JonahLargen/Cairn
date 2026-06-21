@@ -124,7 +124,13 @@ internal static class CairnLinkRecorder
     {
         if (scope.Visited.Add(envelope))
         {
-            CairnLinkStore.Record(http, envelope, new ResourceHypermedia(buildLinks(), null));
+            var links = new Dictionary<string, HalLinkValue>(StringComparer.Ordinal);
+            foreach (var (relation, link) in buildLinks())
+            {
+                links[relation] = new HalLinkValue([link]);
+            }
+
+            CairnLinkStore.Record(http, envelope, new ResourceHypermedia(links, null));
         }
 
         foreach (var item in items)
@@ -307,17 +313,29 @@ internal static class CairnLinkRecorder
         return result;
     }
 
-    // A repeated relation overwrites: the last declaration wins. This keeps a duplicate rel from crashing
-    // serialization (the wire model is keyed by relation) rather than throwing on a configuration mistake.
+    // Links are grouped by relation: a single link for a rel emits as a HAL link object, several as a HAL link
+    // array. Insertion order (the declaration order) is preserved within a relation.
     private static ResourceHypermedia ToPayload(LinkSet linkSet)
     {
-        Dictionary<string, HalLink>? links = null;
+        Dictionary<string, HalLinkValue>? links = null;
         if (linkSet.Links.Count > 0)
         {
-            links = new Dictionary<string, HalLink>(StringComparer.Ordinal);
+            var grouped = new Dictionary<string, List<HalLink>>(StringComparer.Ordinal);
             foreach (var link in linkSet.Links)
             {
-                links[link.Relation.Value] = new HalLink(link.Href) { Title = link.Title, Templated = link.Templated ? true : null, Type = link.Type };
+                if (!grouped.TryGetValue(link.Relation.Value, out var list))
+                {
+                    list = [];
+                    grouped[link.Relation.Value] = list;
+                }
+
+                list.Add(new HalLink(link.Href) { Title = link.Title, Templated = link.Templated ? true : null, Type = link.Type });
+            }
+
+            links = new Dictionary<string, HalLinkValue>(StringComparer.Ordinal);
+            foreach (var (relation, list) in grouped)
+            {
+                links[relation] = new HalLinkValue(list);
             }
         }
 

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 
@@ -14,6 +15,37 @@ internal sealed record HalLink(string Href)
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Type { get; init; }
+}
+
+/// <summary>The value of a <c>_links</c> relation: a single link object, or a JSON array when several share a rel.</summary>
+[JsonConverter(typeof(HalLinkValueJsonConverter))]
+internal sealed class HalLinkValue(IReadOnlyList<HalLink> links)
+{
+    public IReadOnlyList<HalLink> Links { get; } = links;
+}
+
+/// <summary>Writes a single-element relation as a HAL link object and a multi-element relation as a HAL link array.</summary>
+internal sealed class HalLinkValueJsonConverter : JsonConverter<HalLinkValue>
+{
+    public override HalLinkValue Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => throw new NotSupportedException();
+
+    public override void Write(Utf8JsonWriter writer, HalLinkValue value, JsonSerializerOptions options)
+    {
+        if (value.Links.Count == 1)
+        {
+            JsonSerializer.Serialize(writer, value.Links[0], options);
+            return;
+        }
+
+        writer.WriteStartArray();
+        foreach (var link in value.Links)
+        {
+            JsonSerializer.Serialize(writer, link, options);
+        }
+
+        writer.WriteEndArray();
+    }
 }
 
 /// <summary>An affordance (action) in the emitted hypermedia payload.</summary>
@@ -59,7 +91,7 @@ internal sealed record HalFormsProperty(string Name)
 
 /// <summary>The serializable hypermedia computed for a single resource instance.</summary>
 internal sealed record ResourceHypermedia(
-    IReadOnlyDictionary<string, HalLink>? Links,
+    IReadOnlyDictionary<string, HalLinkValue>? Links,
     IReadOnlyDictionary<string, HalAction>? Actions);
 
 /// <summary>Per-request map from a serializable instance to its computed hypermedia (by reference).</summary>

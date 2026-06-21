@@ -5,8 +5,6 @@ internal abstract class HypermediaSpec<T>
 {
     public required LinkRelation Relation { get; init; }
 
-    public required Func<T, LinkContext, ValueTask<LinkTarget>> Target { get; init; }
-
     public Func<T, LinkContext, ValueTask<bool>>? Condition { get; set; }
 
     public string? Policy { get; set; }
@@ -16,9 +14,11 @@ internal abstract class HypermediaSpec<T>
     public string? TypeText { get; set; }
 }
 
-/// <summary>A recorded link declaration.</summary>
+/// <summary>A recorded link declaration; yields one or more targets for its relation.</summary>
 internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
 {
+    public required Func<T, LinkContext, ValueTask<IEnumerable<LinkTarget>>> Targets { get; init; }
+
     public ILinkSpec<T> Title(string title)
     {
         TitleText = title;
@@ -54,6 +54,8 @@ internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
 /// <summary>A recorded affordance declaration.</summary>
 internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
 {
+    public required Func<T, LinkContext, ValueTask<LinkTarget>> Target { get; init; }
+
     public string HttpMethod { get; private set; } = "POST";
 
     public Type? InputType { get; private set; }
@@ -99,9 +101,9 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
 /// <summary>Records link and affordance declarations from a <see cref="LinkConfig{T}"/>.</summary>
 internal sealed class LinkBuilder<T> : ILinkBuilder<T>
 {
-    public List<LinkSpec<T>> Links { get; } = [];
+    public List<LinkSpec<T>> LinkSpecs { get; } = [];
 
-    public List<AffordanceSpec<T>> Affordances { get; } = [];
+    public List<AffordanceSpec<T>> AffordanceSpecs { get; } = [];
 
     public ILinkSpec<T> Self(Func<T, LinkTarget> target) => Link(IanaLinkRelations.Self, target);
 
@@ -116,8 +118,22 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
     public ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkContext, ValueTask<LinkTarget>> target)
     {
         ArgumentNullException.ThrowIfNull(target);
-        var spec = new LinkSpec<T> { Relation = relation, Target = target };
-        Links.Add(spec);
+        var spec = new LinkSpec<T> { Relation = relation, Targets = async (resource, context) => new[] { await target(resource, context).ConfigureAwait(false) } };
+        LinkSpecs.Add(spec);
+        return spec;
+    }
+
+    public ILinkSpec<T> Links(LinkRelation relation, Func<T, IEnumerable<LinkTarget>> targets)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        return Links(relation, (resource, _) => new ValueTask<IEnumerable<LinkTarget>>(targets(resource)));
+    }
+
+    public ILinkSpec<T> Links(LinkRelation relation, Func<T, LinkContext, ValueTask<IEnumerable<LinkTarget>>> targets)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        var spec = new LinkSpec<T> { Relation = relation, Targets = targets };
+        LinkSpecs.Add(spec);
         return spec;
     }
 
@@ -131,7 +147,7 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
     {
         ArgumentNullException.ThrowIfNull(target);
         var spec = new AffordanceSpec<T> { Relation = name, Target = target };
-        Affordances.Add(spec);
+        AffordanceSpecs.Add(spec);
         return spec;
     }
 }

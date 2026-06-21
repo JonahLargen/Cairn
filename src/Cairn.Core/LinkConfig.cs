@@ -24,6 +24,12 @@ public interface ILinkBuilder<T>
     /// <summary>Adds a link with the given relation, computing its target with access to the request's services.</summary>
     ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkContext, ValueTask<LinkTarget>> target);
 
+    /// <summary>Adds multiple links sharing one relation, emitted as a HAL link array (e.g. one <c>item</c> per child).</summary>
+    ILinkSpec<T> Links(LinkRelation relation, Func<T, IEnumerable<LinkTarget>> targets);
+
+    /// <summary>Adds multiple links sharing one relation, computing their targets with access to the request's services.</summary>
+    ILinkSpec<T> Links(LinkRelation relation, Func<T, LinkContext, ValueTask<IEnumerable<LinkTarget>>> targets);
+
     /// <summary>Adds an affordance (available action) with the given name.</summary>
     IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkTarget> target);
 
