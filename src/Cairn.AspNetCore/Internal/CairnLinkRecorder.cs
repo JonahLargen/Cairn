@@ -50,10 +50,11 @@ internal static class CairnLinkRecorder
 
         await RecordAsync(http, value, scope);
 
-        // Only relabel the response media type when we actually injected hypermedia — i.e. the body was a
-        // resource representation (a configured type). Problem documents and uncovered bodies, whatever their
-        // status code, keep their original content type per RFC 9457.
-        if (CairnLinkStore.HasRecorded(http))
+        // Only relabel the response media type when the top-level value itself is a decorated resource object
+        // (a configured single resource, or a paged/cursor envelope). A problem document or uncovered body keeps
+        // its content type per RFC 9457; and a bare collection serializes as a JSON array, which is not a HAL
+        // document even though its elements carry _links — so it stays application/json.
+        if (CairnLinkStore.Lookup(http, value) is not null)
         {
             ApplyContentType(http, format);
         }
@@ -149,24 +150,51 @@ internal static class CairnLinkRecorder
         return options.DefaultFormat;
     }
 
+    // Pick the highest-quality acceptable hypermedia type, honoring q-values (RFC 9110): a q=0 excludes a type,
+    // and a higher-q plain application/json/wildcard wins over hal/hal-forms. Returns null to use the default.
     private static HypermediaFormat? NegotiateFromAccept(HttpRequest request)
     {
-        foreach (var accept in request.Headers.Accept)
+        if (request.Headers.Accept.Count == 0)
         {
-            if (accept is null)
+            return null;
+        }
+
+        var winner = HypermediaFormat.Default;
+        var bestQuality = 0.0;
+
+        foreach (var media in MediaTypeHeaderValue.ParseList(request.Headers.Accept))
+        {
+            var quality = media.Quality ?? 1.0;
+            if (quality <= 0.0 || FormatFor(media.MediaType) is not { } format || quality <= bestQuality)
             {
                 continue;
             }
 
-            if (accept.Contains("application/prs.hal-forms+json", StringComparison.OrdinalIgnoreCase))
-            {
-                return HypermediaFormat.HalForms;
-            }
+            bestQuality = quality;
+            winner = format;
+        }
 
-            if (accept.Contains("application/hal+json", StringComparison.OrdinalIgnoreCase))
-            {
-                return HypermediaFormat.Hal;
-            }
+        return winner == HypermediaFormat.Default ? null : winner;
+    }
+
+    private static HypermediaFormat? FormatFor(Microsoft.Extensions.Primitives.StringSegment mediaType)
+    {
+        if (mediaType.Equals("application/prs.hal-forms+json", StringComparison.OrdinalIgnoreCase))
+        {
+            return HypermediaFormat.HalForms;
+        }
+
+        if (mediaType.Equals("application/hal+json", StringComparison.OrdinalIgnoreCase))
+        {
+            return HypermediaFormat.Hal;
+        }
+
+        if (mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+            || mediaType.Equals("application/*+json", StringComparison.OrdinalIgnoreCase)
+            || mediaType.Equals("application/*", StringComparison.OrdinalIgnoreCase)
+            || mediaType.Equals("*/*", StringComparison.OrdinalIgnoreCase))
+        {
+            return HypermediaFormat.Default;
         }
 
         return null;
