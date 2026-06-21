@@ -8,26 +8,32 @@ public sealed class CollectionResource<TItem>
 {
     private readonly CairnClient _client;
 
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<Link>> _linksByRelation;
+
     internal CollectionResource(
         CairnClient client,
         IReadOnlyList<Resource<TItem>> items,
-        IReadOnlyDictionary<string, Link> links,
+        IReadOnlyDictionary<string, IReadOnlyList<Link>> links,
         IReadOnlyDictionary<string, Affordance> affordances)
     {
         _client = client;
+        _linksByRelation = links;
         Items = items;
-        Links = links;
+        Links = LinkMap.Flatten(links);
         Affordances = affordances;
     }
 
     /// <summary>The items, each with its own value, links, and affordances.</summary>
     public IReadOnlyList<Resource<TItem>> Items { get; }
 
-    /// <summary>The collection's links (e.g. <c>next</c>/<c>prev</c>), keyed by relation.</summary>
+    /// <summary>The collection's links (e.g. <c>next</c>/<c>prev</c>), keyed by relation. Use <see cref="LinksFor"/> for a relation with several links.</summary>
     public IReadOnlyDictionary<string, Link> Links { get; }
 
     /// <summary>The collection's affordances, keyed by name.</summary>
     public IReadOnlyDictionary<string, Affordance> Affordances { get; }
+
+    /// <summary>All links sharing the given relation (a HAL link array exposes more than one), or empty if none.</summary>
+    public IReadOnlyList<Link> LinksFor(string relation) => _linksByRelation.TryGetValue(relation, out var list) ? list : [];
 
     /// <summary>Whether the collection exposes a link with the given relation.</summary>
     public bool HasLink(string relation) => Links.ContainsKey(relation);
