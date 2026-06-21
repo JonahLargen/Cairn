@@ -50,6 +50,27 @@ public sealed class CairnClient
         return await ReadResultAsync<T>(response, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Gets a collection from <paramref name="url"/>, with each item as a navigable resource. <paramref name="itemsProperty"/>
+    /// names the array property on an envelope (default <c>items</c>); a bare JSON array is read directly. Does not throw on an HTTP error status.
+    /// </summary>
+    public async Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty = "items", CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        return await ReadCollectionResultAsync<TItem>(response, itemsProperty, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<CollectionResult<TItem>> FollowCollectionAsync<TItem>(Link link, string itemsProperty, CancellationToken cancellationToken)
+    {
+        if (link.Templated)
+        {
+            throw new NotSupportedException($"The '{link.Relation}' link is a URI template; expanding templated links is not supported.");
+        }
+
+        using var response = await _http.GetAsync(Authorize(link.Href), cancellationToken).ConfigureAwait(false);
+        return await ReadCollectionResultAsync<TItem>(response, itemsProperty, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Invokes an affordance, optionally with a request body. Does not throw on an HTTP error status.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="affordance"/> is null.</exception>
     /// <exception cref="InvalidOperationException">The affordance target is rejected by the configured link policy.</exception>
@@ -107,6 +128,42 @@ public sealed class CairnClient
 
         return ClientResult<T>.Failure(status, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
     }
+
+    private async Task<CollectionResult<TItem>> ReadCollectionResultAsync<TItem>(HttpResponseMessage response, string itemsProperty, CancellationToken cancellationToken)
+    {
+        var status = (int)response.StatusCode;
+        if (!response.IsSuccessStatusCode)
+        {
+            return CollectionResult<TItem>.Failure(status, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
+        }
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(bytes);
+        var root = document.RootElement;
+
+        // A bare array carries no collection-level links; an envelope's links live on its root object.
+        var (links, affordances) = root.ValueKind == JsonValueKind.Object
+            ? HypermediaParser.Parse(root)
+            : (Empty<Link>(), Empty<Affordance>());
+
+        var elements = root.ValueKind == JsonValueKind.Array ? root
+            : root.ValueKind == JsonValueKind.Object && root.TryGetProperty(itemsProperty, out var array) && array.ValueKind == JsonValueKind.Array ? array
+            : default;
+
+        var items = new List<Resource<TItem>>();
+        if (elements.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var element in elements.EnumerateArray())
+            {
+                var (itemLinks, itemAffordances) = HypermediaParser.Parse(element);
+                items.Add(new Resource<TItem>(this, element.Deserialize<TItem>(_json), itemLinks, itemAffordances));
+            }
+        }
+
+        return CollectionResult<TItem>.Success(status, new CollectionResource<TItem>(this, items, links, affordances));
+    }
+
+    private static IReadOnlyDictionary<string, TValue> Empty<TValue>() => new Dictionary<string, TValue>();
 
     // Parse the body once: a single JsonDocument binds the typed value and the hypermedia.
     private async Task<Resource<T>> ReadAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
