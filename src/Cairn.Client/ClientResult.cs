@@ -28,6 +28,9 @@ public sealed class ClientResult<T>
     /// <summary>The resource and its hypermedia, when <see cref="IsSuccess"/>.</summary>
     public Resource<T>? Resource { get; }
 
+    /// <summary>The resource's deserialized value on success, otherwise <see langword="default"/>. A shortcut for <c>Resource?.Value</c>.</summary>
+    public T? Value => Resource is { } resource ? resource.Value : default;
+
     /// <summary>The parsed problem detail, when not <see cref="IsSuccess"/>.</summary>
     public Problem? Problem { get; }
 
