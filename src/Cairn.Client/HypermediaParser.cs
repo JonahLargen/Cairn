@@ -5,7 +5,7 @@ namespace Cairn.Client;
 /// <summary>Parses Cairn hypermedia (<c>_links</c>, <c>_actions</c>, HAL-FORMS <c>_templates</c>) from a resource body.</summary>
 internal static class HypermediaParser
 {
-    public static (IReadOnlyDictionary<string, IReadOnlyList<Link>> Links, IReadOnlyDictionary<string, Affordance> Affordances, IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> Fields) Parse(JsonElement root)
+    public static (IReadOnlyDictionary<string, IReadOnlyList<Link>> Links, IReadOnlyDictionary<string, Affordance> Affordances, IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> Fields, JsonElement Embedded) Parse(JsonElement root)
     {
         var links = new Dictionary<string, IReadOnlyList<Link>>(StringComparer.Ordinal);
         var affordances = new Dictionary<string, Affordance>(StringComparer.Ordinal);
@@ -13,7 +13,7 @@ internal static class HypermediaParser
 
         if (root.ValueKind != JsonValueKind.Object)
         {
-            return (links, affordances, fields);
+            return (links, affordances, fields, default);
         }
 
         if (root.TryGetProperty("_links", out var linksElement) && linksElement.ValueKind == JsonValueKind.Object)
@@ -63,7 +63,12 @@ internal static class HypermediaParser
             }
         }
 
-        return (links, affordances, fields);
+        // Clone so the embedded subtree survives the source JsonDocument being disposed; resolved on demand.
+        var embedded = root.TryGetProperty("_embedded", out var embeddedElement) && embeddedElement.ValueKind == JsonValueKind.Object
+            ? embeddedElement.Clone()
+            : default;
+
+        return (links, affordances, fields, embedded);
     }
 
     private static IReadOnlyList<Link> ParseLinks(string relation, JsonElement value)
