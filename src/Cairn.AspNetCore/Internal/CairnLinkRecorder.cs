@@ -348,7 +348,16 @@ internal static class CairnLinkRecorder
                     grouped[link.Relation.Value] = list;
                 }
 
-                list.Add(new HalLink(link.Href) { Title = link.Title, Templated = link.Templated ? true : null, Type = link.Type });
+                list.Add(new HalLink(link.Href)
+                {
+                    Name = link.Name,
+                    Title = link.Title,
+                    Templated = link.Templated ? true : null,
+                    Type = link.Type,
+                    Deprecation = link.Deprecation,
+                    Hreflang = link.Hreflang,
+                    Profile = link.Profile,
+                });
             }
 
             links = new Dictionary<string, HalLinkValue>(StringComparer.Ordinal);

@@ -19,6 +19,14 @@ internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
 {
     public required Func<T, LinkContext, ValueTask<IEnumerable<LinkTarget>>> Targets { get; init; }
 
+    public string? NameText { get; private set; }
+
+    public string? DeprecationText { get; private set; }
+
+    public string? HreflangText { get; private set; }
+
+    public string? ProfileText { get; private set; }
+
     public ILinkSpec<T> Title(string title)
     {
         TitleText = title;
@@ -28,6 +36,30 @@ internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
     public ILinkSpec<T> Type(string mediaType)
     {
         TypeText = mediaType;
+        return this;
+    }
+
+    public ILinkSpec<T> Name(string name)
+    {
+        NameText = name;
+        return this;
+    }
+
+    public ILinkSpec<T> Deprecated(string url)
+    {
+        DeprecationText = url;
+        return this;
+    }
+
+    public ILinkSpec<T> Hreflang(string language)
+    {
+        HreflangText = language;
+        return this;
+    }
+
+    public ILinkSpec<T> Profile(string profileUri)
+    {
+        ProfileText = profileUri;
         return this;
     }
 
