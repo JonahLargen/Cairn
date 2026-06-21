@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Cairn.SourceGenerators;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -47,7 +48,64 @@ class Program
         Assert.Contains("public static global::Cairn.LinkTarget GetUserPost(global::System.Guid key, string slug)", generated);
     }
 
-    private static string Run(string source)
+    [Fact]
+    public void Maps_optional_constrained_parameter_to_its_type()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/orders/{id:int?}"", handler).WithName(""GetOptionalOrder"");
+    }
+}";
+
+        var generated = Run(source);
+
+        Assert.Contains("public static global::Cairn.LinkTarget GetOptionalOrder(int id)", generated);
+    }
+
+    [Fact]
+    public void Includes_map_group_prefix_parameters()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGroup(""/users/{userId:int}"").MapGet(""/{id:int}"", handler).WithName(""GetUserOrder"");
+    }
+}";
+
+        var generated = Run(source);
+
+        Assert.Contains("public static global::Cairn.LinkTarget GetUserOrder(int userId, int id)", generated);
+        Assert.Contains(@"Route(""GetUserOrder"", new { userId, id })", generated);
+    }
+
+    [Fact]
+    public void Reports_diagnostic_when_two_route_names_reduce_to_the_same_method()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/a"", handler).WithName(""GetUser"");
+        app.MapGet(""/b"", handler).WithName(""get-user"");
+    }
+}";
+
+        var diagnostics = RunDiagnostics(source);
+
+        Assert.Contains(diagnostics, d => d.Id == "CAIRN002");
+    }
+
+    private static string Run(string source) => RunDriver(source).GeneratedTrees.Single().ToString();
+
+    private static ImmutableArray<Diagnostic> RunDiagnostics(string source) => RunDriver(source).Diagnostics;
+
+    private static GeneratorDriverRunResult RunDriver(string source)
     {
         var compilation = CSharpCompilation.Create(
             "Test",
@@ -58,6 +116,6 @@ class Program
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new RoutesGenerator().AsSourceGenerator());
         driver = driver.RunGenerators(compilation);
 
-        return driver.GetRunResult().GeneratedTrees.Single().ToString();
+        return driver.GetRunResult();
     }
 }

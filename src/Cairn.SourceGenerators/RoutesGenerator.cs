@@ -12,6 +12,15 @@ namespace Cairn.SourceGenerators;
 [Generator(LanguageNames.CSharp)]
 public sealed class RoutesGenerator : IIncrementalGenerator
 {
+    private static readonly DiagnosticDescriptor RouteNameCollision = new(
+        id: "CAIRN002",
+        title: "Route name collides in the generated catalog",
+        messageFormat: "Route name '{0}' was not added to the Routes catalog because it maps to the same method name '{2}' as route '{1}'",
+        category: "Cairn",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Two route names that reduce to the same C# method name cannot both appear in the Routes catalog; rename one.");
+
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -41,17 +50,55 @@ public sealed class RoutesGenerator : IIncrementalGenerator
 
     private static string? FindRouteTemplate(ExpressionSyntax expression)
     {
+        string? endpointTemplate = null;
+        var prefixes = new List<string>();
+
+        // Walk the fluent chain outward from .WithName toward the app, collecting the endpoint's own template
+        // plus any inline MapGroup("/prefix") prefixes so group route parameters are included. (Group prefixes
+        // bound to a local variable, e.g. `var g = app.MapGroup(...); g.MapGet(...)`, are not visible here.)
         while (expression is InvocationExpressionSyntax invocation && invocation.Expression is MemberAccessExpressionSyntax member)
         {
-            if (member.Name.Identifier.ValueText is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
+            var method = member.Name.Identifier.ValueText;
+            if (endpointTemplate is null && method is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
             {
-                return FirstStringLiteral(invocation);
+                endpointTemplate = FirstStringLiteral(invocation);
+            }
+            else if (method == "MapGroup" && FirstStringLiteral(invocation) is { } prefix)
+            {
+                prefixes.Add(prefix);
             }
 
             expression = member.Expression;
         }
 
-        return null;
+        if (endpointTemplate is null)
+        {
+            return null;
+        }
+
+        if (prefixes.Count == 0)
+        {
+            return endpointTemplate;
+        }
+
+        // prefixes were collected innermost-first; emit outermost-first, then the endpoint template.
+        var builder = new StringBuilder();
+        for (var i = prefixes.Count - 1; i >= 0; i--)
+        {
+            AppendSegment(builder, prefixes[i]);
+        }
+
+        AppendSegment(builder, endpointTemplate);
+        return builder.ToString();
+    }
+
+    private static void AppendSegment(StringBuilder builder, string segment)
+    {
+        var trimmed = segment.Trim('/');
+        if (trimmed.Length > 0)
+        {
+            builder.Append('/').Append(trimmed);
+        }
     }
 
     private static string? FirstStringLiteral(InvocationExpressionSyntax invocation)
@@ -83,6 +130,14 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             }
 
             var content = template.Substring(index + 1, end - index - 1).TrimStart('*');
+
+            // Strip an inline default value: "{id=5}" / "{id:int=5}".
+            var equals = content.IndexOf('=');
+            if (equals >= 0)
+            {
+                content = content.Substring(0, equals);
+            }
+
             var colon = content.IndexOf(':');
             string name;
             var type = "string";
@@ -90,7 +145,8 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             if (colon >= 0)
             {
                 name = content.Substring(0, colon);
-                type = MapConstraint(content.Substring(colon + 1).Split(':')[0].Split('(')[0]);
+                // TrimEnd('?') so an optional constraint like "{id:int?}" maps to int, not the default string.
+                type = MapConstraint(content.Substring(colon + 1).Split(':')[0].Split('(')[0].TrimEnd('?'));
             }
             else
             {
@@ -139,14 +195,27 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         builder.AppendLine("    public static partial class Routes");
         builder.AppendLine("    {");
 
-        var emitted = new HashSet<string>();
+        var emitted = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var route in routes)
         {
             var method = Sanitize(route.Name);
-            if (method.Length == 0 || !emitted.Add(method))
+            if (method.Length == 0)
             {
                 continue;
             }
+
+            if (emitted.TryGetValue(method, out var winner))
+            {
+                // A distinct route name that reduces to an already-emitted method is dropped; warn so the loss is visible.
+                if (!string.Equals(winner, route.Name, StringComparison.Ordinal))
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(RouteNameCollision, Location.None, route.Name, winner, method));
+                }
+
+                continue;
+            }
+
+            emitted[method] = route.Name;
 
             var parameters = Decode(route.Parameters);
             var signature = string.Join(", ", parameters.Select(static p => p.Type + " " + Escape(p.Name)));
