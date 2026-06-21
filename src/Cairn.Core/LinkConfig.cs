@@ -16,12 +16,18 @@ public interface ILinkBuilder<T>
     ILinkSpec<T> Self(Func<T, LinkTarget> target);
 
     /// <summary>Adds the <c>self</c> link, computing its target with access to the request's services.</summary>
+    ILinkSpec<T> Self(Func<T, LinkContext, LinkTarget> target);
+
+    /// <summary>Adds the <c>self</c> link, computing its target asynchronously with access to the request's services.</summary>
     ILinkSpec<T> Self(Func<T, LinkContext, ValueTask<LinkTarget>> target);
 
     /// <summary>Adds a link with the given relation.</summary>
     ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkTarget> target);
 
     /// <summary>Adds a link with the given relation, computing its target with access to the request's services.</summary>
+    ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkContext, LinkTarget> target);
+
+    /// <summary>Adds a link with the given relation, computing its target asynchronously with access to the request's services.</summary>
     ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkContext, ValueTask<LinkTarget>> target);
 
     /// <summary>Adds multiple links sharing one relation, emitted as a HAL link array (e.g. one <c>item</c> per child).</summary>
@@ -34,6 +40,9 @@ public interface ILinkBuilder<T>
     IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkTarget> target);
 
     /// <summary>Adds an affordance with the given name, computing its target with access to the request's services.</summary>
+    IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkContext, LinkTarget> target);
+
+    /// <summary>Adds an affordance with the given name, computing its target asynchronously with access to the request's services.</summary>
     IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkContext, ValueTask<LinkTarget>> target);
 
     /// <summary>Embeds a related resource under the given relation in HAL <c>_embedded</c>, decorated with its own links. A null result embeds nothing.</summary>
@@ -70,11 +79,17 @@ public interface ILinkSpec<T>
     /// <summary>Includes the link only when the predicate holds for the resource.</summary>
     ILinkSpec<T> When(Func<T, bool> condition);
 
+    /// <summary>Includes the link only when the predicate holds, with access to the request's services.</summary>
+    ILinkSpec<T> When(Func<T, LinkContext, bool> condition);
+
     /// <summary>Includes the link only when the async predicate holds, with access to the request's services.</summary>
     ILinkSpec<T> When(Func<T, LinkContext, ValueTask<bool>> condition);
 
     /// <summary>Includes the link only when the caller satisfies the named authorization policy.</summary>
     ILinkSpec<T> RequireAuthorization(string policy);
+
+    /// <summary>Includes the link only when the caller satisfies the default authorization policy (an authenticated user, by default).</summary>
+    ILinkSpec<T> RequireAuthorization();
 }
 
 /// <summary>Configures a single affordance.</summary>
@@ -83,6 +98,21 @@ public interface IAffordanceSpec<T>
 {
     /// <summary>Sets the HTTP method used to invoke the action (default <c>POST</c>).</summary>
     IAffordanceSpec<T> Method(string httpMethod);
+
+    /// <summary>Sets the method to <c>GET</c>.</summary>
+    IAffordanceSpec<T> Get();
+
+    /// <summary>Sets the method to <c>POST</c>.</summary>
+    IAffordanceSpec<T> Post();
+
+    /// <summary>Sets the method to <c>PUT</c>.</summary>
+    IAffordanceSpec<T> Put();
+
+    /// <summary>Sets the method to <c>PATCH</c>.</summary>
+    IAffordanceSpec<T> Patch();
+
+    /// <summary>Sets the method to <c>DELETE</c>.</summary>
+    IAffordanceSpec<T> Delete();
 
     /// <summary>Declares the input type the action accepts, used to describe its form fields (e.g. HAL-FORMS).</summary>
     /// <typeparam name="TInput">The request/body type the action accepts.</typeparam>
@@ -97,9 +127,15 @@ public interface IAffordanceSpec<T>
     /// <summary>Includes the affordance only when the predicate holds for the resource.</summary>
     IAffordanceSpec<T> When(Func<T, bool> condition);
 
+    /// <summary>Includes the affordance only when the predicate holds, with access to the request's services.</summary>
+    IAffordanceSpec<T> When(Func<T, LinkContext, bool> condition);
+
     /// <summary>Includes the affordance only when the async predicate holds, with access to the request's services.</summary>
     IAffordanceSpec<T> When(Func<T, LinkContext, ValueTask<bool>> condition);
 
     /// <summary>Includes the affordance only when the caller satisfies the named authorization policy.</summary>
     IAffordanceSpec<T> RequireAuthorization(string policy);
+
+    /// <summary>Includes the affordance only when the caller satisfies the default authorization policy (an authenticated user, by default).</summary>
+    IAffordanceSpec<T> RequireAuthorization();
 }

@@ -144,6 +144,41 @@ public class LinkEngineTests
     }
 
     [Fact]
+    public async Task Verb_helper_and_sync_service_aware_overloads_work()
+    {
+        var engine = EngineFor(new ErgoLinks());
+
+        var set = await engine.BuildAsync(new TestOrder(3, "Pending"), Context());
+
+        Assert.Contains(set.Links, l => l.Relation.Value == "self" && l.Href == "/orders/3");
+        Assert.Equal("DELETE", Assert.Single(set.Affordances).Method);
+    }
+
+    [Fact]
+    public async Task Strict_mode_message_names_the_route()
+    {
+        var engine = EngineFor(new RouteSelfLink());
+        var context = Context(resolver: new FakeUrlResolver(_ => null), mode: LinkResolutionMode.Strict);
+
+        var exception = await Assert.ThrowsAsync<LinkResolutionException>(
+            async () => await engine.BuildAsync(new TestOrder(1, "Pending"), context));
+
+        Assert.Contains("route 'order'", exception.Message);
+    }
+
+    [Fact]
+    public async Task Parameterless_require_authorization_uses_the_default_policy_sentinel()
+    {
+        var authorizer = new FakeAuthorizer(false);
+        var engine = EngineFor(new DefaultAuthLinks());
+
+        var set = await engine.BuildAsync(new TestOrder(1, "Pending"), Context(authorizer: authorizer));
+
+        Assert.Empty(set.Affordances);
+        Assert.Contains(string.Empty, authorizer.AskedPolicies);
+    }
+
+    [Fact]
     public void Non_generic_add_registers_by_runtime_resource_type()
     {
         var registry = new LinkConfigRegistry();
@@ -189,6 +224,21 @@ public class LinkEngineTests
                     ctx.CancellationToken.ThrowIfCancellationRequested();
                     return new ValueTask<bool>(true);
                 });
+    }
+
+    private sealed class ErgoLinks : LinkConfig<TestOrder>
+    {
+        public override void Configure(ILinkBuilder<TestOrder> b)
+        {
+            b.Self((o, _) => LinkTarget.Uri($"/orders/{o.Id}"));
+            b.Affordance("remove", (o, _) => LinkTarget.Uri($"/orders/{o.Id}")).Delete();
+        }
+    }
+
+    private sealed class DefaultAuthLinks : LinkConfig<TestOrder>
+    {
+        public override void Configure(ILinkBuilder<TestOrder> b)
+            => b.Affordance("admin", o => LinkTarget.Uri($"/x/{o.Id}")).RequireAuthorization();
     }
 
     private sealed class DefaultMethodAffordance : LinkConfig<TestOrder>
