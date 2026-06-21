@@ -131,6 +131,18 @@ public class LinkEngineTests
         Assert.Contains(set.Links, l => l.Relation.Value == "self");
     }
 
+    [Fact]
+    public async Task Async_condition_observes_a_cancelled_token()
+    {
+        var engine = EngineFor(new CancelObservingLinks());
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var context = new LinkContext(new FakeUrlResolver(), new FakeAuthorizer(true), LinkResolutionMode.Lax, services: null, cancellationToken: cts.Token);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await engine.BuildAsync(new TestOrder(1, "Pending"), context, cts.Token));
+    }
+
     private static LinkEngine EngineFor<T>(LinkConfig<T> config) => new(new LinkConfigRegistry().Add(config));
 
     private static LinkContext Context(
@@ -152,6 +164,17 @@ public class LinkEngineTests
                 .When(o => o.Status == "Pending")
                 .RequireAuthorization("CanCancel");
         }
+    }
+
+    private sealed class CancelObservingLinks : LinkConfig<TestOrder>
+    {
+        public override void Configure(ILinkBuilder<TestOrder> b)
+            => b.Self(o => LinkTarget.Uri($"/orders/{o.Id}"))
+                .When((o, ctx) =>
+                {
+                    ctx.CancellationToken.ThrowIfCancellationRequested();
+                    return new ValueTask<bool>(true);
+                });
     }
 
     private sealed class DefaultMethodAffordance : LinkConfig<TestOrder>
