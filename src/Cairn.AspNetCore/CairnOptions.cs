@@ -40,6 +40,13 @@ public sealed class CairnOptions
     /// </summary>
     public Func<HttpRequest, string, string>? CursorLink { get; set; }
 
+    /// <summary>
+    /// Post-processes each route-resolved link and affordance URL (the current request and the generated URL).
+    /// Use it to carry request state onto links — e.g. re-apply a query-string API version so links stay on the
+    /// current version. Pagination links already preserve other query parameters, so they aren't passed here.
+    /// </summary>
+    public Func<HttpContext, string, string>? TransformUrl { get; set; }
+
     /// <summary>Registers the link configuration for resources of type <typeparamref name="T"/>.</summary>
     public CairnOptions AddLinks<T>(LinkConfig<T> config)
     {

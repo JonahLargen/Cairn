@@ -56,6 +56,19 @@ public class OrdersController(IOrderRepo repo) : ControllerBase
 }
 ```
 
+## API versioning
+
+Cairn composes with `Asp.Versioning`. Because links resolve through the standard `LinkGenerator`, **URL-segment versioning works automatically** — the current request's version flows into links (a `/v1` request links to `/v1/...`). For **query-string** versioning, carry the version onto links with `TransformUrl`:
+
+```csharp
+builder.Services.AddCairn(o => o.TransformUrl = (http, url) =>
+    http.Request.Query.TryGetValue("api-version", out var v) && v.Count > 0
+        ? QueryHelpers.AddQueryString(url, "api-version", v.ToString())
+        : url);
+```
+
+Header and media-type versioning keep the version out of the URL by design, so links stay version-neutral and the client re-applies its version.
+
 ## Packages
 
 | Package | Purpose |
