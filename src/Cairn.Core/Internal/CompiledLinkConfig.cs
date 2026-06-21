@@ -22,32 +22,35 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         ArgumentNullException.ThrowIfNull(context);
         var typed = (T)resource;
 
-        var links = new List<Link>(_builder.Links.Count);
-        foreach (var spec in _builder.Links)
+        var links = new List<Link>(_builder.LinkSpecs.Count);
+        foreach (var spec in _builder.LinkSpecs)
         {
             if (!await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false))
             {
                 continue;
             }
 
-            var (target, href) = await ResolveAsync(spec, typed, context).ConfigureAwait(false);
-            if (href is not null)
+            var targets = await spec.Targets(typed, context).ConfigureAwait(false) ?? [];
+            foreach (var target in targets)
             {
-                var templated = target is ExplicitLinkTarget { Templated: true };
-                links.Add(new Link(spec.Relation, href, templated) { Title = spec.TitleText, Type = spec.TypeText });
+                if (ResolveHref(spec.Relation, target, context) is { } href)
+                {
+                    var templated = target is ExplicitLinkTarget { Templated: true };
+                    links.Add(new Link(spec.Relation, href, templated) { Title = spec.TitleText, Type = spec.TypeText });
+                }
             }
         }
 
-        var affordances = new List<Affordance>(_builder.Affordances.Count);
-        foreach (var spec in _builder.Affordances)
+        var affordances = new List<Affordance>(_builder.AffordanceSpecs.Count);
+        foreach (var spec in _builder.AffordanceSpecs)
         {
             if (!await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false))
             {
                 continue;
             }
 
-            var (_, href) = await ResolveAsync(spec, typed, context).ConfigureAwait(false);
-            if (href is not null)
+            var target = await spec.Target(typed, context).ConfigureAwait(false);
+            if (ResolveHref(spec.Relation, target, context) is { } href)
             {
                 affordances.Add(new Affordance(spec.Relation, href, spec.HttpMethod) { Title = spec.TitleText, Input = spec.InputType });
             }
@@ -71,9 +74,8 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         return true;
     }
 
-    private static async ValueTask<(LinkTarget Target, string? Href)> ResolveAsync(HypermediaSpec<T> spec, T resource, LinkContext context)
+    private static string? ResolveHref(LinkRelation relation, LinkTarget target, LinkContext context)
     {
-        var target = await spec.Target(resource, context).ConfigureAwait(false);
         var href = context.UrlResolver.Resolve(target);
 
         // Treat null-or-whitespace as unresolved: Strict throws a clear LinkResolutionException; Lax drops the
@@ -83,12 +85,12 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         {
             if (context.Mode == LinkResolutionMode.Strict)
             {
-                throw new LinkResolutionException($"Could not resolve a URL for relation '{spec.Relation}'.");
+                throw new LinkResolutionException($"Could not resolve a URL for relation '{relation}'.");
             }
 
-            return (target, null);
+            return null;
         }
 
-        return (target, href);
+        return href;
     }
 }

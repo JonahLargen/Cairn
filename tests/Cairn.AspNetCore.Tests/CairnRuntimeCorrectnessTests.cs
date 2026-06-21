@@ -13,7 +13,7 @@ namespace Cairn.AspNetCore.Tests;
 public class CairnRuntimeCorrectnessTests
 {
     [Fact]
-    public async Task Duplicate_link_relation_does_not_crash_and_last_wins()
+    public async Task Duplicate_link_relation_emits_a_hal_link_array()
     {
         await using var app = await StartAsync(
             services => services.AddCairn(o => o.AddLinks(new DuplicateLinkConfig())),
@@ -22,7 +22,12 @@ public class CairnRuntimeCorrectnessTests
 
         var root = await GetJsonAsync(app, "/dup/5");
 
-        Assert.EndsWith("/second/5", root.GetProperty("_links").GetProperty("alternate").GetProperty("href").GetString());
+        // Two links sharing a relation serialize as a HAL link array, in declaration order.
+        var alternate = root.GetProperty("_links").GetProperty("alternate");
+        Assert.Equal(JsonValueKind.Array, alternate.ValueKind);
+        Assert.Equal(2, alternate.GetArrayLength());
+        Assert.EndsWith("/first/5", alternate[0].GetProperty("href").GetString());
+        Assert.EndsWith("/second/5", alternate[1].GetProperty("href").GetString());
     }
 
     [Fact]
