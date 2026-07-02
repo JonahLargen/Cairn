@@ -31,9 +31,11 @@
   analyzer, matching the generator, so referencing such names no longer produces a false warning.
   CAIRN001 also now binds `LinkTarget.Route(...)` receivers semantically: look-alike `LinkTarget`
   types in other namespaces are ignored, and `using static Cairn.LinkTarget` call sites are checked.
-- Registering two affordances that both claim the reserved `default` HAL-FORMS template key
-  (two `AsDefault()` calls, or `AsDefault()` plus an affordance named `default`) now throws at
-  registration time instead of silently emitting last-wins.
+- Registering two affordances that both unconditionally claim the reserved `default` HAL-FORMS
+  template key (two `AsDefault()` calls, or `AsDefault()` plus an affordance named `default`) now
+  throws at registration time instead of silently emitting last-wins. Claimants gated with `When()`
+  or `RequireAuthorization()` are exempt, so mutually exclusive defaults ("approve is the default
+  when pending, reopen when closed") register fine.
 - The generated route catalog maps `min`/`max`/`range` constraints to `long` (previously `string`),
   and optional (`{id:int?}`) or defaulted (`{id=5}`) route parameters generate nullable parameters
   with a `null` default that are omitted from the route values when not supplied.
@@ -46,6 +48,15 @@
   longer splits surrogate pairs into replacement characters.
 - Warn-once diagnostics are now scoped per host container instead of process-wide, so side-by-side
   hosts (e.g. `WebApplicationFactory` test suites) each get their own diagnostics.
+- The OpenAPI/Swagger documents now describe envelope types registered via
+  `AddPaging`/`AddCursorPaging` — their negotiable HAL media types and pagination `_links` —
+  matching how the wire decorates them. The registrations reach the document generators through the
+  new Core-level `IPaginationEnvelopeProvider` service `AddCairn` registers.
+- The generated route catalog no longer fails to compile (CS0136) when a route with an optional
+  parameter also has a parameter named `values`: the generated route-values local uses a
+  collision-proof name.
+- `WithDeprecation(...)` without `AddCairn` now logs a once-per-host warning: the headers are
+  emitted by the middleware `AddCairn` registers, so without it the metadata was a silent no-op.
 
 ### Removed
 
@@ -55,6 +66,10 @@
 
 ### Added
 
+- `Cairn.Core`: `IPaginationEnvelopeProvider` — announces the response types the wire treats as
+  pagination envelopes beyond the structural interfaces (i.e. types adapted via
+  `AddPaging`/`AddCursorPaging`), so document generators that reference only Cairn.Core can
+  describe them. `AddCairn` registers an implementation backed by the options registrations.
 - `Cairn.Testing`: `HaveLinkMatching(rel, pattern)`, `WithHrefMatching(pattern)` (affordances), and
   `WithTargetMatching(pattern)` (HAL-FORMS templates) — `{param}` matches one path segment and a
   trailing `*` makes the pattern a prefix match, so assertions survive host/port differences.

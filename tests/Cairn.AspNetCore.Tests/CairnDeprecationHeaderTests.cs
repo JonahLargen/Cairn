@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using Cairn.AspNetCore;
 using Microsoft.AspNetCore.Builder;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Cairn.AspNetCore.Tests;
 
@@ -115,6 +117,73 @@ public class CairnDeprecationHeaderTests
         response.EnsureSuccessStatusCode();
         Assert.True(response.Headers.Contains("Deprecation"));
         Assert.True(response.Headers.Contains("Sunset"));
+    }
+
+    [Fact]
+    public async Task WithDeprecation_without_AddCairn_warns_once_that_the_headers_are_inert()
+    {
+        var logs = new CapturingLoggerProvider();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Logging.AddProvider(logs);
+        // Deliberately no AddCairn: the metadata is attached, but nothing registers the emitting middleware.
+
+        await using var app = builder.Build();
+        app.MapGet("/old", () => TypedResults.Ok(new { ok = true })).WithDeprecation();
+        app.MapGet("/older", () => TypedResults.Ok(new { ok = true })).WithDeprecation();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/old");
+        response.EnsureSuccessStatusCode();
+        Assert.False(response.Headers.Contains("Deprecation"));
+
+        // The silent no-op is surfaced — once per host, not once per deprecated endpoint.
+        Assert.Single(logs.Messages, m => m.Contains("AddCairn was not called", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WithDeprecation_with_AddCairn_does_not_warn()
+    {
+        var logs = new CapturingLoggerProvider();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Logging.AddProvider(logs);
+        builder.Services.AddCairn();
+
+        await using var app = builder.Build();
+        app.MapGet("/old", () => TypedResults.Ok(new { ok = true })).WithDeprecation();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/old");
+        response.EnsureSuccessStatusCode();
+        Assert.True(response.Headers.Contains("Deprecation"));
+
+        Assert.DoesNotContain(logs.Messages, m => m.Contains("AddCairn was not called", StringComparison.Ordinal));
+    }
+
+    private sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        public ConcurrentBag<string> Messages { get; } = [];
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Messages);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class CapturingLogger(ConcurrentBag<string> messages) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+                => messages.Add(formatter(state, exception));
+        }
     }
 }
 

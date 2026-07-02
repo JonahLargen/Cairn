@@ -37,7 +37,7 @@ internal sealed class HypermediaSchemaTransformer : IOpenApiSchemaTransformer
             {
                 HypermediaJsonSchemas.Apply(schema, DeclaredByType);
             }
-            else if (HypermediaJsonSchemas.IsPaginationEnvelope(context.JsonTypeInfo.Type, out var cursor))
+            else if (HypermediaJsonSchemas.IsPaginationEnvelope(context.JsonTypeInfo.Type, context.ApplicationServices.GetService<IPaginationEnvelopeProvider>(), out var cursor))
             {
                 HypermediaJsonSchemas.ApplyPaginationLinks(schema, cursor, DeclaredByType);
             }

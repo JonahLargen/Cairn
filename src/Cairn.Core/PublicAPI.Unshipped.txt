@@ -88,6 +88,8 @@ Cairn.ILinkSpec<T>.When(System.Func<T, Cairn.LinkContext!, bool>! condition) -> 
 Cairn.ILinkSpec<T>.When(System.Func<T, bool>! condition) -> Cairn.ILinkSpec<T>!
 Cairn.ILinkUrlResolver
 Cairn.ILinkUrlResolver.Resolve(Cairn.LinkTarget! target) -> string?
+Cairn.IPaginationEnvelopeProvider
+Cairn.IPaginationEnvelopeProvider.IsPaginationEnvelope(System.Type! type, out bool cursor) -> bool
 Cairn.IanaLinkRelations
 Cairn.Link
 Cairn.Link.<Clone>$() -> Cairn.Link!
