@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # MinVer derives the version from tag history, so the full history is required.
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -35,6 +38,17 @@ jobs:
 
       - name: Test
         run: dotnet test Cairn.slnx --configuration Release --no-build --verbosity normal
+
+      # Keep packaging healthy on every change; the produced preview packages
+      # (X.Y.Z-preview.0.N via MinVer) are downloadable from the run for local testing.
+      - name: Pack (validate)
+        run: dotnet pack Cairn.slnx --configuration Release --no-build --output artifacts
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/*nupkg
 
   docs:
     name: Docs build
