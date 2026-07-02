@@ -23,6 +23,9 @@ public static class CairnClientServiceCollectionExtensions
     /// Registers <see cref="CairnClient"/> as a typed <see cref="System.Net.Http.HttpClient"/> over
     /// <c>IHttpClientFactory</c>, so it participates in DI, handlers, and resilience. Returns the
     /// <see cref="IHttpClientBuilder"/> for further configuration (e.g. <c>AddStandardResilienceHandler</c>).
+    /// When <see cref="CairnClientOptions.AllowLink"/> is set, handler-level auto-redirect is disabled and
+    /// redirects are followed by a policy-enforcing handler instead, so every hop — not just the first
+    /// request — must satisfy the policy.
     /// </summary>
     public static IHttpClientBuilder AddCairnClient(this IServiceCollection services, Action<CairnClientOptions>? configure = null)
     {
@@ -31,7 +34,7 @@ public static class CairnClientServiceCollectionExtensions
         var options = new CairnClientOptions();
         configure?.Invoke(options);
 
-        return services
+        var builder = services
             .AddHttpClient<CairnClient>(http =>
             {
                 if (options.BaseAddress is not null)
@@ -40,5 +43,14 @@ public static class CairnClientServiceCollectionExtensions
                 }
             })
             .AddTypedClient((http, _) => new CairnClient(http, options.JsonOptions, options.AllowLink));
+
+        if (options.AllowLink is { } allowLink)
+        {
+            builder
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+                .AddHttpMessageHandler(() => new LinkPolicyRedirectHandler(allowLink));
+        }
+
+        return builder;
     }
 }

@@ -18,7 +18,8 @@ public sealed class Resource<T>
         IReadOnlyDictionary<string, Affordance> affordances,
         IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> fields,
         string? etag = null,
-        JsonElement embedded = default)
+        JsonElement embedded = default,
+        IReadOnlyList<Curie>? curies = null)
     {
         _client = client;
         _fields = fields;
@@ -28,6 +29,7 @@ public sealed class Resource<T>
         Links = LinkMap.Flatten(links);
         Affordances = affordances;
         ETag = etag;
+        Curies = curies ?? [];
     }
 
     /// <summary>The deserialized resource body, or <see langword="null"/> if the body could not be deserialized to <typeparamref name="T"/>.</summary>
@@ -45,6 +47,34 @@ public sealed class Resource<T>
 
     /// <summary>The resource's affordances (available actions), keyed by name.</summary>
     public IReadOnlyDictionary<string, Affordance> Affordances { get; }
+
+    /// <summary>The curie definitions from <c>_links.curies</c>, resolving prefixed relations to documentation.</summary>
+    public IReadOnlyList<Curie> Curies { get; }
+
+    /// <summary>
+    /// The documentation URL for a curie-prefixed relation (e.g. <c>acme:widget</c>), expanding the matching
+    /// curie's <c>{rel}</c> template — or <see langword="null"/> when the relation carries no known prefix.
+    /// </summary>
+    public string? DocumentationFor(string relation)
+    {
+        ArgumentNullException.ThrowIfNull(relation);
+        var colon = relation.IndexOf(':');
+        if (colon <= 0)
+        {
+            return null;
+        }
+
+        var prefix = relation[..colon];
+        foreach (var curie in Curies)
+        {
+            if (string.Equals(curie.Name, prefix, StringComparison.Ordinal))
+            {
+                return curie.Templated ? UriTemplate.Expand(curie.Href, new { rel = relation[(colon + 1)..] }) : curie.Href;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>All links sharing the given relation (a HAL link array exposes more than one), or empty if none.</summary>
     public IReadOnlyList<Link> LinksFor(string relation) => _linksByRelation.TryGetValue(relation, out var list) ? list : [];
@@ -111,5 +141,29 @@ public sealed class Resource<T>
     public Task<ClientResult<TResult>> InvokeAsync<TResult>(string name, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
         => Affordances.TryGetValue(name, out var affordance)
             ? _client.InvokeAsync<TResult>(affordance, body, ifMatch, cancellationToken)
+            : throw new InvalidOperationException($"The resource has no '{name}' affordance.");
+
+    /// <summary>
+    /// Submits the named affordance's HAL-FORMS template: validates <paramref name="values"/> against the
+    /// template's fields (required, read-only, regex, length, range, options) before anything is sent, then
+    /// sends them with the template's method and declared content type.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The resource has no affordance with that name.</exception>
+    /// <exception cref="ArgumentException"><paramref name="values"/> fail client-side validation against the template's fields.</exception>
+    public Task<ClientResult> SubmitAsync(string name, object? values = null, string? ifMatch = null, CancellationToken cancellationToken = default)
+        => Affordances.TryGetValue(name, out var affordance)
+            ? _client.SubmitAsync(affordance, Fields(name), values, ifMatch, cancellationToken)
+            : throw new InvalidOperationException($"The resource has no '{name}' affordance.");
+
+    /// <summary>
+    /// Submits the named affordance's HAL-FORMS template and reads its returned resource: validates
+    /// <paramref name="values"/> against the template's fields before anything is sent, then sends them with
+    /// the template's method and declared content type.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The resource has no affordance with that name.</exception>
+    /// <exception cref="ArgumentException"><paramref name="values"/> fail client-side validation against the template's fields.</exception>
+    public Task<ClientResult<TResult>> SubmitAsync<TResult>(string name, object? values = null, string? ifMatch = null, CancellationToken cancellationToken = default)
+        => Affordances.TryGetValue(name, out var affordance)
+            ? _client.SubmitAsync<TResult>(affordance, Fields(name), values, ifMatch, cancellationToken)
             : throw new InvalidOperationException($"The resource has no '{name}' affordance.");
 }

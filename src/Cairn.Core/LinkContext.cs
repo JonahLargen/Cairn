@@ -24,6 +24,12 @@ public interface ILinkAuthorizer
     ValueTask<bool> AuthorizeAsync(string policy, CancellationToken cancellationToken = default);
 }
 
+/// <summary>Details of a link or affordance that could not be resolved to a URL.</summary>
+/// <param name="ResourceType">The resource type whose configuration declared the link.</param>
+/// <param name="Relation">The relation (or affordance name) that failed to resolve.</param>
+/// <param name="Target">The target that could not be resolved.</param>
+public sealed record UnresolvedLink(Type ResourceType, LinkRelation Relation, LinkTarget Target);
+
 /// <summary>Per-request inputs the engine needs to resolve and authorize links.</summary>
 public sealed class LinkContext
 {
@@ -65,6 +71,12 @@ public sealed class LinkContext
 
     /// <summary>The request's cancellation token.</summary>
     public CancellationToken CancellationToken { get; }
+
+    /// <summary>
+    /// Invoked when a link target cannot be resolved and <see cref="Mode"/> is <see cref="LinkResolutionMode.Lax"/>
+    /// (the link is dropped). Hosts use this to log or meter silent drops; unset, drops stay silent.
+    /// </summary>
+    public Action<UnresolvedLink>? OnUnresolvedLink { get; init; }
 
     private sealed class EmptyServiceProvider : IServiceProvider
     {

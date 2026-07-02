@@ -50,7 +50,13 @@ public class CairnClientFormsTests
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
-        builder.Services.AddCairn(o => o.AddLinks(new FieldOrderLinks()));   // Default format — _actions, no properties
+        // Pin the Default format (_actions, no properties): the client's Accept would otherwise negotiate
+        // HAL-FORMS and receive a template with fields.
+        builder.Services.AddCairn(o =>
+        {
+            o.NegotiateFormat = false;
+            o.AddLinks(new FieldOrderLinks());
+        });
 
         await using var app = builder.Build();
         app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new FieldOrder(id))).WithName("FieldGetOrder").WithLinks();

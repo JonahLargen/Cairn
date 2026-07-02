@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <Description>ASP.NET Core integration for Cairn — opt-in, Minimal-API-first HATEOAS. Inject hypermedia links into plain DTOs via System.Text.Json with no base classes or attributes.</Description>
   </PropertyGroup>
 

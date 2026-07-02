@@ -9,8 +9,10 @@ public static class CairnEndpointExtensions
 {
     /// <summary>
     /// Projects hypermedia links and affordances onto this endpoint's (or route group's) responses. The
-    /// returned value — and each element of a returned collection — is linked according to its runtime
-    /// type's configuration.
+    /// returned value — carried by an <c>IResult</c> (e.g. <c>TypedResults.Ok(...)</c>) or returned bare —
+    /// and each element of a returned collection is linked according to its runtime type's configuration.
+    /// A bare deferred sequence (LINQ query, <c>IQueryable</c>) is materialized once so it is not enumerated
+    /// a second time by the serializer.
     /// </summary>
     /// <param name="builder">The endpoint or route group builder.</param>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
@@ -22,8 +24,7 @@ public static class CairnEndpointExtensions
         return builder.AddEndpointFilterFactory((_, next) => async invocation =>
         {
             var result = await next(invocation);
-            await CairnLinkRecorder.RecordResultAsync(invocation.HttpContext, result);
-            return result;
+            return await CairnLinkRecorder.RecordResultAsync(invocation.HttpContext, result);
         });
     }
 
@@ -68,5 +69,21 @@ public static class CairnEndpointExtensions
         ArgumentNullException.ThrowIfNull(builder);
 
         return builder.WithMetadata(new HypermediaFormatMetadata(format));
+    }
+
+    /// <summary>
+    /// Forces a custom hypermedia format (registered with <see cref="CairnOptions.AddFormatter"/>) for this
+    /// endpoint or route group by its <paramref name="mediaType"/>, overriding content negotiation and the
+    /// global default. Requests fail if no formatter is registered for the media type.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="mediaType"/> is null or whitespace.</exception>
+    public static TBuilder WithHypermediaFormat<TBuilder>(this TBuilder builder, string mediaType)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(mediaType);
+
+        return builder.WithMetadata(new HypermediaFormatMetadata(mediaType));
     }
 }

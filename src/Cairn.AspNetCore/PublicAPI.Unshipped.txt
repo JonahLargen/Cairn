@@ -1,0 +1,176 @@
+#nullable enable
+Cairn.AspNetCore.CairnDeprecationExtensions
+Cairn.AspNetCore.CairnDiagnostics
+Cairn.AspNetCore.CairnETagExtensions
+Cairn.AspNetCore.CairnEndpointExtensions
+Cairn.AspNetCore.CairnHttpOptionsExtensions
+Cairn.AspNetCore.CairnLinksAttribute
+Cairn.AspNetCore.CairnLinksAttribute.CairnLinksAttribute() -> void
+Cairn.AspNetCore.CairnLinksAttribute.OnResultExecutionAsync(Microsoft.AspNetCore.Mvc.Filters.ResultExecutingContext! context, Microsoft.AspNetCore.Mvc.Filters.ResultExecutionDelegate! next) -> System.Threading.Tasks.Task!
+Cairn.AspNetCore.CairnOptions
+Cairn.AspNetCore.CairnOptions.AddCurie(string! prefix, string! hrefTemplate) -> Cairn.AspNetCore.CairnOptions!
+Cairn.AspNetCore.CairnOptions.AddCursorPaging<T>(System.Func<T, Cairn.AspNetCore.CursorView>! describe) -> Cairn.AspNetCore.CairnOptions!
+Cairn.AspNetCore.CairnOptions.AddFormatter(Cairn.AspNetCore.IHypermediaFormatter! formatter) -> Cairn.AspNetCore.CairnOptions!
+Cairn.AspNetCore.CairnOptions.AddLinks<T>(Cairn.LinkConfig<T>! config) -> Cairn.AspNetCore.CairnOptions!
+Cairn.AspNetCore.CairnOptions.AddLinksFromAssembly(System.Reflection.Assembly! assembly) -> Cairn.AspNetCore.CairnOptions!
+Cairn.AspNetCore.CairnOptions.AddLinksFromAssemblyContaining<T>() -> Cairn.AspNetCore.CairnOptions!
+Cairn.AspNetCore.CairnOptions.AddPaging<T>(System.Func<T, Cairn.AspNetCore.PagedView>! describe) -> Cairn.AspNetCore.CairnOptions!
+Cairn.AspNetCore.CairnOptions.CairnOptions() -> void
+Cairn.AspNetCore.CairnOptions.CursorLink.get -> System.Func<Microsoft.AspNetCore.Http.HttpRequest!, string!, string!>?
+Cairn.AspNetCore.CairnOptions.CursorLink.set -> void
+Cairn.AspNetCore.CairnOptions.CursorQueryParameter.get -> string!
+Cairn.AspNetCore.CairnOptions.CursorQueryParameter.set -> void
+Cairn.AspNetCore.CairnOptions.DefaultFormat.get -> Cairn.AspNetCore.HypermediaFormat
+Cairn.AspNetCore.CairnOptions.DefaultFormat.set -> void
+Cairn.AspNetCore.CairnOptions.Mode.get -> Cairn.LinkResolutionMode
+Cairn.AspNetCore.CairnOptions.Mode.set -> void
+Cairn.AspNetCore.CairnOptions.NegotiateFormat.get -> bool
+Cairn.AspNetCore.CairnOptions.NegotiateFormat.set -> void
+Cairn.AspNetCore.CairnOptions.PageLink.get -> System.Func<Microsoft.AspNetCore.Http.HttpRequest!, int, string!>?
+Cairn.AspNetCore.CairnOptions.PageLink.set -> void
+Cairn.AspNetCore.CairnOptions.PageQueryParameter.get -> string!
+Cairn.AspNetCore.CairnOptions.PageQueryParameter.set -> void
+Cairn.AspNetCore.CairnOptions.PublicBaseUri.get -> System.Uri?
+Cairn.AspNetCore.CairnOptions.PublicBaseUri.set -> void
+Cairn.AspNetCore.CairnOptions.TransformUrl.get -> System.Func<Microsoft.AspNetCore.Http.HttpContext!, string!, string!>?
+Cairn.AspNetCore.CairnOptions.TransformUrl.set -> void
+Cairn.AspNetCore.CairnOptions.UrlStyle.get -> Cairn.AspNetCore.LinkUrlStyle
+Cairn.AspNetCore.CairnOptions.UrlStyle.set -> void
+Cairn.AspNetCore.CairnPreconditions
+Cairn.AspNetCore.CairnResults
+Cairn.AspNetCore.CairnServiceCollectionExtensions
+Cairn.AspNetCore.CursorPage<T>
+Cairn.AspNetCore.CursorPage<T>.<Clone>$() -> Cairn.AspNetCore.CursorPage<T>!
+Cairn.AspNetCore.CursorPage<T>.CursorPage(System.Collections.Generic.IReadOnlyList<T>! Items, string? Next = null, string? Prev = null) -> void
+Cairn.AspNetCore.CursorPage<T>.Deconstruct(out System.Collections.Generic.IReadOnlyList<T>! Items, out string? Next, out string? Prev) -> void
+Cairn.AspNetCore.CursorPage<T>.Equals(Cairn.AspNetCore.CursorPage<T>? other) -> bool
+Cairn.AspNetCore.CursorPage<T>.Items.get -> System.Collections.Generic.IReadOnlyList<T>!
+Cairn.AspNetCore.CursorPage<T>.Items.init -> void
+Cairn.AspNetCore.CursorPage<T>.Next.get -> string?
+Cairn.AspNetCore.CursorPage<T>.Next.init -> void
+Cairn.AspNetCore.CursorPage<T>.Prev.get -> string?
+Cairn.AspNetCore.CursorPage<T>.Prev.init -> void
+Cairn.AspNetCore.CursorView
+Cairn.AspNetCore.CursorView.CursorView() -> void
+Cairn.AspNetCore.CursorView.CursorView(System.Collections.IEnumerable! Items, string? Next, string? Prev) -> void
+Cairn.AspNetCore.CursorView.Deconstruct(out System.Collections.IEnumerable! Items, out string? Next, out string? Prev) -> void
+Cairn.AspNetCore.CursorView.Equals(Cairn.AspNetCore.CursorView other) -> bool
+Cairn.AspNetCore.CursorView.Items.get -> System.Collections.IEnumerable!
+Cairn.AspNetCore.CursorView.Items.init -> void
+Cairn.AspNetCore.CursorView.Next.get -> string?
+Cairn.AspNetCore.CursorView.Next.init -> void
+Cairn.AspNetCore.CursorView.Prev.get -> string?
+Cairn.AspNetCore.CursorView.Prev.init -> void
+Cairn.AspNetCore.HypermediaDocument
+Cairn.AspNetCore.HypermediaDocument.Affordances.get -> System.Collections.Generic.IReadOnlyList<Cairn.Affordance!>!
+Cairn.AspNetCore.HypermediaDocument.Embedded.get -> System.Collections.Generic.IReadOnlyDictionary<string!, object!>?
+Cairn.AspNetCore.HypermediaDocument.Links.get -> System.Collections.Generic.IReadOnlyList<Cairn.Link!>!
+Cairn.AspNetCore.HypermediaFormat
+Cairn.AspNetCore.HypermediaFormat.Default = 0 -> Cairn.AspNetCore.HypermediaFormat
+Cairn.AspNetCore.HypermediaFormat.Hal = 1 -> Cairn.AspNetCore.HypermediaFormat
+Cairn.AspNetCore.HypermediaFormat.HalForms = 2 -> Cairn.AspNetCore.HypermediaFormat
+Cairn.AspNetCore.HypermediaFormatProperty
+Cairn.AspNetCore.HypermediaFormatProperty.<Clone>$() -> Cairn.AspNetCore.HypermediaFormatProperty!
+Cairn.AspNetCore.HypermediaFormatProperty.Deconstruct(out string! Name, out System.Func<Cairn.AspNetCore.HypermediaDocument!, object?>! Value) -> void
+Cairn.AspNetCore.HypermediaFormatProperty.Equals(Cairn.AspNetCore.HypermediaFormatProperty? other) -> bool
+Cairn.AspNetCore.HypermediaFormatProperty.HypermediaFormatProperty(string! Name, System.Func<Cairn.AspNetCore.HypermediaDocument!, object?>! Value) -> void
+Cairn.AspNetCore.HypermediaFormatProperty.Name.get -> string!
+Cairn.AspNetCore.HypermediaFormatProperty.Name.init -> void
+Cairn.AspNetCore.HypermediaFormatProperty.Value.get -> System.Func<Cairn.AspNetCore.HypermediaDocument!, object?>!
+Cairn.AspNetCore.HypermediaFormatProperty.Value.init -> void
+Cairn.AspNetCore.HypermediaProblem
+Cairn.AspNetCore.HypermediaProblem.Detail.get -> string?
+Cairn.AspNetCore.HypermediaProblem.Detail.set -> void
+Cairn.AspNetCore.HypermediaProblem.ExecuteAsync(Microsoft.AspNetCore.Http.HttpContext! httpContext) -> System.Threading.Tasks.Task!
+Cairn.AspNetCore.HypermediaProblem.HypermediaProblem(int status) -> void
+Cairn.AspNetCore.HypermediaProblem.Instance.get -> string?
+Cairn.AspNetCore.HypermediaProblem.Instance.set -> void
+Cairn.AspNetCore.HypermediaProblem.Status.get -> int
+Cairn.AspNetCore.HypermediaProblem.Title.get -> string?
+Cairn.AspNetCore.HypermediaProblem.Title.set -> void
+Cairn.AspNetCore.HypermediaProblem.Type.get -> string?
+Cairn.AspNetCore.HypermediaProblem.Type.set -> void
+Cairn.AspNetCore.HypermediaProblem.WithAction(string! name, string! href, string! method = "POST") -> Cairn.AspNetCore.HypermediaProblem!
+Cairn.AspNetCore.HypermediaProblem.WithExtension(string! name, object? value) -> Cairn.AspNetCore.HypermediaProblem!
+Cairn.AspNetCore.HypermediaProblem.WithLink(string! relation, string! href, string? title = null) -> Cairn.AspNetCore.HypermediaProblem!
+Cairn.AspNetCore.ICursorPagedResource
+Cairn.AspNetCore.ICursorPagedResource.Items.get -> System.Collections.IEnumerable!
+Cairn.AspNetCore.ICursorPagedResource.Next.get -> string?
+Cairn.AspNetCore.ICursorPagedResource.Prev.get -> string?
+Cairn.AspNetCore.IHypermediaFormatter
+Cairn.AspNetCore.IHypermediaFormatter.MediaType.get -> string!
+Cairn.AspNetCore.IHypermediaFormatter.Properties.get -> System.Collections.Generic.IReadOnlyList<Cairn.AspNetCore.HypermediaFormatProperty!>!
+Cairn.AspNetCore.IPagedResource
+Cairn.AspNetCore.IPagedResource.Items.get -> System.Collections.IEnumerable!
+Cairn.AspNetCore.IPagedResource.Page.get -> int
+Cairn.AspNetCore.IPagedResource.PageSize.get -> int
+Cairn.AspNetCore.IPagedResource.TotalCount.get -> int
+Cairn.AspNetCore.IPagedResource.TotalPages.get -> int
+Cairn.AspNetCore.LinkUrlStyle
+Cairn.AspNetCore.LinkUrlStyle.Absolute = 0 -> Cairn.AspNetCore.LinkUrlStyle
+Cairn.AspNetCore.LinkUrlStyle.PathRelative = 1 -> Cairn.AspNetCore.LinkUrlStyle
+Cairn.AspNetCore.PagedResource<T>
+Cairn.AspNetCore.PagedResource<T>.<Clone>$() -> Cairn.AspNetCore.PagedResource<T>!
+Cairn.AspNetCore.PagedResource<T>.Deconstruct(out System.Collections.Generic.IReadOnlyList<T>! Items, out int Page, out int PageSize, out int TotalCount) -> void
+Cairn.AspNetCore.PagedResource<T>.Equals(Cairn.AspNetCore.PagedResource<T>? other) -> bool
+Cairn.AspNetCore.PagedResource<T>.Items.get -> System.Collections.Generic.IReadOnlyList<T>!
+Cairn.AspNetCore.PagedResource<T>.Items.init -> void
+Cairn.AspNetCore.PagedResource<T>.Page.get -> int
+Cairn.AspNetCore.PagedResource<T>.Page.init -> void
+Cairn.AspNetCore.PagedResource<T>.PageSize.get -> int
+Cairn.AspNetCore.PagedResource<T>.PageSize.init -> void
+Cairn.AspNetCore.PagedResource<T>.PagedResource(System.Collections.Generic.IReadOnlyList<T>! Items, int Page, int PageSize, int TotalCount) -> void
+Cairn.AspNetCore.PagedResource<T>.TotalCount.get -> int
+Cairn.AspNetCore.PagedResource<T>.TotalCount.init -> void
+Cairn.AspNetCore.PagedResource<T>.TotalPages.get -> int
+Cairn.AspNetCore.PagedView
+Cairn.AspNetCore.PagedView.Deconstruct(out System.Collections.IEnumerable! Items, out int Page, out int PageSize, out int TotalCount) -> void
+Cairn.AspNetCore.PagedView.Equals(Cairn.AspNetCore.PagedView other) -> bool
+Cairn.AspNetCore.PagedView.Items.get -> System.Collections.IEnumerable!
+Cairn.AspNetCore.PagedView.Items.init -> void
+Cairn.AspNetCore.PagedView.Page.get -> int
+Cairn.AspNetCore.PagedView.Page.init -> void
+Cairn.AspNetCore.PagedView.PageSize.get -> int
+Cairn.AspNetCore.PagedView.PageSize.init -> void
+Cairn.AspNetCore.PagedView.PagedView() -> void
+Cairn.AspNetCore.PagedView.PagedView(System.Collections.IEnumerable! Items, int Page, int PageSize, int TotalCount) -> void
+Cairn.AspNetCore.PagedView.TotalCount.get -> int
+Cairn.AspNetCore.PagedView.TotalCount.init -> void
+const Cairn.AspNetCore.CairnDiagnostics.ActivitySourceName = "Cairn.AspNetCore" -> string!
+const Cairn.AspNetCore.CairnDiagnostics.MeterName = "Cairn.AspNetCore" -> string!
+override Cairn.AspNetCore.CursorPage<T>.Equals(object? obj) -> bool
+override Cairn.AspNetCore.CursorPage<T>.GetHashCode() -> int
+override Cairn.AspNetCore.CursorPage<T>.ToString() -> string!
+override Cairn.AspNetCore.CursorView.GetHashCode() -> int
+override Cairn.AspNetCore.HypermediaFormatProperty.Equals(object? obj) -> bool
+override Cairn.AspNetCore.HypermediaFormatProperty.GetHashCode() -> int
+override Cairn.AspNetCore.HypermediaFormatProperty.ToString() -> string!
+override Cairn.AspNetCore.PagedResource<T>.Equals(object? obj) -> bool
+override Cairn.AspNetCore.PagedResource<T>.GetHashCode() -> int
+override Cairn.AspNetCore.PagedResource<T>.ToString() -> string!
+override Cairn.AspNetCore.PagedView.GetHashCode() -> int
+static Cairn.AspNetCore.CairnDeprecationExtensions.WithDeprecation<TBuilder>(this TBuilder builder, System.DateTimeOffset? sunset = null, string? link = null, System.DateTimeOffset? deprecatedAt = null) -> TBuilder
+static Cairn.AspNetCore.CairnETagExtensions.WithETag<TBuilder, T>(this TBuilder builder, System.Func<T, string!>! etag) -> TBuilder
+static Cairn.AspNetCore.CairnEndpointExtensions.WithCursorLinks<TBuilder>(this TBuilder builder, System.Func<Microsoft.AspNetCore.Http.HttpRequest!, string!, string!>! cursorLink) -> TBuilder
+static Cairn.AspNetCore.CairnEndpointExtensions.WithHypermediaFormat<TBuilder>(this TBuilder builder, Cairn.AspNetCore.HypermediaFormat format) -> TBuilder
+static Cairn.AspNetCore.CairnEndpointExtensions.WithHypermediaFormat<TBuilder>(this TBuilder builder, string! mediaType) -> TBuilder
+static Cairn.AspNetCore.CairnEndpointExtensions.WithLinks<TBuilder>(this TBuilder builder) -> TBuilder
+static Cairn.AspNetCore.CairnEndpointExtensions.WithPageLinks<TBuilder>(this TBuilder builder, System.Func<Microsoft.AspNetCore.Http.HttpRequest!, int, string!>! pageLink) -> TBuilder
+static Cairn.AspNetCore.CairnHttpOptionsExtensions.UseCairnOptionsHandler(this Microsoft.AspNetCore.Builder.IApplicationBuilder! app) -> Microsoft.AspNetCore.Builder.IApplicationBuilder!
+static Cairn.AspNetCore.CairnPreconditions.Evaluate(Microsoft.AspNetCore.Http.HttpRequest! request, string! currentETag, bool requireIfMatch = false) -> Microsoft.AspNetCore.Http.IResult?
+static Cairn.AspNetCore.CairnResults.Problem(int status, string? title = null, string? detail = null, string? type = null, string? instance = null) -> Cairn.AspNetCore.HypermediaProblem!
+static Cairn.AspNetCore.CairnServiceCollectionExtensions.AddCairn(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Cairn.AspNetCore.CairnOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Cairn.AspNetCore.CursorPage<T>.operator !=(Cairn.AspNetCore.CursorPage<T>? left, Cairn.AspNetCore.CursorPage<T>? right) -> bool
+static Cairn.AspNetCore.CursorPage<T>.operator ==(Cairn.AspNetCore.CursorPage<T>? left, Cairn.AspNetCore.CursorPage<T>? right) -> bool
+static Cairn.AspNetCore.CursorView.operator !=(Cairn.AspNetCore.CursorView left, Cairn.AspNetCore.CursorView right) -> bool
+static Cairn.AspNetCore.CursorView.operator ==(Cairn.AspNetCore.CursorView left, Cairn.AspNetCore.CursorView right) -> bool
+static Cairn.AspNetCore.HypermediaFormatProperty.operator !=(Cairn.AspNetCore.HypermediaFormatProperty? left, Cairn.AspNetCore.HypermediaFormatProperty? right) -> bool
+static Cairn.AspNetCore.HypermediaFormatProperty.operator ==(Cairn.AspNetCore.HypermediaFormatProperty? left, Cairn.AspNetCore.HypermediaFormatProperty? right) -> bool
+static Cairn.AspNetCore.PagedResource<T>.operator !=(Cairn.AspNetCore.PagedResource<T>? left, Cairn.AspNetCore.PagedResource<T>? right) -> bool
+static Cairn.AspNetCore.PagedResource<T>.operator ==(Cairn.AspNetCore.PagedResource<T>? left, Cairn.AspNetCore.PagedResource<T>? right) -> bool
+static Cairn.AspNetCore.PagedView.operator !=(Cairn.AspNetCore.PagedView left, Cairn.AspNetCore.PagedView right) -> bool
+static Cairn.AspNetCore.PagedView.operator ==(Cairn.AspNetCore.PagedView left, Cairn.AspNetCore.PagedView right) -> bool
+~override Cairn.AspNetCore.CursorView.Equals(object obj) -> bool
+~override Cairn.AspNetCore.CursorView.ToString() -> string
+~override Cairn.AspNetCore.PagedView.Equals(object obj) -> bool
+~override Cairn.AspNetCore.PagedView.ToString() -> string

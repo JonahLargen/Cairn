@@ -1,6 +1,10 @@
 namespace Cairn;
 
-/// <summary>A hypermedia link relation type (the "rel"), such as <c>self</c> or <c>next</c>.</summary>
+/// <summary>
+/// A hypermedia link relation type (the "rel"), such as <c>self</c> or <c>next</c>. Relations compare
+/// case-insensitively per RFC 8288 §2.1 (<c>Self</c> equals <c>self</c>); <see cref="Value"/> keeps the
+/// original casing for emission.
+/// </summary>
 public readonly record struct LinkRelation
 {
     /// <summary>Creates a relation from a token or URI.</summary>
@@ -23,6 +27,12 @@ public readonly record struct LinkRelation
 
     /// <summary>Converts a string to a <see cref="LinkRelation"/>.</summary>
     public static implicit operator LinkRelation(string value) => new(value);
+
+    /// <summary>Whether the relations are equal, compared case-insensitively per RFC 8288 §2.1.</summary>
+    public bool Equals(LinkRelation other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => Value is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
 
     /// <inheritdoc />
     public override string ToString() => Value;

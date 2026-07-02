@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <!-- BenchmarkDotNet requires optimized code; keep the project buildable in Debug for CI. -->
+    <Optimize Condition="'$(Configuration)' == 'Release'">true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
+  <!-- The central Roslyn pin is floored at 4.8.0 so the shipped analyzers load on the .NET 8 SDK,
+       but BenchmarkDotNet needs 4.14+ transitively. Benchmarks are never shipped, so lift the pin here. -->
+  <ItemGroup>
+    <PackageVersion Update="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cairn.AspNetCore\Cairn.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>

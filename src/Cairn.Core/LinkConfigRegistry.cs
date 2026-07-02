@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using Cairn.Internal;
 
@@ -18,17 +19,29 @@ public interface ILinkConfigProvider
     ICompiledLinkConfig? GetConfig(Type resourceType);
 }
 
-/// <summary>An in-memory registry of link configurations keyed by resource type.</summary>
+/// <summary>
+/// An in-memory registry of link configurations keyed by resource type. Lookup honors inheritance: a
+/// resource type with no config of its own uses the config of its nearest registered base class (so a
+/// <c>LinkConfig&lt;OrderDto&gt;</c> also covers <c>RushOrderDto : OrderDto</c>). Interfaces are not
+/// considered.
+/// </summary>
 public sealed class LinkConfigRegistry : ILinkConfigProvider
 {
-    private readonly Dictionary<Type, ICompiledLinkConfig> _configs = [];
+    private readonly object _writeLock = new();
+
+    // Both maps are replaced wholesale (copy-on-write) rather than mutated, so lock-free readers always see
+    // a consistent snapshot. The cache holds per-runtime-type resolutions (including negative results); Add
+    // publishes a fresh cache *after* the new config map, so a GetConfig racing an Add can only ever store a
+    // stale negative into the generation being discarded — never into the current one.
+    private Dictionary<Type, ICompiledLinkConfig> _configs = [];
+    private ConcurrentDictionary<Type, ICompiledLinkConfig?> _resolved = new();
 
     /// <summary>Registers the config for <typeparamref name="T"/>, replacing any existing one.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="config"/> is null.</exception>
     public LinkConfigRegistry Add<T>(LinkConfig<T> config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        _configs[typeof(T)] = CompiledLinkConfig<T>.Compile(config);
+        Publish(typeof(T), CompiledLinkConfig<T>.Compile(config));
         return this;
     }
 
@@ -41,11 +54,25 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
         var resourceType = ResourceTypeOf(config.GetType())
             ?? throw new ArgumentException($"'{config.GetType().Name}' does not derive from LinkConfig<T>.", nameof(config));
 
-        _configs[resourceType] = (ICompiledLinkConfig)typeof(CompiledLinkConfig<>)
+        var compiled = (ICompiledLinkConfig)typeof(CompiledLinkConfig<>)
             .MakeGenericType(resourceType)
             .GetMethod(nameof(CompiledLinkConfig<object>.Compile), BindingFlags.Public | BindingFlags.Static)!
             .Invoke(null, [config])!;
+        Publish(resourceType, compiled);
         return this;
+    }
+
+    private void Publish(Type resourceType, ICompiledLinkConfig compiled)
+    {
+        lock (_writeLock)
+        {
+            var configs = new Dictionary<Type, ICompiledLinkConfig>(_configs) { [resourceType] = compiled };
+            _configs = configs;
+
+            // Release-publish an empty cache after the config map: a reader that acquires this cache is
+            // guaranteed to resolve against (at least) the config map above.
+            Volatile.Write(ref _resolved, new ConcurrentDictionary<Type, ICompiledLinkConfig?>());
+        }
     }
 
     private static Type? ResourceTypeOf(Type configType)
@@ -61,10 +88,31 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
         return null;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Returns the config registered for <paramref name="resourceType"/>, falling back to its nearest
+    /// registered base class, or <see langword="null"/> if neither exists.
+    /// </summary>
     public ICompiledLinkConfig? GetConfig(Type resourceType)
     {
         ArgumentNullException.ThrowIfNull(resourceType);
-        return _configs.TryGetValue(resourceType, out var config) ? config : null;
+
+        // Acquire the current cache generation once; a concurrent Add swaps in a fresh generation, so any
+        // stale (possibly negative) entry this call computes lands only in the abandoned snapshot.
+        var resolved = Volatile.Read(ref _resolved);
+        return resolved.GetOrAdd(resourceType, Resolve);
+    }
+
+    private ICompiledLinkConfig? Resolve(Type resourceType)
+    {
+        var configs = _configs;
+        for (var type = resourceType; type is not null; type = type.BaseType)
+        {
+            if (configs.TryGetValue(type, out var config))
+            {
+                return config;
+            }
+        }
+
+        return null;
     }
 }

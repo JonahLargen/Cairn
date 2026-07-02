@@ -41,11 +41,34 @@ public sealed class CollectionResource<TItem>
     /// <summary>Whether the collection exposes the named affordance.</summary>
     public bool HasAffordance(string name) => Affordances.ContainsKey(name);
 
-    /// <summary>Follows a collection link (e.g. <c>next</c>) to another page of the same item type.</summary>
+    /// <summary>
+    /// Follows a collection link (e.g. <c>next</c>) to another page of the same item type. A templated link
+    /// expands with no variables, so its optional expressions collapse per RFC 6570.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="itemsProperty"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The collection has no link with that relation.</exception>
     public Task<CollectionResult<TItem>> FollowAsync(string relation, string itemsProperty = "items", CancellationToken cancellationToken = default)
+    {
+        // A bare null second argument binds here (string is more specific than object), not to the
+        // (relation, variables) overload — catch it now rather than null-ref reading the items property later.
+        if (itemsProperty is null)
+        {
+            throw new ArgumentNullException(
+                nameof(itemsProperty),
+                "itemsProperty must not be null. To follow the link with no template variables, call FollowAsync(relation, (object?)null) — a bare null second argument binds to this overload's itemsProperty instead.");
+        }
+
+        return Links.TryGetValue(relation, out var link)
+            ? _client.FollowCollectionAsync<TItem>(link, variables: null, itemsProperty, cancellationToken)
+            : throw new InvalidOperationException($"The collection has no '{relation}' link.");
+    }
+
+    /// <summary>Follows a collection link, expanding it as an RFC 6570 URI template with <paramref name="variables"/> (e.g. <c>new { page = 2 }</c>).</summary>
+    /// <exception cref="InvalidOperationException">The collection has no link with that relation.</exception>
+    /// <exception cref="ArgumentException">The link is not templated but <paramref name="variables"/> were supplied.</exception>
+    public Task<CollectionResult<TItem>> FollowAsync(string relation, object? variables, string itemsProperty = "items", CancellationToken cancellationToken = default)
         => Links.TryGetValue(relation, out var link)
-            ? _client.FollowCollectionAsync<TItem>(link, itemsProperty, cancellationToken)
+            ? _client.FollowCollectionAsync<TItem>(link, variables, itemsProperty, cancellationToken)
             : throw new InvalidOperationException($"The collection has no '{relation}' link.");
 
     /// <summary>Invokes a collection-level affordance, optionally with a request body and an <c>ifMatch</c> ETag.</summary>
@@ -68,13 +91,20 @@ public sealed class CollectionResult<TItem>
         Problem = problem;
     }
 
-    /// <summary>Whether the response had a success (2xx) status. When <see langword="true"/>, <see cref="Collection"/> is non-null; otherwise <see cref="Problem"/> is non-null.</summary>
+    /// <summary>
+    /// Whether the request succeeded — a 2xx status, or <c>304 Not Modified</c> for a conditional request
+    /// (see <see cref="IsNotModified"/>). When <see langword="true"/>, <see cref="Collection"/> is non-null;
+    /// otherwise <see cref="Problem"/> is non-null.
+    /// </summary>
     [MemberNotNullWhen(true, nameof(Collection))]
     [MemberNotNullWhen(false, nameof(Problem))]
     public bool IsSuccess { get; }
 
     /// <summary>The HTTP status code.</summary>
     public int Status { get; }
+
+    /// <summary>Whether the server returned <c>304 Not Modified</c> (in response to a conditional request). The result is successful but carries no items.</summary>
+    public bool IsNotModified => Status == 304;
 
     /// <summary>The collection and its hypermedia, when <see cref="IsSuccess"/>.</summary>
     public CollectionResource<TItem>? Collection { get; }

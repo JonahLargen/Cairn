@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <Description>Swashbuckle integration for Cairn — surfaces hypermedia links and affordances in the Swagger/OpenAPI document via an ISchemaFilter.</Description>
   </PropertyGroup>
 
@@ -11,6 +11,11 @@
 
   <ItemGroup>
     <PackageReference Include="Swashbuckle.AspNetCore.SwaggerGen" />
+  </ItemGroup>
+
+  <!-- Shared with Cairn.OpenApi (linked source, no shared assembly) so both documents describe the same wire format. -->
+  <ItemGroup>
+    <Compile Include="..\Shared\HypermediaJsonSchemas.cs" Link="HypermediaJsonSchemas.cs" />
   </ItemGroup>
 
 </Project>

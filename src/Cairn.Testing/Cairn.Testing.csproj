@@ -1,16 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <Description>Test assertion helpers for Cairn — verify hypermedia links and affordances in API responses.</Description>
   </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Cairn.Core\Cairn.Core.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="AwesomeAssertions" />
-  </ItemGroup>
+  <!-- Deliberately dependency-free: assertions fail by throwing CairnAssertionException, so the
+       package works under any test framework without pulling in an assertion library. -->
 
 </Project>

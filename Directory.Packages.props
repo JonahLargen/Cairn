@@ -5,14 +5,23 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Benchmarks -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.4" />
     <!-- Test stack -->
     <PackageVersion Include="Asp.Versioning.Http" Version="10.0.0" />
-    <PackageVersion Include="AwesomeAssertions" Version="9.4.0" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.9" />
-    <!-- Floor at the .NET 10 GA Roslyn (5.0.0) so the shipped analyzers/generators load on the GA SDK. -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
+    <!-- Transitive pin: Microsoft.AspNetCore.OpenApi floors this at 2.0.0, which has a known
+         vulnerability (GHSA-v5pm-xwqc-g5wc / NU1903). -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.9.0" />
+    <!-- Floor at the .NET 8 GA Roslyn (4.8.0) so the shipped analyzers/generators load on every SDK
+         that can build the lowest supported TFM (net8.0). Analyzers built against 4.8 load fine on
+         newer compilers, including the .NET 10 SDK's Roslyn 5. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
+    <!-- API-stability guardrail: tracks the public surface of every shippable package in
+         PublicAPI.Shipped.txt / PublicAPI.Unshipped.txt and fails the build on undeclared changes. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="4.14.0" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.2" />
@@ -20,5 +29,19 @@
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+  </ItemGroup>
+
+  <!-- Per-TFM floors: keep net8.0/net9.0 targets on their own package generation instead of
+       forcing the 10.x dependency graph onto older runtimes. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageVersion Update="Microsoft.Extensions.Http" Version="8.0.1" />
+    <PackageVersion Update="Microsoft.AspNetCore.TestHost" Version="8.0.28" />
+    <PackageVersion Update="Asp.Versioning.Http" Version="8.1.1" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PackageVersion Update="Microsoft.Extensions.Http" Version="9.0.17" />
+    <PackageVersion Update="Microsoft.AspNetCore.TestHost" Version="9.0.17" />
+    <!-- Asp.Versioning has no 9.x line; the 8.x assets run on net9.0. -->
+    <PackageVersion Update="Asp.Versioning.Http" Version="8.1.1" />
   </ItemGroup>
 </Project>

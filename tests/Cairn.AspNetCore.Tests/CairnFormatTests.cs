@@ -100,10 +100,17 @@ public class CairnFormatTests
         Assert.Equal(5d, severity.GetProperty("max").GetDouble());
 
         Assert.Equal("email", byName["notifyEmail"].GetProperty("type").GetString());
-        Assert.Equal("checkbox", byName["notify"].GetProperty("type").GetString());
+
+        // bool has no valid HAL-FORMS input type ("checkbox" is not one); it is described by a
+        // two-value options list instead.
+        var notify = byName["notify"];
+        Assert.False(notify.TryGetProperty("type", out _));
+        var notifyValues = notify.GetProperty("options").GetProperty("inline").EnumerateArray()
+            .Select(o => o.GetProperty("value").GetString()).ToList();
+        Assert.Equal(["true", "false"], notifyValues);
 
         // 'reason' is required; 'notify' is not — required is omitted when false.
-        Assert.False(byName["notify"].TryGetProperty("required", out _));
+        Assert.False(notify.TryGetProperty("required", out _));
     }
 
     private static async Task<TestApp> StartAsync(Action<CairnOptions> configure, bool forceHalForms = false)

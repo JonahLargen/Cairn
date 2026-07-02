@@ -13,7 +13,7 @@ namespace Cairn.SourceGenerators;
 public sealed class RoutesGenerator : IIncrementalGenerator
 {
     private static readonly DiagnosticDescriptor RouteNameCollision = new(
-        id: "CAIRN002",
+        id: "CAIRN003",
         title: "Route name collides in the generated catalog",
         messageFormat: "Route name '{0}' was not added to the Routes catalog because it maps to the same method name '{2}' as route '{1}'",
         category: "Cairn",
@@ -21,67 +21,95 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         isEnabledByDefault: true,
         description: "Two route names that reduce to the same C# method name cannot both appear in the Routes catalog; rename one.");
 
+    // The named-route attributes discovered via ForAttributeWithMetadataName. Matching by metadata name keeps
+    // the provider incremental (the compiler pre-filters candidates) and stops look-alike attributes from
+    // other namespaces feeding the catalog.
+    private static readonly string[] RouteAttributeMetadataNames =
+    [
+        "Microsoft.AspNetCore.Mvc.RouteAttribute",
+        "Microsoft.AspNetCore.Mvc.HttpGetAttribute",
+        "Microsoft.AspNetCore.Mvc.HttpPostAttribute",
+        "Microsoft.AspNetCore.Mvc.HttpPutAttribute",
+        "Microsoft.AspNetCore.Mvc.HttpDeleteAttribute",
+        "Microsoft.AspNetCore.Mvc.HttpPatchAttribute",
+        "Microsoft.AspNetCore.Mvc.HttpHeadAttribute",
+        "Microsoft.AspNetCore.Mvc.HttpOptionsAttribute",
+    ];
+
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        // Minimal-API endpoints: .WithName("name") in a Map* fluent chain.
+        // Minimal-API endpoints: .WithName(name) in a Map* fluent chain.
         var fromEndpoints = context.SyntaxProvider.CreateSyntaxProvider(
                 predicate: static (node, _) => IsWithNameInvocation(node),
-                transform: static (syntaxContext, _) => Extract((InvocationExpressionSyntax)syntaxContext.Node))
+                transform: static (syntaxContext, cancellationToken) => Extract(syntaxContext, cancellationToken))
             .Where(static route => route is not null)
             .Select(static (route, _) => route!.Value)
             .Collect();
 
         // Controllers: [HttpGet(Name = "name")] / [Route("...", Name = "name")] attributes.
-        var fromControllers = context.SyntaxProvider.CreateSyntaxProvider(
-                predicate: static (node, _) => IsNamedRouteAttribute(node),
-                transform: static (syntaxContext, _) => ExtractFromAttribute((AttributeSyntax)syntaxContext.Node))
-            .Where(static route => route is not null)
-            .Select(static (route, _) => route!.Value)
-            .Collect();
+        var fromControllers = NamedControllerRoutes(context);
 
         context.RegisterSourceOutput(
             fromEndpoints.Combine(fromControllers),
             static (production, pair) => Generate(production, pair.Left.AddRange(pair.Right)));
     }
 
-    private static bool IsWithNameInvocation(SyntaxNode node)
-        => node is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "WithName" } };
-
-    private static bool IsNamedRouteAttribute(SyntaxNode node)
-        => node is AttributeSyntax attribute
-            && IsRouteAttribute(SimpleName(attribute.Name))
-            && attribute.ArgumentList is { } arguments
-            && arguments.Arguments.Any(static argument => argument.NameEquals?.Name.Identifier.ValueText == "Name");
-
-    private static RouteInfo? ExtractFromAttribute(AttributeSyntax attribute)
+    private static IncrementalValueProvider<ImmutableArray<RouteInfo>> NamedControllerRoutes(IncrementalGeneratorInitializationContext context)
     {
-        if (NamedArgument(attribute, "Name") is not { } name)
+        IncrementalValueProvider<ImmutableArray<RouteInfo>>? combined = null;
+
+        foreach (var metadataName in RouteAttributeMetadataNames)
         {
-            return null;
+            var provider = context.SyntaxProvider.ForAttributeWithMetadataName(
+                    metadataName,
+                    predicate: static (node, _) => node is MethodDeclarationSyntax or TypeDeclarationSyntax,
+                    transform: static (attributeContext, _) => ExtractFromAttributes(attributeContext))
+                .SelectMany(static (routes, _) => routes)
+                .Collect();
+
+            combined = combined is { } existing
+                ? existing.Combine(provider).Select(static (pair, _) => pair.Left.AddRange(pair.Right))
+                : provider;
         }
 
-        var actionTemplate = FirstAttributeStringArgument(attribute) ?? string.Empty;
-        var prefix = attribute.FirstAncestorOrSelf<MethodDeclarationSyntax>() is not null ? ControllerRoutePrefix(attribute) : null;
-        return new RouteInfo(name, ParseParameters(CombineController(prefix, actionTemplate)));
+        return combined!.Value;
     }
 
-    // The controller's own [Route("prefix")] template, if any (a non-absolute action template hangs off it).
-    private static string? ControllerRoutePrefix(AttributeSyntax attribute)
-    {
-        if (attribute.FirstAncestorOrSelf<TypeDeclarationSyntax>() is not { } type)
+    private static bool IsWithNameInvocation(SyntaxNode node)
+        => node is InvocationExpressionSyntax
         {
-            return null;
+            ArgumentList.Arguments.Count: 1,
+            Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "WithName" },
+        };
+
+    private static ImmutableArray<RouteInfo> ExtractFromAttributes(GeneratorAttributeSyntaxContext context)
+    {
+        // The controller's own [Route("prefix")] template, if any (a non-absolute action template hangs off it).
+        var prefix = context.TargetSymbol is IMethodSymbol method ? ControllerRoutePrefix(method.ContainingType) : null;
+        var builder = ImmutableArray.CreateBuilder<RouteInfo>();
+
+        foreach (var attribute in context.Attributes)
+        {
+            if (NamedStringArgument(attribute, "Name") is not { } name)
+            {
+                continue;
+            }
+
+            var actionTemplate = FirstConstructorStringArgument(attribute) ?? string.Empty;
+            builder.Add(new RouteInfo(name, ParseParameters(CombineController(prefix, actionTemplate))));
         }
 
-        foreach (var list in type.AttributeLists)
+        return builder.ToImmutable();
+    }
+
+    private static string? ControllerRoutePrefix(INamedTypeSymbol type)
+    {
+        foreach (var attribute in type.GetAttributes())
         {
-            foreach (var candidate in list.Attributes)
+            if (attribute.AttributeClass?.Name == "RouteAttribute")
             {
-                if (SimpleName(candidate.Name) is "Route" or "RouteAttribute")
-                {
-                    return FirstAttributeStringArgument(candidate);
-                }
+                return FirstConstructorStringArgument(attribute);
             }
         }
 
@@ -108,96 +136,46 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         return builder.ToString();
     }
 
-    private static string? NamedArgument(AttributeSyntax attribute, string name)
+    // Attribute arguments arrive as compiler-evaluated constants, so a Name (or template) declared through a
+    // const or nameof(...) resolves for free.
+    private static string? NamedStringArgument(AttributeData attribute, string name)
     {
-        if (attribute.ArgumentList is not { } arguments)
+        foreach (var argument in attribute.NamedArguments)
         {
-            return null;
-        }
-
-        foreach (var argument in arguments.Arguments)
-        {
-            if (argument.NameEquals?.Name.Identifier.ValueText == name
-                && argument.Expression is LiteralExpressionSyntax literal
-                && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            if (argument.Key == name && argument.Value is { Kind: TypedConstantKind.Primitive, Value: string value })
             {
-                return literal.Token.ValueText;
+                return value;
             }
         }
 
         return null;
     }
 
-    private static string? FirstAttributeStringArgument(AttributeSyntax attribute)
+    private static string? FirstConstructorStringArgument(AttributeData attribute)
+        => attribute.ConstructorArguments.Length > 0
+            && attribute.ConstructorArguments[0] is { Kind: TypedConstantKind.Primitive, Value: string value }
+            ? value
+            : null;
+
+    private static RouteInfo? Extract(GeneratorSyntaxContext context, System.Threading.CancellationToken cancellationToken)
     {
-        if (attribute.ArgumentList is not { } arguments)
-        {
-            return null;
-        }
-
-        foreach (var argument in arguments.Arguments)
-        {
-            if (argument.NameEquals is null && argument.NameColon is null
-                && argument.Expression is LiteralExpressionSyntax literal
-                && literal.IsKind(SyntaxKind.StringLiteralExpression))
-            {
-                return literal.Token.ValueText;
-            }
-        }
-
-        return null;
-    }
-
-    private static string SimpleName(NameSyntax name) => name switch
-    {
-        IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
-        QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
-        _ => name.ToString(),
-    };
-
-    private static bool IsRouteAttribute(string name)
-    {
-        if (name.EndsWith("Attribute", System.StringComparison.Ordinal))
-        {
-            name = name.Substring(0, name.Length - "Attribute".Length);
-        }
-
-        return name is "Route" or "HttpGet" or "HttpPost" or "HttpPut" or "HttpDelete" or "HttpPatch" or "HttpHead" or "HttpOptions";
-    }
-
-    private static RouteInfo? Extract(InvocationExpressionSyntax withName)
-    {
-        if (FirstStringLiteral(withName) is not { } name)
+        var withName = (InvocationExpressionSyntax)context.Node;
+        if (FirstStringArgument(context.SemanticModel, withName, cancellationToken) is not { } name)
         {
             return null;
         }
 
         var receiver = ((MemberAccessExpressionSyntax)withName.Expression).Expression;
-        return FindRouteTemplate(receiver) is { } template ? new RouteInfo(name, ParseParameters(template)) : null;
+        return FindRouteTemplate(context.SemanticModel, receiver, cancellationToken) is { } template
+            ? new RouteInfo(name, ParseParameters(template))
+            : null;
     }
 
-    private static string? FindRouteTemplate(ExpressionSyntax expression)
+    private static string? FindRouteTemplate(SemanticModel semanticModel, ExpressionSyntax expression, System.Threading.CancellationToken cancellationToken)
     {
         string? endpointTemplate = null;
         var prefixes = new List<string>();
-
-        // Walk the fluent chain outward from .WithName toward the app, collecting the endpoint's own template
-        // plus any inline MapGroup("/prefix") prefixes so group route parameters are included. (Group prefixes
-        // bound to a local variable, e.g. `var g = app.MapGroup(...); g.MapGet(...)`, are not visible here.)
-        while (expression is InvocationExpressionSyntax invocation && invocation.Expression is MemberAccessExpressionSyntax member)
-        {
-            var method = member.Name.Identifier.ValueText;
-            if (endpointTemplate is null && method is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
-            {
-                endpointTemplate = FirstStringLiteral(invocation);
-            }
-            else if (method == "MapGroup" && FirstStringLiteral(invocation) is { } prefix)
-            {
-                prefixes.Add(prefix);
-            }
-
-            expression = member.Expression;
-        }
+        CollectChain(semanticModel, expression, prefixes, ref endpointTemplate, depth: 0, cancellationToken);
 
         if (endpointTemplate is null)
         {
@@ -220,6 +198,58 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         return builder.ToString();
     }
 
+    // Walks the fluent chain outward from .WithName toward the app, collecting the endpoint's own template
+    // plus any MapGroup("/prefix") prefixes so group route parameters are included. When the chain bottoms out
+    // at a local variable (`var g = app.MapGroup(...); g.MapGet(...)`), continues from the variable's
+    // initializer so group prefixes bound to variables are included too. Prefixes accumulate innermost-first.
+    private static void CollectChain(SemanticModel semanticModel, ExpressionSyntax expression, List<string> prefixes, ref string? endpointTemplate, int depth, System.Threading.CancellationToken cancellationToken)
+    {
+        while (expression is InvocationExpressionSyntax invocation && invocation.Expression is MemberAccessExpressionSyntax member)
+        {
+            var method = member.Name.Identifier.ValueText;
+            if (endpointTemplate is null && method is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
+            {
+                endpointTemplate = FirstStringArgument(semanticModel, invocation, cancellationToken);
+            }
+            else if (method == "MapGroup" && FirstStringArgument(semanticModel, invocation, cancellationToken) is { } prefix)
+            {
+                prefixes.Add(prefix);
+            }
+
+            expression = member.Expression;
+        }
+
+        // Depth-bounded to defend against pathological (or cyclic) variable chains.
+        if (depth < 8 && expression is IdentifierNameSyntax identifier && FindLocalInitializer(identifier) is { } initializer)
+        {
+            CollectChain(semanticModel, initializer, prefixes, ref endpointTemplate, depth + 1, cancellationToken);
+        }
+    }
+
+    // The initializer of the nearest local variable declaration with the identifier's name, searching the
+    // enclosing scopes outward (a block, a method/local function, or top-level statements).
+    private static ExpressionSyntax? FindLocalInitializer(IdentifierNameSyntax identifier)
+    {
+        var name = identifier.Identifier.ValueText;
+        for (SyntaxNode? scope = identifier.Parent; scope is not null; scope = scope.Parent)
+        {
+            if (scope is not (BlockSyntax or MethodDeclarationSyntax or LocalFunctionStatementSyntax or CompilationUnitSyntax))
+            {
+                continue;
+            }
+
+            foreach (var declarator in scope.DescendantNodes().OfType<VariableDeclaratorSyntax>())
+            {
+                if (declarator.Identifier.ValueText == name && declarator.Initializer is { } initializer)
+                {
+                    return initializer.Value;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static void AppendSegment(StringBuilder builder, string segment)
     {
         var trimmed = segment.Trim('/');
@@ -229,12 +259,23 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         }
     }
 
-    private static string? FirstStringLiteral(InvocationExpressionSyntax invocation)
+    // A string literal, or any expression the compiler can evaluate to a constant string (a const field,
+    // nameof(...), concatenated constants) — mirrors the RouteNameAnalyzer's resolution, so route names
+    // factored into constants still surface in the catalog.
+    private static string? FirstStringArgument(SemanticModel semanticModel, InvocationExpressionSyntax invocation, System.Threading.CancellationToken cancellationToken)
     {
-        var argument = invocation.ArgumentList.Arguments.FirstOrDefault();
-        return argument?.Expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression)
-            ? literal.Token.ValueText
-            : null;
+        if (invocation.ArgumentList.Arguments.FirstOrDefault() is not { } argument)
+        {
+            return null;
+        }
+
+        if (argument.Expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
+        {
+            return literal.Token.ValueText;
+        }
+
+        var constant = semanticModel.GetConstantValue(argument.Expression, cancellationToken);
+        return constant is { HasValue: true, Value: string value } ? value : null;
     }
 
     // Encodes the route's parameters as "name:type|name2:type2".
@@ -262,11 +303,20 @@ public sealed class RoutesGenerator : IIncrementalGenerator
 
             var content = template.Substring(index + 1, end - index - 1).TrimStart('*');
 
-            // Strip an inline default value: "{id=5}" / "{id:int=5}".
+            // Both optional markers make the parameter optional for callers too: an inline default
+            // ("{id=5}" / "{id:int=5}") or a trailing '?' ("{id?}" / "{id:int?}") — the route resolves
+            // without the value either way.
+            var optional = false;
             var equals = content.IndexOf('=');
             if (equals >= 0)
             {
                 content = content.Substring(0, equals);
+                optional = true;
+            }
+            else if (content.EndsWith("?", System.StringComparison.Ordinal))
+            {
+                content = content.Substring(0, content.Length - 1);
+                optional = true;
             }
 
             var colon = content.IndexOf(':');
@@ -276,18 +326,15 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             if (colon >= 0)
             {
                 name = content.Substring(0, colon);
-                // TrimEnd('?') so an optional constraint like "{id:int?}" maps to int, not the default string.
-                type = MapConstraint(content.Substring(colon + 1).Split(':')[0].Split('(')[0].TrimEnd('?'));
+                type = MapConstraint(content.Substring(colon + 1).Split(':')[0].Split('(')[0]);
             }
             else
             {
                 name = content;
             }
-
-            name = name.TrimEnd('?');
             if (IsIdentifier(name) && seen.Add(name))
             {
-                parameters.Add(name + " " + type);
+                parameters.Add(name + " " + type + (optional ? " ?" : string.Empty));
             }
 
             index = end + 1;
@@ -306,14 +353,19 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         "decimal" => "decimal",
         "guid" => "global::System.Guid",
         "datetime" => "global::System.DateTime",
+
+        // Numeric range constraints on an otherwise untyped parameter: ASP.NET evaluates them as long.
+        "min" or "max" or "range" => "long",
         _ => "string",
     };
 
     private static void Generate(SourceProductionContext context, ImmutableArray<RouteInfo> routes)
     {
-        if (routes.IsDefaultOrEmpty)
+        // With zero named routes the class is emitted empty (rather than not at all) so user code that
+        // references Cairn.Routes keeps compiling in a project that has no named endpoints yet.
+        if (routes.IsDefault)
         {
-            return;
+            routes = ImmutableArray<RouteInfo>.Empty;
         }
 
         var builder = new StringBuilder();
@@ -323,7 +375,10 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         builder.AppendLine("namespace Cairn");
         builder.AppendLine("{");
         builder.AppendLine("    /// <summary>Strongly-typed route references generated from named endpoints.</summary>");
-        builder.AppendLine("    public static partial class Routes");
+        // internal: a route catalog is app-internal by nature, and an internal class can neither collide with
+        // a hand-written public Cairn.Routes in a referencing project nor be ambiguous (CS0433) across
+        // assemblies that each generate one. partial already allows same-assembly extension.
+        builder.AppendLine("    internal static partial class Routes");
         builder.AppendLine("    {");
 
         var emitted = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -349,14 +404,56 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             emitted[method] = route.Name;
 
             var parameters = Decode(route.Parameters);
-            var signature = string.Join(", ", parameters.Select(static p => p.Type + " " + Escape(p.Name)));
-            var values = parameters.Count == 0
-                ? "null"
-                : "new { " + string.Join(", ", parameters.Select(static p => Escape(p.Name))) + " }";
 
-            builder.AppendLine($"        /// <summary>Route to the '{route.Name}' endpoint.</summary>");
-            builder.AppendLine($"        public static global::Cairn.LinkTarget {method}({signature})");
-            builder.AppendLine($"            => global::Cairn.LinkTarget.Route(\"{route.Name}\", {values});");
+            // Optional/defaulted route parameters are optional for callers too: nullable with a null default,
+            // and skipped in the route values when omitted so link generation renders the URL without them.
+            var signature = string.Join(", ", parameters.Select(static p
+                => p.Optional ? p.Type + "? " + Escape(p.Name) + " = null" : p.Type + " " + Escape(p.Name)));
+
+            builder.AppendLine($"        /// <summary>Route to the '{XmlEscape(route.Name)}' endpoint.</summary>");
+            var name = SymbolDisplay.FormatLiteral(route.Name, quote: true);
+            if (parameters.Exists(static p => p.Optional))
+            {
+                // The local must not shadow a same-named route parameter (CS0136 in the generated catalog),
+                // so start from an unlikely name and suffix-rename while one still claims it.
+                var local = "__cairnRouteValues";
+                while (parameters.Exists(p => string.Equals(p.Name, local, StringComparison.Ordinal)))
+                {
+                    local += "_";
+                }
+
+                builder.AppendLine($"        public static global::Cairn.LinkTarget {method}({signature})");
+                builder.AppendLine("        {");
+                builder.AppendLine($"            var {local} = new global::System.Collections.Generic.Dictionary<string, object?>();");
+                foreach (var parameter in parameters)
+                {
+                    var escaped = Escape(parameter.Name);
+                    if (parameter.Optional)
+                    {
+                        builder.AppendLine($"            if ({escaped} is not null)");
+                        builder.AppendLine("            {");
+                        builder.AppendLine($"                {local}[{SymbolDisplay.FormatLiteral(parameter.Name, quote: true)}] = {escaped};");
+                        builder.AppendLine("            }");
+                        builder.AppendLine();
+                    }
+                    else
+                    {
+                        builder.AppendLine($"            {local}[{SymbolDisplay.FormatLiteral(parameter.Name, quote: true)}] = {escaped};");
+                    }
+                }
+
+                builder.AppendLine($"            return global::Cairn.LinkTarget.Route({name}, {local});");
+                builder.AppendLine("        }");
+            }
+            else
+            {
+                var values = parameters.Count == 0
+                    ? "null"
+                    : "new { " + string.Join(", ", parameters.Select(static p => Escape(p.Name))) + " }";
+                builder.AppendLine($"        public static global::Cairn.LinkTarget {method}({signature})");
+                builder.AppendLine($"            => global::Cairn.LinkTarget.Route({name}, {values});");
+            }
+
             builder.AppendLine();
         }
 
@@ -366,10 +463,10 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         context.AddSource("Cairn.Routes.g.cs", builder.ToString());
     }
 
-    private static List<(string Name, string Type)> Decode(string encoded)
+    private static List<(string Name, string Type, bool Optional)> Decode(string encoded)
         => encoded.Length == 0
-            ? new List<(string, string)>()
-            : encoded.Split('|').Select(static part => part.Split(' ')).Select(static pieces => (pieces[0], pieces[1])).ToList();
+            ? new List<(string, string, bool)>()
+            : encoded.Split('|').Select(static part => part.Split(' ')).Select(static pieces => (pieces[0], pieces[1], pieces.Length > 2)).ToList();
 
     private static string Sanitize(string routeName)
     {
@@ -392,6 +489,9 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         var result = builder.ToString();
         return result.Length > 0 && char.IsDigit(result[0]) ? "_" + result : result;
     }
+
+    private static string XmlEscape(string text)
+        => text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     private static string Escape(string name)
         => SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None || SyntaxFacts.GetContextualKeywordKind(name) != SyntaxKind.None

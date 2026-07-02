@@ -26,7 +26,7 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
         category: "Cairn",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "A LinkTarget.Route name should match an endpoint named with WithName or a controller route attribute such as [HttpGet(Name = \"...\")].",
+        description: "A LinkTarget.Route name should match an endpoint named with WithName or a controller route attribute such as [HttpGet(Name = \"...\")]. When the compilation declares no named endpoints at all, the rule stays silent (the routes are assumed to live in another project); names declared elsewhere can also be listed via cairn_additional_route_names in .editorconfig or the CairnAdditionalRouteNames MSBuild property.",
         customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     /// <inheritdoc />
@@ -46,38 +46,42 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
         var references = new ConcurrentBag<(string Name, Location Location)>();
 
         context.RegisterSyntaxNodeAction(
-            nodeContext => Collect((InvocationExpressionSyntax)nodeContext.Node, routeNames, references),
+            nodeContext => Collect(nodeContext, routeNames, references),
             SyntaxKind.InvocationExpression);
 
         context.RegisterSyntaxNodeAction(
-            nodeContext => CollectAttribute((AttributeSyntax)nodeContext.Node, routeNames),
+            nodeContext => CollectAttribute(nodeContext, routeNames),
             SyntaxKind.Attribute);
 
         context.RegisterCompilationEndAction(endContext => Report(endContext, routeNames, references));
     }
 
     private static void Collect(
-        InvocationExpressionSyntax invocation,
+        SyntaxNodeAnalysisContext context,
         ConcurrentDictionary<string, byte> routeNames,
         ConcurrentBag<(string, Location)> references)
     {
-        if (invocation.Expression is not MemberAccessExpressionSyntax member)
-        {
-            return;
-        }
+        var invocation = (InvocationExpressionSyntax)context.Node;
 
-        var method = member.Name.Identifier.ValueText;
+        // The method's simple name is a cheap syntactic pre-filter; only "Route" calls pay for symbol lookup.
+        // An IdentifierName expression covers `using static Cairn.LinkTarget` call sites.
+        var method = invocation.Expression switch
+        {
+            MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            _ => null,
+        };
 
         if (method == "WithName")
         {
-            if (FirstStringLiteral(invocation) is { } endpoint)
+            if (FirstStringArgument(context, invocation) is { } endpoint)
             {
                 routeNames.TryAdd(endpoint.Value, 0);
             }
         }
-        else if (method == "Route" && IsLinkTargetReceiver(member.Expression))
+        else if (method == "Route" && IsLinkTargetRoute(context, invocation))
         {
-            if (FirstStringLiteral(invocation) is { } route)
+            if (FirstStringArgument(context, invocation) is { } route)
             {
                 references.Add((route.Value, route.Location));
             }
@@ -85,8 +89,12 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
     }
 
     // Collect named controller routes: [HttpGet(Name = "...")], [Route("...", Name = "...")], etc.
-    private static void CollectAttribute(AttributeSyntax attribute, ConcurrentDictionary<string, byte> routeNames)
+    // Name = arguments resolve through GetConstantValue — exactly as FirstStringArgument does for WithName,
+    // and mirroring the generator's TypedConstant resolution — so a name declared via nameof(...) or a const
+    // is collected instead of false-positiving every reference to it.
+    private static void CollectAttribute(SyntaxNodeAnalysisContext context, ConcurrentDictionary<string, byte> routeNames)
     {
+        var attribute = (AttributeSyntax)context.Node;
         if (!IsRouteAttribute(SimpleName(attribute.Name)) || attribute.ArgumentList is not { } arguments)
         {
             return;
@@ -94,11 +102,18 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
 
         foreach (var argument in arguments.Arguments)
         {
-            if (argument.NameEquals?.Name.Identifier.ValueText == "Name"
-                && argument.Expression is LiteralExpressionSyntax literal
-                && literal.IsKind(SyntaxKind.StringLiteralExpression))
+            if (argument.NameEquals?.Name.Identifier.ValueText != "Name")
+            {
+                continue;
+            }
+
+            if (argument.Expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
             {
                 routeNames.TryAdd(literal.Token.ValueText, 0);
+            }
+            else if (context.SemanticModel.GetConstantValue(argument.Expression, context.CancellationToken) is { HasValue: true, Value: string name })
+            {
+                routeNames.TryAdd(name, 0);
             }
         }
     }
@@ -131,6 +146,14 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
             return;
         }
 
+        // Names declared in other projects can be listed in .editorconfig / a global analyzer config
+        // (cairn_additional_route_names = a, b) or via an MSBuild CompilerVisibleProperty
+        // (CairnAdditionalRouteNames), so multi-project solutions can silence cross-project references.
+        foreach (var configured in AdditionalRouteNames(context))
+        {
+            routeNames.TryAdd(configured, 0);
+        }
+
         foreach (var (name, location) in references)
         {
             if (routeNames.ContainsKey(name))
@@ -148,18 +171,73 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static bool IsLinkTargetReceiver(ExpressionSyntax receiver) => receiver switch
+    private static IEnumerable<string> AdditionalRouteNames(CompilationAnalysisContext context)
     {
-        IdentifierNameSyntax identifier => identifier.Identifier.ValueText == "LinkTarget",
-        MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText == "LinkTarget",
-        _ => false,
-    };
+        var provider = context.Options.AnalyzerConfigOptionsProvider;
+        var raw = new List<string>();
 
-    private static (string Value, Location Location)? FirstStringLiteral(InvocationExpressionSyntax invocation)
+        if (provider.GlobalOptions.TryGetValue("cairn_additional_route_names", out var global))
+        {
+            raw.Add(global);
+        }
+
+        if (provider.GlobalOptions.TryGetValue("build_property.CairnAdditionalRouteNames", out var property))
+        {
+            raw.Add(property);
+        }
+
+        foreach (var tree in context.Compilation.SyntaxTrees)
+        {
+            if (provider.GetOptions(tree).TryGetValue("cairn_additional_route_names", out var perTree))
+            {
+                raw.Add(perTree);
+            }
+        }
+
+        foreach (var list in raw)
+        {
+            foreach (var name in list.Split(','))
+            {
+                var trimmed = name.Trim();
+                if (trimmed.Length > 0)
+                {
+                    yield return trimmed;
+                }
+            }
+        }
+    }
+
+    // The invocation must bind to a method on Cairn.LinkTarget (checked by metadata name via the semantic
+    // model): a look-alike LinkTarget in another namespace is not a Cairn link reference, while `using static
+    // Cairn.LinkTarget` and type aliases — invisible to a syntax check — are.
+    private static bool IsLinkTargetRoute(SyntaxNodeAnalysisContext context, InvocationExpressionSyntax invocation)
     {
-        var argument = invocation.ArgumentList.Arguments.FirstOrDefault();
-        return argument?.Expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression)
-            ? (literal.Token.ValueText, literal.GetLocation())
+        var info = context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken);
+        var symbol = info.Symbol ?? (info.CandidateSymbols.Length == 1 ? info.CandidateSymbols[0] : null);
+
+        return symbol is IMethodSymbol method
+            && method.ContainingType is { Name: "LinkTarget", ContainingType: null } type
+            && type.ContainingNamespace is { Name: "Cairn", ContainingNamespace.IsGlobalNamespace: true };
+    }
+
+    // A string literal, or any expression the compiler can evaluate to a constant string (a const field,
+    // nameof(...), concatenated constants) — so names factored into constants neither false-positive as
+    // undeclared nor escape validation as references.
+    private static (string Value, Location Location)? FirstStringArgument(SyntaxNodeAnalysisContext context, InvocationExpressionSyntax invocation)
+    {
+        if (invocation.ArgumentList.Arguments.FirstOrDefault() is not { } argument)
+        {
+            return null;
+        }
+
+        if (argument.Expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
+        {
+            return (literal.Token.ValueText, literal.GetLocation());
+        }
+
+        var constant = context.SemanticModel.GetConstantValue(argument.Expression, context.CancellationToken);
+        return constant is { HasValue: true, Value: string name }
+            ? (name, argument.Expression.GetLocation())
             : null;
     }
 
