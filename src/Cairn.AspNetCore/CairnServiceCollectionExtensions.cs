@@ -36,6 +36,7 @@ public static class CairnServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Transient<IStartupFilter, CairnHeadersStartupFilter>());
         services.TryAddSingleton<CairnOptions>(static provider => provider.GetRequiredService<IOptions<CairnOptions>>().Value);
         services.TryAddSingleton<ILinkConfigProvider>(static provider => provider.GetRequiredService<CairnOptions>().Registry);
+        services.TryAddSingleton<IPaginationEnvelopeProvider>(static provider => new OptionsPaginationEnvelopeProvider(provider.GetRequiredService<CairnOptions>()));
         services.TryAddSingleton<ILinkEngine, LinkEngine>();
         services.TryAddScoped<ILinkUrlResolver, LinkGeneratorUrlResolver>();
         services.TryAddScoped<ILinkAuthorizer, AuthorizationPolicyLinkAuthorizer>();

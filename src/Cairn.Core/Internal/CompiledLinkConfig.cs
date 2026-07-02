@@ -19,8 +19,11 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
     }
 
     // An affordance marked AsDefault() emits under the reserved "default" HAL-FORMS template key — as does one
-    // literally named "default" (template keys compare case-insensitively). Two claimants would collide
-    // last-wins on the wire with no trace, so fail deterministically at registration time instead.
+    // literally named "default" (template keys compare case-insensitively). Two claimants that always emit
+    // would collide last-wins on the wire with no trace, so fail deterministically at registration time. A
+    // claimant gated by When()/RequireAuthorization() may not emit, and several gated claimants with mutually
+    // exclusive conditions are a legitimate pattern ("approve is the default when pending, reopen when
+    // closed") — so only unconditional claimants count toward the collision.
     private static void ThrowOnDefaultTemplateCollision(LinkBuilder<T> builder)
     {
         AffordanceSpec<T>? claimant = null;
@@ -31,12 +34,18 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
                 continue;
             }
 
+            if (spec.Condition is not null || spec.Policy is not null)
+            {
+                continue;
+            }
+
             if (claimant is not null)
             {
                 throw new InvalidOperationException(
-                    $"The link configuration for {typeof(T).Name} declares more than one affordance claiming the reserved 'default' HAL-FORMS template key: " +
+                    $"The link configuration for {typeof(T).Name} declares more than one affordance unconditionally claiming the reserved 'default' HAL-FORMS template key: " +
                     $"'{claimant.Relation.Value}'{(claimant.IsDefault ? " (AsDefault)" : string.Empty)} and '{spec.Relation.Value}'{(spec.IsDefault ? " (AsDefault)" : string.Empty)}. " +
-                    "Mark only one affordance AsDefault(), and don't combine AsDefault() with an affordance named 'default'.");
+                    "Mark only one always-emitted affordance AsDefault() — additional defaults are allowed when gated with When() or RequireAuthorization() so at most one emits per response — " +
+                    "and don't combine an unconditional AsDefault() with an unconditional affordance named 'default'.");
             }
 
             claimant = spec;

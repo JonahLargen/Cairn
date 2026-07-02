@@ -164,6 +164,48 @@ public class CairnOpenApiTests
     }
 
     [Fact]
+    public async Task Adapted_paged_envelope_documents_media_types_and_pagination_links()
+    {
+        using var document = await GetDocumentAsync();
+        var content = document.RootElement
+            .GetProperty("paths").GetProperty("/orders/adapted-paged").GetProperty("get")
+            .GetProperty("responses").GetProperty("200").GetProperty("content");
+
+        // An envelope adapted via AddPaging is decorated by the wire exactly like PagedResource<T>; the
+        // registration reaches the document through the Core-level IPaginationEnvelopeProvider.
+        Assert.True(content.TryGetProperty("application/json", out var json));
+        Assert.True(content.TryGetProperty("application/hal+json", out _));
+        Assert.True(content.TryGetProperty("application/prs.hal-forms+json", out _));
+
+        var links = ResolveSchema(document, json.GetProperty("schema")).GetProperty("properties").GetProperty("_links");
+        foreach (var relation in new[] { "self", "first", "prev", "next", "last" })
+        {
+            Assert.True(links.GetProperty("properties").TryGetProperty(relation, out _), $"pagination links missing '{relation}'");
+        }
+    }
+
+    [Fact]
+    public async Task Adapted_cursor_envelope_documents_media_types_and_cursor_links()
+    {
+        using var document = await GetDocumentAsync();
+        var content = document.RootElement
+            .GetProperty("paths").GetProperty("/orders/adapted-cursor").GetProperty("get")
+            .GetProperty("responses").GetProperty("200").GetProperty("content");
+
+        Assert.True(content.TryGetProperty("application/json", out var json));
+        Assert.True(content.TryGetProperty("application/hal+json", out _));
+        Assert.True(content.TryGetProperty("application/prs.hal-forms+json", out _));
+
+        var links = ResolveSchema(document, json.GetProperty("schema")).GetProperty("properties").GetProperty("_links");
+        foreach (var relation in new[] { "self", "next", "prev" })
+        {
+            Assert.True(links.GetProperty("properties").TryGetProperty(relation, out _), $"cursor links missing '{relation}'");
+        }
+
+        Assert.False(links.GetProperty("properties").TryGetProperty("last", out _));
+    }
+
+    [Fact]
     public async Task Schema_keeps_a_dto_declared_links_property()
     {
         using var document = await GetDocumentAsync();
@@ -205,7 +247,11 @@ public class CairnOpenApiTests
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
-        builder.Services.AddCairn(o => o.AddLinks(new DocOrderLinks()).AddLinks(new DocClashOrderLinks()));
+        builder.Services.AddCairn(o => o
+            .AddLinks(new DocOrderLinks())
+            .AddLinks(new DocClashOrderLinks())
+            .AddPaging<DocCustomPage>(p => new PagedView(p.Records, p.PageNo, p.Size, p.Total))
+            .AddCursorPaging<DocCustomFeed>(f => new CursorView(f.Entries, f.After, f.Before)));
         builder.Services.AddOpenApi(o => o.AddCairnHypermedia());
 
         await using var app = builder.Build();
@@ -216,6 +262,8 @@ public class CairnOpenApiTests
         app.MapGet("/orders", () => TypedResults.Ok(new List<DocOrder> { new(1) })).WithLinks();
         app.MapGet("/orders/paged", () => TypedResults.Ok(new PagedResource<DocOrder>([new(1)], 1, 10, 25))).WithLinks();
         app.MapGet("/orders/cursor", () => TypedResults.Ok(new CursorPage<DocOrder>([new(1)], Next: "n"))).WithLinks();
+        app.MapGet("/orders/adapted-paged", () => TypedResults.Ok(new DocCustomPage([new(1)], 1, 10, 25))).WithLinks();
+        app.MapGet("/orders/adapted-cursor", () => TypedResults.Ok(new DocCustomFeed([new(1)], "a", null))).WithLinks();
         app.MapGet("/clash", () => TypedResults.Ok(new DocClashOrder(1, new Dictionary<string, string>()))).WithLinks();
         app.MapGet("/plain", () => TypedResults.Ok(new DocPlainNote("hi")));
 
@@ -243,6 +291,11 @@ public class CairnOpenApiTests
     private sealed record DocOrder(int Id);
 
     private sealed record DocPlainNote(string Text);
+
+    // Envelope types adapted via AddPaging/AddCursorPaging rather than implementing the pagination interfaces.
+    private sealed record DocCustomPage(List<DocOrder> Records, int PageNo, int Size, int Total);
+
+    private sealed record DocCustomFeed(List<DocOrder> Entries, string? After, string? Before);
 
     // Declares its own _links property; the wire serializes it (the injector skips colliding names).
     private sealed record DocClashOrder(int Id, [property: JsonPropertyName("_links")] Dictionary<string, string> DeclaredLinks);

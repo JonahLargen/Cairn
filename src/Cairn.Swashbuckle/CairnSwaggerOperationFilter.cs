@@ -18,7 +18,7 @@ internal sealed class CairnSwaggerOperationFilter(IServiceProvider services) : I
     {
         if (services.GetService<ILinkConfigProvider>() is { } provider)
         {
-            HypermediaJsonSchemas.AddNegotiatedMediaTypes(context.ApiDescription, operation, provider);
+            HypermediaJsonSchemas.AddNegotiatedMediaTypes(context.ApiDescription, operation, provider, services.GetService<IPaginationEnvelopeProvider>());
         }
     }
 }

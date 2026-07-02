@@ -74,23 +74,34 @@ internal static class HypermediaJsonSchemas
     /// not linked — its elements carry hypermedia, but a JSON array is not a HAL document and stays
     /// <c>application/json</c> on the wire.
     /// </summary>
-    public static bool IsLinked(ILinkConfigProvider provider, Type? type)
+    public static bool IsLinked(ILinkConfigProvider provider, IPaginationEnvelopeProvider? envelopes, Type? type)
     {
         if (type is null || type == typeof(void))
         {
             return false;
         }
 
-        return provider.GetConfig(type) is not null || IsPaginationEnvelope(type, out _);
+        return provider.GetConfig(type) is not null || IsPaginationEnvelope(type, envelopes, out _);
     }
 
     /// <summary>
-    /// Whether <paramref name="type"/> is a pagination envelope (<c>PagedResource&lt;T&gt;</c>,
-    /// <c>CursorPage&lt;T&gt;</c>, or any implementation of their interfaces); <paramref name="cursor"/> says
-    /// which navigation shape it carries. Envelope types adapted via <c>AddPaging</c>/<c>AddCursorPaging</c>
-    /// are not visible from here (that registration lives in Cairn.AspNetCore's options).
+    /// Whether <paramref name="type"/> is a pagination envelope: <c>PagedResource&lt;T&gt;</c>,
+    /// <c>CursorPage&lt;T&gt;</c>, any implementation of their interfaces, or a type adapted via
+    /// <c>AddPaging</c>/<c>AddCursorPaging</c> — those registrations live in Cairn.AspNetCore's options
+    /// and reach here through the host's <paramref name="envelopes"/> service. <paramref name="cursor"/>
+    /// says which navigation shape the envelope carries.
     /// </summary>
-    public static bool IsPaginationEnvelope(Type type, out bool cursor)
+    public static bool IsPaginationEnvelope(Type type, IPaginationEnvelopeProvider? envelopes, out bool cursor)
+    {
+        if (IsPaginationEnvelope(type, out cursor))
+        {
+            return true;
+        }
+
+        return envelopes is not null && envelopes.IsPaginationEnvelope(type, out cursor);
+    }
+
+    private static bool IsPaginationEnvelope(Type type, out bool cursor)
     {
         foreach (var candidate in type.GetInterfaces())
         {
@@ -116,7 +127,7 @@ internal static class HypermediaJsonSchemas
     /// Mirrors each Cairn-linked <c>application/json</c> response of <paramref name="operation"/> onto the
     /// HAL and HAL-FORMS media types the endpoint can negotiate, reusing the JSON entry's schema.
     /// </summary>
-    public static void AddNegotiatedMediaTypes(ApiDescription description, OpenApiOperation operation, ILinkConfigProvider provider)
+    public static void AddNegotiatedMediaTypes(ApiDescription description, OpenApiOperation operation, ILinkConfigProvider provider, IPaginationEnvelopeProvider? envelopes)
     {
         if (operation.Responses is not { } responses)
         {
@@ -125,7 +136,7 @@ internal static class HypermediaJsonSchemas
 
         foreach (var responseType in description.SupportedResponseTypes)
         {
-            if (!IsLinked(provider, responseType.Type))
+            if (!IsLinked(provider, envelopes, responseType.Type))
             {
                 continue;
             }

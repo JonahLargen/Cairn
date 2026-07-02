@@ -25,7 +25,7 @@ internal sealed class CairnSwaggerSchemaFilter(IServiceProvider services) : ISch
         {
             HypermediaJsonSchemas.Apply(concrete);
         }
-        else if (HypermediaJsonSchemas.IsPaginationEnvelope(context.Type, out var cursor))
+        else if (HypermediaJsonSchemas.IsPaginationEnvelope(context.Type, services.GetService<IPaginationEnvelopeProvider>(), out var cursor))
         {
             HypermediaJsonSchemas.ApplyPaginationLinks(concrete, cursor);
         }
