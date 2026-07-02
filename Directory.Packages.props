@@ -20,6 +20,9 @@
          newer compilers, including the .NET 10 SDK's Roslyn 5. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
+    <!-- API-stability guardrail: tracks the public surface of every shippable package in
+         PublicAPI.Shipped.txt / PublicAPI.Unshipped.txt and fails the build on undeclared changes. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="4.14.0" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.2" />

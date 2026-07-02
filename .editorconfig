@@ -38,6 +38,13 @@ dotnet_style_prefer_conditional_expression_over_assignment = true:suggestion
 dotnet_style_null_propagation = true:suggestion
 dotnet_style_coalesce_expression = true:suggestion
 
+# Public API surface tracking (Microsoft.CodeAnalysis.PublicApiAnalyzers).
+# RS0016/RS0017 (undeclared additions/removals) stay at their default warning severity and fail
+# the build via TreatWarningsAsErrors. RS0026 forbids sibling overloads that each end in an
+# optional parameter; the library deliberately uses the idiomatic optional-CancellationToken
+# overload pattern (as dotnet/runtime does), so that rule is off.
+dotnet_diagnostic.RS0026.severity = none
+
 # Naming: private fields => _camelCase
 dotnet_naming_rule.private_fields_underscore.severity = suggestion
 dotnet_naming_rule.private_fields_underscore.symbols = private_fields
