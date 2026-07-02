@@ -2,19 +2,36 @@ using System.Text.Json;
 
 namespace Cairn.Client;
 
+/// <summary>The hypermedia parsed from a resource body.</summary>
+internal sealed record ParsedHypermedia(
+    IReadOnlyDictionary<string, IReadOnlyList<Link>> Links,
+    IReadOnlyDictionary<string, Affordance> Affordances,
+    IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> Fields,
+    IReadOnlyList<Curie> Curies,
+    JsonElement Embedded)
+{
+    public static readonly ParsedHypermedia Empty = new(
+        new Dictionary<string, IReadOnlyList<Link>>(),
+        new Dictionary<string, Affordance>(),
+        new Dictionary<string, IReadOnlyList<AffordanceField>>(),
+        [],
+        default);
+}
+
 /// <summary>Parses Cairn hypermedia (<c>_links</c>, <c>_actions</c>, HAL-FORMS <c>_templates</c>) from a resource body.</summary>
 internal static class HypermediaParser
 {
-    public static (IReadOnlyDictionary<string, IReadOnlyList<Link>> Links, IReadOnlyDictionary<string, Affordance> Affordances, IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> Fields, JsonElement Embedded) Parse(JsonElement root)
+    public static ParsedHypermedia Parse(JsonElement root)
     {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return ParsedHypermedia.Empty;
+        }
+
         var links = new Dictionary<string, IReadOnlyList<Link>>(StringComparer.Ordinal);
         var affordances = new Dictionary<string, Affordance>(StringComparer.Ordinal);
         var fields = new Dictionary<string, IReadOnlyList<AffordanceField>>(StringComparer.Ordinal);
-
-        if (root.ValueKind != JsonValueKind.Object)
-        {
-            return (links, affordances, fields, default);
-        }
+        List<Curie>? curies = null;
 
         if (root.TryGetProperty("_links", out var linksElement) && linksElement.ValueKind == JsonValueKind.Object)
         {
@@ -30,6 +47,18 @@ internal static class HypermediaParser
                 if (parsed.Count > 0)
                 {
                     links[entry.Name] = parsed;
+                }
+
+                // The reserved curies relation additionally defines prefixes for resolving relation docs.
+                if (entry.Name == "curies")
+                {
+                    foreach (var link in parsed)
+                    {
+                        if (IsUsable(link.Name))
+                        {
+                            (curies ??= []).Add(new Curie(link.Name!, link.Href, link.Templated));
+                        }
+                    }
                 }
             }
         }
@@ -57,6 +86,7 @@ internal static class HypermediaParser
                     affordances[entry.Name] = new Affordance(entry.Name, target, GetString(entry.Value, "method") ?? "GET")
                     {
                         Title = GetString(entry.Value, "title"),
+                        ContentType = GetString(entry.Value, "contentType"),
                     };
                     fields[entry.Name] = ParseFields(entry.Value);
                 }
@@ -68,7 +98,7 @@ internal static class HypermediaParser
             ? embeddedElement.Clone()
             : default;
 
-        return (links, affordances, fields, embedded);
+        return new ParsedHypermedia(links, affordances, fields, curies ?? [], embedded);
     }
 
     private static IReadOnlyList<Link> ParseLinks(string relation, JsonElement value)

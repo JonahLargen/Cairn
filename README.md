@@ -116,6 +116,53 @@ builder.Services.AddCairn(o => o.TransformUrl = (http, url) =>
 
 Header and media-type versioning keep the version out of the URL by design, so links stay version-neutral and the client re-applies its version.
 
+## Link URL policy
+
+Links resolve to absolute URLs from the incoming request by default. Behind a proxy or gateway whose forwarded headers you can't fix, that leaks internal hostnames — pin the public origin instead, or emit path-relative links:
+
+```csharp
+builder.Services.AddCairn(o => o.PublicBaseUri = new Uri("https://api.example.com/v2"));
+// or: o.UrlStyle = LinkUrlStyle.PathRelative;   // links like "/orders/1", immune to host misconfiguration
+```
+
+Both apply to route-resolved links and pagination links; `TransformUrl` still runs afterwards.
+
+## Conditional requests and OPTIONS
+
+`CairnClient` already sends `If-None-Match`/`If-Match`; the server side completes the round trip:
+
+```csharp
+app.MapGet("/orders/{id:int}", (int id, IOrderRepo repo) => TypedResults.Ok(repo.Get(id)))
+   .WithLinks()
+   .WithETag((OrderDto o) => o.Version);   // emits ETag, answers matching If-None-Match with 304
+
+app.MapPut("/orders/{id:int}", (int id, OrderDto dto, HttpRequest req, IOrderRepo repo) =>
+    CairnPreconditions.Evaluate(req, repo.Get(id).Version, requireIfMatch: true)   // 412 / 428
+        ?? Results.NoContent());
+
+app.UseCairnOptionsHandler();   // OPTIONS /orders/1 → 204 + Allow: GET, HEAD, PUT, OPTIONS
+```
+
+## Custom wire formats
+
+The built-in formats (flat, HAL, HAL-FORMS) are joined by anything you register — a formatter's media type participates in `Accept` negotiation and can be forced per endpoint:
+
+```csharp
+builder.Services.AddCairn(o => o.AddFormatter(new SirenFormatter()));   // IHypermediaFormatter
+// per endpoint: .WithHypermediaFormat("application/vnd.siren+json")
+```
+
+A formatter declares the JSON properties it injects and projects each resource's `HypermediaDocument` (links, affordances, embedded) into them; when active it supersedes the built-in `_links`/`_actions`/`_templates` and the response is labeled with its media type.
+
+## Observability
+
+Cairn publishes an `ActivitySource` and a `Meter`, both named `Cairn.AspNetCore` (see `CairnDiagnostics`): compute-stage spans plus counters for resources linked, links/affordances computed, **lax-mode drops** (`cairn.links.unresolved` — the silent failure mode, also logged once per type/relation), and computed-but-never-emitted hypermedia. Subscribe with OpenTelemetry via `AddSource`/`AddMeter`.
+
+## Analyzers
+
+- **CAIRN001** — a `LinkTarget.Route("name")` whose name no `WithName`/`[Http*(Name = ...)]` declares (constants and `nameof` are resolved). Names declared in other projects can be listed via `cairn_additional_route_names` in `.editorconfig` or the `CairnAdditionalRouteNames` MSBuild property.
+- **CAIRN002** — a `.WithLinks()` endpoint returning a type with no `LinkConfig<T>` in the compilation: the classic silent no-op.
+
 ## Packages
 
 | Package | Purpose |
@@ -132,6 +179,14 @@ dotnet test Cairn.slnx
 ```
 
 Requires the .NET 10 SDK.
+
+"What does this cost per response?" — run the benchmarks:
+
+```bash
+dotnet run -c Release --project benchmarks/Cairn.Benchmarks
+```
+
+They compare a 1,000-item page with and without Cairn end to end, and isolate the serializer-level overhead of the injected hypermedia properties.
 
 ## License
 

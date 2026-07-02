@@ -18,7 +18,8 @@ public sealed class Resource<T>
         IReadOnlyDictionary<string, Affordance> affordances,
         IReadOnlyDictionary<string, IReadOnlyList<AffordanceField>> fields,
         string? etag = null,
-        JsonElement embedded = default)
+        JsonElement embedded = default,
+        IReadOnlyList<Curie>? curies = null)
     {
         _client = client;
         _fields = fields;
@@ -28,6 +29,7 @@ public sealed class Resource<T>
         Links = LinkMap.Flatten(links);
         Affordances = affordances;
         ETag = etag;
+        Curies = curies ?? [];
     }
 
     /// <summary>The deserialized resource body, or <see langword="null"/> if the body could not be deserialized to <typeparamref name="T"/>.</summary>
@@ -45,6 +47,34 @@ public sealed class Resource<T>
 
     /// <summary>The resource's affordances (available actions), keyed by name.</summary>
     public IReadOnlyDictionary<string, Affordance> Affordances { get; }
+
+    /// <summary>The curie definitions from <c>_links.curies</c>, resolving prefixed relations to documentation.</summary>
+    public IReadOnlyList<Curie> Curies { get; }
+
+    /// <summary>
+    /// The documentation URL for a curie-prefixed relation (e.g. <c>acme:widget</c>), expanding the matching
+    /// curie's <c>{rel}</c> template — or <see langword="null"/> when the relation carries no known prefix.
+    /// </summary>
+    public string? DocumentationFor(string relation)
+    {
+        ArgumentNullException.ThrowIfNull(relation);
+        var colon = relation.IndexOf(':');
+        if (colon <= 0)
+        {
+            return null;
+        }
+
+        var prefix = relation[..colon];
+        foreach (var curie in Curies)
+        {
+            if (string.Equals(curie.Name, prefix, StringComparison.Ordinal))
+            {
+                return curie.Templated ? UriTemplate.Expand(curie.Href, new { rel = relation[(colon + 1)..] }) : curie.Href;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>All links sharing the given relation (a HAL link array exposes more than one), or empty if none.</summary>
     public IReadOnlyList<Link> LinksFor(string relation) => _linksByRelation.TryGetValue(relation, out var list) ? list : [];

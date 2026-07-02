@@ -16,8 +16,16 @@ public sealed class CairnClient
     /// <param name="allowLink">
     /// An optional policy invoked with the absolute target of a followed link or invoked affordance; return
     /// <see langword="false"/> to reject it. Use it to restrict navigation to trusted hosts (e.g. the base
-    /// address authority). When <see langword="null"/>, any server-supplied link is followed.
+    /// address authority). When <see langword="null"/>, any server-supplied link is followed. Note that a
+    /// default <see cref="HttpClient"/> follows redirects inside its handler, where this policy cannot see the
+    /// hops — register via <c>AddCairnClient</c> (which enforces the policy on every redirect) or disable
+    /// <c>HttpClientHandler.AllowAutoRedirect</c>.
     /// </param>
+    /// <remarks>
+    /// Unless <paramref name="http"/> already declares <c>Accept</c> headers, the client asks for the
+    /// hypermedia it can parse: <c>application/prs.hal-forms+json</c>, then <c>application/hal+json</c>,
+    /// then <c>application/json</c>.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="http"/> is null.</exception>
     public CairnClient(HttpClient http, JsonSerializerOptions? jsonOptions = null, Func<Uri, bool>? allowLink = null)
     {
@@ -25,6 +33,13 @@ public sealed class CairnClient
         _http = http;
         _json = jsonOptions ?? new JsonSerializerOptions(JsonSerializerDefaults.Web);
         _allowLink = allowLink;
+
+        if (http.DefaultRequestHeaders.Accept.Count == 0)
+        {
+            http.DefaultRequestHeaders.Accept.ParseAdd("application/prs.hal-forms+json");
+            http.DefaultRequestHeaders.Accept.ParseAdd("application/hal+json; q=0.9");
+            http.DefaultRequestHeaders.Accept.ParseAdd("application/json; q=0.8");
+        }
     }
 
     /// <summary>
@@ -124,7 +139,7 @@ public sealed class CairnClient
         using var request = new HttpRequestMessage(new HttpMethod(affordance.Method), Authorize(affordance.Href));
         if (body is not null)
         {
-            request.Content = JsonContent.Create(body, options: _json);
+            request.Content = CreateContent(body, affordance.ContentType);
         }
 
         if (ifMatch is not null)
@@ -133,6 +148,66 @@ public sealed class CairnClient
         }
 
         return await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Honor the affordance's declared contentType (HAL-FORMS): JSON media types serialize the body as JSON
+    // under that label; form encoding flattens the body's top-level scalars. Anything else must be handed to
+    // us pre-encoded, so fail loudly rather than mislabel a JSON payload.
+    private HttpContent CreateContent(object body, string? contentType)
+    {
+        if (contentType is null || string.Equals(contentType, "application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonContent.Create(body, options: _json);
+        }
+
+        if (System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(contentType, out var mediaType)
+            && mediaType.MediaType is { } label
+            && label.EndsWith("+json", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonContent.Create(body, mediaType, _json);
+        }
+
+        if (string.Equals(mediaType?.MediaType, "application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
+        {
+            return new FormUrlEncodedContent(FormPairs(body));
+        }
+
+        throw new NotSupportedException(
+            $"The affordance's content type '{contentType}' is not supported. Use application/json, a +json media type, or application/x-www-form-urlencoded.");
+    }
+
+    private IEnumerable<KeyValuePair<string, string>> FormPairs(object body)
+    {
+        if (body is IEnumerable<KeyValuePair<string, string>> pairs)
+        {
+            return pairs;
+        }
+
+        var element = JsonSerializer.SerializeToElement(body, _json);
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw new NotSupportedException("A form-encoded affordance body must be an object (or key/value pairs).");
+        }
+
+        var flattened = new List<KeyValuePair<string, string>>();
+        foreach (var property in element.EnumerateObject())
+        {
+            switch (property.Value.ValueKind)
+            {
+                case JsonValueKind.Null or JsonValueKind.Undefined:
+                    break;
+                case JsonValueKind.String:
+                    flattened.Add(new(property.Name, property.Value.GetString()!));
+                    break;
+                case JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False:
+                    flattened.Add(new(property.Name, property.Value.GetRawText()));
+                    break;
+                default:
+                    throw new NotSupportedException($"The '{property.Name}' value is a nested {property.Value.ValueKind}; it cannot be form-encoded.");
+            }
+        }
+
+        return flattened;
     }
 
     private Uri Authorize(string href)
@@ -186,9 +261,8 @@ public sealed class CairnClient
         var root = document.RootElement;
 
         // A bare array carries no collection-level links; an envelope's links live on its root object.
-        var (links, affordances, _, _) = root.ValueKind == JsonValueKind.Object
-            ? HypermediaParser.Parse(root)
-            : (Empty<IReadOnlyList<Link>>(), Empty<Affordance>(), Empty<IReadOnlyList<AffordanceField>>(), default);
+        var parsed = root.ValueKind == JsonValueKind.Object ? HypermediaParser.Parse(root) : ParsedHypermedia.Empty;
+        var (links, affordances) = (parsed.Links, parsed.Affordances);
 
         var elements = root.ValueKind == JsonValueKind.Array ? root
             : root.ValueKind == JsonValueKind.Object && root.TryGetProperty(itemsProperty, out var array) && array.ValueKind == JsonValueKind.Array ? array
@@ -240,8 +314,8 @@ public sealed class CairnClient
     internal Resource<T> BuildResource<T>(JsonElement element, string? etag = null)
     {
         var value = element.Deserialize<T>(_json);
-        var (links, affordances, fields, embedded) = HypermediaParser.Parse(element);
-        return new Resource<T>(this, value, links, affordances, fields, etag, embedded);
+        var parsed = HypermediaParser.Parse(element);
+        return new Resource<T>(this, value, parsed.Links, parsed.Affordances, parsed.Fields, etag, parsed.Embedded, parsed.Curies);
     }
 
     private static async Task<Problem> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)
