@@ -127,8 +127,12 @@ class Program
     public void Generates_route_methods_from_controller_attributes()
     {
         const string source = @"
-class RouteAttribute : System.Attribute { public RouteAttribute(string template) {} public string Name { get; set; } }
-class HttpGetAttribute : System.Attribute { public HttpGetAttribute() {} public HttpGetAttribute(string template) {} public string Name { get; set; } }
+using Microsoft.AspNetCore.Mvc;
+namespace Microsoft.AspNetCore.Mvc
+{
+    class RouteAttribute : System.Attribute { public RouteAttribute(string template) {} public string Name { get; set; } }
+    class HttpGetAttribute : System.Attribute { public HttpGetAttribute() {} public HttpGetAttribute(string template) {} public string Name { get; set; } }
+}
 
 [Route(""customers"")]
 class CustomersController
@@ -171,8 +175,12 @@ class Program
     public void Tilde_rooted_controller_action_template_overrides_the_controller_prefix()
     {
         const string source = @"
-class RouteAttribute : System.Attribute { public RouteAttribute(string template) {} public string Name { get; set; } }
-class HttpGetAttribute : System.Attribute { public HttpGetAttribute(string template) {} public string Name { get; set; } }
+using Microsoft.AspNetCore.Mvc;
+namespace Microsoft.AspNetCore.Mvc
+{
+    class RouteAttribute : System.Attribute { public RouteAttribute(string template) {} public string Name { get; set; } }
+    class HttpGetAttribute : System.Attribute { public HttpGetAttribute(string template) {} public string Name { get; set; } }
+}
 
 [Route(""api/{version}"")]
 class ThingsController
@@ -203,7 +211,72 @@ class Program
 
         var diagnostics = RunDiagnostics(source);
 
-        Assert.Contains(diagnostics, d => d.Id == "CAIRN002");
+        Assert.Contains(diagnostics, d => d.Id == "CAIRN003");
+        // CAIRN002 belongs to the MissingLinkConfig analyzer; the generator must not reuse it.
+        Assert.DoesNotContain(diagnostics, d => d.Id == "CAIRN002");
+    }
+
+    [Fact]
+    public void Resolves_route_names_declared_through_constants_and_nameof()
+    {
+        const string source = @"
+static class RouteNames { public const string GetOrder = ""GetOrder""; }
+class Program
+{
+    static void GetOrderItem() {}
+    static void M()
+    {
+        app.MapGet(""/orders/{id:int}"", handler).WithName(RouteNames.GetOrder);
+        app.MapGet(""/orders/{id:int}/items/{itemId:int}"", handler).WithName(nameof(GetOrderItem));
+    }
+}";
+
+        var generated = Run(source);
+
+        // Names factored into constants or nameof(...) previously vanished from the catalog.
+        Assert.Contains("public static global::Cairn.LinkTarget GetOrder(int id)", generated);
+        Assert.Contains(@"Route(""GetOrder"", new { id })", generated);
+        Assert.Contains("public static global::Cairn.LinkTarget GetOrderItem(int id, int itemId)", generated);
+    }
+
+    [Fact]
+    public void Resolves_controller_route_names_declared_through_nameof()
+    {
+        const string source = @"
+using Microsoft.AspNetCore.Mvc;
+namespace Microsoft.AspNetCore.Mvc
+{
+    class HttpGetAttribute : System.Attribute { public HttpGetAttribute(string template) {} public string Name { get; set; } }
+}
+
+class WidgetsController
+{
+    [HttpGet(""widgets/{id:int}"", Name = nameof(GetWidget))]
+    public object GetWidget(int id) => null;
+}";
+
+        var generated = Run(source);
+
+        Assert.Contains("public static global::Cairn.LinkTarget GetWidget(int id)", generated);
+        Assert.Contains(@"Route(""GetWidget"", new { id })", generated);
+    }
+
+    [Fact]
+    public void Emits_an_empty_routes_class_when_no_endpoints_are_named()
+    {
+        const string source = @"
+class Program
+{
+    static void M() { }
+}";
+
+        var generated = Run(source);
+
+        // Without the empty class, user code referencing Cairn.Routes fails to compile until the
+        // first endpoint is named.
+        Assert.Contains("public static partial class Routes", generated);
+        Assert.DoesNotContain("public static global::Cairn.LinkTarget", generated);
+        Assert.DoesNotContain(CSharpSyntaxTree.ParseText(generated).GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
     }
 
     private static string Run(string source) => RunDriver(source).GeneratedTrees.Single().ToString();
