@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write # create the GitHub release
+  id-token: write # GitHub OIDC token for NuGet.org Trusted Publishing
 
 jobs:
   release:
@@ -42,12 +43,21 @@ jobs:
       - name: Pack
         run: dotnet pack Cairn.slnx --configuration Release --no-build --output artifacts
 
+      # Trusted Publishing: exchange this run's OIDC token for a short-lived (1h) NuGet.org
+      # API key — no stored secret to rotate. Requires a trusted publishing policy on
+      # nuget.org pointing at this repo + workflow file (see RELEASING.md).
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
       - name: Push to NuGet.org
         # --skip-duplicate makes re-runs idempotent; matching .snupkg symbol packages are
         # pushed automatically alongside each .nupkg.
         run: >
           dotnet nuget push "artifacts/*.nupkg"
-          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 

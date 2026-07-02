@@ -45,13 +45,21 @@ NuGet lists it as a pre-release and the GitHub release is marked as a pre-releas
 
 ## One-time setup
 
-The workflow needs a `NUGET_API_KEY` repository secret:
+Publishing uses NuGet.org
+[Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing): the
+workflow exchanges its GitHub OIDC token for a short-lived (1-hour) API key at publish time, so
+there is no long-lived key to store or rotate.
 
-1. Create an API key at <https://www.nuget.org/account/apikeys> with the **Push new packages and
-   package versions** scope, glob pattern `Cairn.*`.
-2. Add it under **Settings → Secrets and variables → Actions** as `NUGET_API_KEY`.
+1. On nuget.org, click your username → **Trusted Publishing** → add a policy:
+   - **Repository Owner**: `JonahLargen`
+   - **Repository**: `Cairn`
+   - **Workflow File**: `release.yml` (file name only, no `.github/workflows/` path)
+   - **Environment**: leave empty
+2. In the GitHub repo, add a secret under **Settings → Secrets and variables → Actions** named
+   `NUGET_USER` containing your nuget.org **profile name** (not your email). The `NuGet/login`
+   step reads it.
 
-NuGet.org API keys expire after at most a year; when a push fails with 403, regenerate the key and
-update the secret. Alternatively, NuGet.org supports
-[Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing) (OIDC
-from GitHub Actions, no long-lived secret) — a worthwhile upgrade once the packages exist.
+A freshly created policy can show as *temporarily active* for 7 days until its first successful
+publish locks it to the repository; if the window lapses before the first release, just restart it
+from the same UI. If a push ever fails with 403, check that the policy is still active and that
+`NUGET_USER` matches the nuget.org profile name exactly.
