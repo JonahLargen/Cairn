@@ -1,19 +1,19 @@
+- name: What is HATEOAS?
+  href: hateoas.md
 - name: Getting started
   href: getting-started.md
 - name: Link configurations
   href: link-configs.md
 - name: Wire formats &amp; negotiation
   href: formats.md
-- name: Custom wire formats
-  href: custom-formats.md
+- name: Affordances &amp; HAL-FORMS
+  href: affordances-and-forms.md
 - name: Pagination
   href: pagination.md
 - name: Embedded resources, link arrays &amp; CURIEs
   href: embedded-resources.md
-- name: Affordances &amp; HAL-FORMS
-  href: affordances-and-forms.md
-- name: Controllers (MVC)
-  href: controllers.md
+- name: Custom wire formats
+  href: custom-formats.md
 - name: Error responses
   href: error-responses.md
 - name: API versioning
@@ -22,14 +22,16 @@
   href: url-policy.md
 - name: Conditional requests, OPTIONS &amp; deprecation
   href: conditional-requests.md
-- name: The typed client
-  href: client.md
-- name: OpenAPI &amp; Swagger
-  href: openapi.md
-- name: Route safety
-  href: route-safety.md
 - name: Diagnostics &amp; observability
   href: diagnostics.md
+- name: Controllers (MVC)
+  href: controllers.md
+- name: The typed client
+  href: client.md
+- name: Route safety
+  href: route-safety.md
+- name: OpenAPI &amp; Swagger
+  href: openapi.md
 - name: Testing
   href: testing.md
 - name: Packages
