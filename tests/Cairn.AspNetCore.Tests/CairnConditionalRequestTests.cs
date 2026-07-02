@@ -26,7 +26,7 @@ public class CairnConditionalRequestTests
 
         Assert.Equal(HttpStatusCode.NotModified, second.StatusCode);
         Assert.Equal("\"v5\"", second.Headers.ETag?.ToString());
-        Assert.Equal(0, (await second.Content.ReadAsByteArrayAsync()).Length);
+        Assert.Empty(await second.Content.ReadAsByteArrayAsync());
     }
 
     [Fact]

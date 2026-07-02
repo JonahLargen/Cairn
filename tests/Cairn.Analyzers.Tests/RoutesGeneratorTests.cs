@@ -120,7 +120,7 @@ class Program
 
         // The name must round-trip as a valid C# string literal, not break the generated file.
         Assert.Contains(@"Route(""Get\""Odd\\Name"", null)", generated);
-        Assert.Empty(CSharpSyntaxTree.ParseText(generated).GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(CSharpSyntaxTree.ParseText(generated).GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
     }
 
     [Fact]
