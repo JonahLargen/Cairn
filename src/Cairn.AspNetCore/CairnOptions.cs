@@ -4,12 +4,23 @@ using Microsoft.AspNetCore.Http;
 
 namespace Cairn.AspNetCore;
 
+/// <summary>How Cairn renders the URLs of route-resolved links and pagination links.</summary>
+public enum LinkUrlStyle
+{
+    /// <summary>Absolute URLs derived from the incoming request's scheme and host (or <see cref="CairnOptions.PublicBaseUri"/> when set).</summary>
+    Absolute,
+
+    /// <summary>Path-relative URLs (<c>/orders/1</c>) — immune to proxy/host misconfiguration; clients resolve them against the document's base.</summary>
+    PathRelative,
+}
+
 /// <summary>Configures Cairn's hypermedia services.</summary>
 public sealed class CairnOptions
 {
     private readonly Dictionary<Type, Func<object, IPagedResource>> _paging = [];
     private readonly Dictionary<Type, Func<object, ICursorPagedResource>> _cursorPaging = [];
     private readonly Dictionary<string, string> _curies = new(StringComparer.Ordinal);
+    private Uri? _publicBaseUri;
 
     internal LinkConfigRegistry Registry { get; } = new();
 
@@ -20,6 +31,30 @@ public sealed class CairnOptions
 
     /// <summary>The wire format used when the request doesn't negotiate one (default <see cref="HypermediaFormat.Default"/>).</summary>
     public HypermediaFormat DefaultFormat { get; set; } = HypermediaFormat.Default;
+
+    /// <summary>How link URLs are rendered (default <see cref="LinkUrlStyle.Absolute"/>).</summary>
+    public LinkUrlStyle UrlStyle { get; set; } = LinkUrlStyle.Absolute;
+
+    /// <summary>
+    /// The public origin absolute links are generated against — scheme, host, and optional path base — instead
+    /// of the incoming request's. Set this when the app runs behind a proxy or gateway whose forwarded headers
+    /// aren't (or can't be) configured, so links never leak internal hostnames. Ignored when
+    /// <see cref="UrlStyle"/> is <see cref="LinkUrlStyle.PathRelative"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">The value is a relative URI.</exception>
+    public Uri? PublicBaseUri
+    {
+        get => _publicBaseUri;
+        set
+        {
+            if (value is { IsAbsoluteUri: false })
+            {
+                throw new ArgumentException("PublicBaseUri must be an absolute URI (e.g. https://api.example.com).", nameof(value));
+            }
+
+            _publicBaseUri = value;
+        }
+    }
 
     /// <summary>Whether a known hypermedia media type in the request's <c>Accept</c> header selects the format (default <see langword="true"/>).</summary>
     public bool NegotiateFormat { get; set; } = true;

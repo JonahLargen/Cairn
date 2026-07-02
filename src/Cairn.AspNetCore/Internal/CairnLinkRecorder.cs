@@ -16,6 +16,7 @@ internal static class CairnLinkRecorder
 {
     private const string EmitDiagnosticKey = "Cairn.EmitDiagnostic";
 
+    private static readonly ConcurrentDictionary<(Type Type, string Relation), byte> WarnedUnresolvedLinks = new();
     private static readonly ConcurrentDictionary<Type, byte> WarnedHalActionTypes = new();
     private static readonly ConcurrentDictionary<Type, byte> WarnedValueTypes = new();
     private static readonly ConcurrentDictionary<Type, byte> WarnedAsyncEnumerableTypes = new();
@@ -58,6 +59,10 @@ internal static class CairnLinkRecorder
 
         var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore");
 
+        using var activity = CairnTelemetry.Source.StartActivity("Cairn.ComputeHypermedia");
+        activity?.SetTag("cairn.format", format.ToString());
+        activity?.SetTag("cairn.resource_type", value.GetType().Name);
+
         // An async stream is fundamentally incompatible with the two-pass design: links are computed before
         // serialization, and the stream cannot be enumerated twice. Warn once rather than fail silently.
         if (AsyncEnumerableElementType(value) is { } elementType)
@@ -73,7 +78,10 @@ internal static class CairnLinkRecorder
                 services.GetRequiredService<ILinkAuthorizer>(),
                 options.Mode,
                 services,
-                http.RequestAborted),
+                http.RequestAborted)
+            {
+                OnUnresolvedLink = unresolved => HandleUnresolved(logger, unresolved),
+            },
             options,
             format,
             logger,
@@ -135,7 +143,7 @@ internal static class CairnLinkRecorder
 
         if (cursor is { } cursored)
         {
-            await RecordEnvelopeAsync(http, value, cursored.Items, () => PaginationLinks.BuildCursor(http.Request, cursored, ResolveCursorUrl(http, scope.Options)), scope);
+            await RecordEnvelopeAsync(http, value, cursored.Items, () => PaginationLinks.BuildCursor(http.Request, cursored, ResolveCursorUrl(http, scope.Options), scope.Options), scope);
             return;
         }
 
@@ -172,6 +180,7 @@ internal static class CairnLinkRecorder
 
         var embedded = await RecordEmbeddedAsync(http, linkSet, scope);
         CairnLinkStore.Record(http, value, ToPayload(linkSet, embedded, scope.Options.Curies));
+        CountComputed(linkSet);
     }
 
     // Record each embedded child first (recursing so it gets its own _links), then capture the map.
@@ -224,6 +233,7 @@ internal static class CairnLinkRecorder
             }
 
             CairnLinkStore.Record(http, envelope, new ResourceHypermedia(links, configured.Actions, configured.Embedded));
+            CountComputed(linkSet, extraLinks: links.Count - (configured.Links?.Count ?? 0));
         }
 
         foreach (var item in items)
@@ -381,6 +391,39 @@ internal static class CairnLinkRecorder
         }, (http.Response, mediaType));
     }
 
+    private static void CountComputed(LinkSet linkSet, int extraLinks = 0)
+    {
+        CairnTelemetry.ResourcesLinked.Add(1);
+        if (linkSet.Links.Count + extraLinks > 0)
+        {
+            CairnTelemetry.LinksComputed.Add(linkSet.Links.Count + extraLinks);
+        }
+
+        if (linkSet.Affordances.Count > 0)
+        {
+            CairnTelemetry.AffordancesComputed.Add(linkSet.Affordances.Count);
+        }
+    }
+
+    // A lax-mode drop is the silent failure mode: the link just disappears from the payload. Meter every
+    // occurrence and log once per (resource type, relation) so production drops are discoverable.
+    private static void HandleUnresolved(ILogger? logger, UnresolvedLink unresolved)
+    {
+        CairnTelemetry.LinksUnresolved.Add(
+            1,
+            new KeyValuePair<string, object?>("cairn.resource_type", unresolved.ResourceType.Name),
+            new KeyValuePair<string, object?>("cairn.relation", unresolved.Relation.Value));
+
+        if (logger is not null && WarnedUnresolvedLinks.TryAdd((unresolved.ResourceType, unresolved.Relation.Value), 0))
+        {
+            logger.LogWarning(
+                "Cairn: link '{Relation}' on {ResourceType} targeting {Target} could not be resolved and was dropped (Lax mode). Ensure the endpoint is named (WithName / [Http*(Name=...)]) and all route values are supplied, or use Strict mode to fail instead.",
+                unresolved.Relation.Value,
+                unresolved.ResourceType.Name,
+                unresolved.Target is RouteLinkTarget route ? $"route '{route.RouteName}'" : "an explicit URI");
+        }
+    }
+
     private static void WarnIfActionsBlocked(RecordScope scope, object value, LinkSet linkSet)
     {
         if (scope.Format != HypermediaFormat.Hal || linkSet.Affordances.Count == 0 || scope.Logger is not { } logger)
@@ -464,6 +507,7 @@ internal static class CairnLinkRecorder
             {
                 foreach (var type in CairnLinkStore.UnemittedTypes(http))
                 {
+                    CairnTelemetry.HypermediaUnemitted.Add(1, new KeyValuePair<string, object?>("cairn.resource_type", type.Name));
                     if (WarnedUnemittedTypes.TryAdd(type, 0))
                     {
                         logger.LogWarning(
@@ -548,7 +592,7 @@ internal static class CairnLinkRecorder
             return page => global(http.Request, page);
         }
 
-        return page => PaginationLinks.DefaultPageUrl(http.Request, page, options.PageQueryParameter);
+        return page => PaginationLinks.DefaultPageUrl(http.Request, page, options.PageQueryParameter, options);
     }
 
     // Per-route .WithCursorLinks() wins over the global CursorLink, which wins over the default query-swap.
@@ -564,7 +608,7 @@ internal static class CairnLinkRecorder
             return cursor => global(http.Request, cursor);
         }
 
-        return cursor => PaginationLinks.SwapQueryParam(http.Request, options.CursorQueryParameter, cursor);
+        return cursor => PaginationLinks.SwapQueryParam(http.Request, options.CursorQueryParameter, cursor, options);
     }
 
     // Peel Results<T1,T2,...> unions down to the concrete result that carries the value.

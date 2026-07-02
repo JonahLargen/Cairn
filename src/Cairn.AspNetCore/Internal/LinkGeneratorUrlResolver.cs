@@ -21,7 +21,22 @@ internal sealed class LinkGeneratorUrlResolver(LinkGenerator linkGenerator, IHtt
             return null;
         }
 
-        var url = linkGenerator.GetUriByName(http, route.RouteName, route.RouteValues);
+        var url = options.UrlStyle == LinkUrlStyle.PathRelative
+            ? linkGenerator.GetPathByName(http, route.RouteName, route.RouteValues)
+            : options.PublicBaseUri is { } publicBase
+                ? linkGenerator.GetUriByName(route.RouteName, route.RouteValues, publicBase.Scheme, Host(publicBase), BasePath(publicBase))
+                : linkGenerator.GetUriByName(http, route.RouteName, route.RouteValues);
         return url is not null && options.TransformUrl is { } transform ? transform(http, url) : url;
+    }
+
+    // The scheme's default port is omitted, matching Uri.Authority (FromUriComponent would render ":443").
+    private static HostString Host(Uri publicBase)
+        => publicBase.IsDefaultPort ? new HostString(publicBase.Host) : new HostString(publicBase.Host, publicBase.Port);
+
+    /// <summary>The base URI's path as a path base (trailing slash trimmed so it composes with route paths).</summary>
+    internal static PathString BasePath(Uri publicBase)
+    {
+        var path = publicBase.AbsolutePath.TrimEnd('/');
+        return path.Length == 0 ? default : new PathString(path);
     }
 }
