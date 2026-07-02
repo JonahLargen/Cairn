@@ -23,7 +23,8 @@ class Program
 
         var generated = Run(source);
 
-        Assert.Contains("public static partial class Routes", generated);
+        // internal: the catalog is app-internal, so it can't collide (or be CS0433-ambiguous) across projects.
+        Assert.Contains("internal static partial class Routes", generated);
         Assert.Contains("public static global::Cairn.LinkTarget GetOrderById(int id)", generated);
         Assert.Contains(@"Route(""GetOrderById"", new { id })", generated);
         Assert.Contains("public static global::Cairn.LinkTarget CancelOrder(int id)", generated);
@@ -49,7 +50,7 @@ class Program
     }
 
     [Fact]
-    public void Maps_optional_constrained_parameter_to_its_type()
+    public void Maps_optional_constrained_parameter_to_a_nullable_defaulted_parameter()
     {
         const string source = @"
 class Program
@@ -62,7 +63,53 @@ class Program
 
         var generated = Run(source);
 
-        Assert.Contains("public static global::Cairn.LinkTarget GetOptionalOrder(int id)", generated);
+        // An optional route parameter is optional for callers too: nullable, defaulted, and skipped in the
+        // route values when omitted — so the link resolves without the segment.
+        Assert.Contains("public static global::Cairn.LinkTarget GetOptionalOrder(int? id = null)", generated);
+        Assert.Contains("if (id is not null)", generated);
+        Assert.Contains(@"values[""id""] = id;", generated);
+        Assert.Contains(@"Route(""GetOptionalOrder"", values)", generated);
+        Assert.DoesNotContain(CSharpSyntaxTree.ParseText(generated).GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Maps_defaulted_and_range_constrained_parameters()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/legacy/{id=5}"", handler).WithName(""GetLegacy"");
+        app.MapGet(""/big/{size:min(10)}"", handler).WithName(""GetBig"");
+    }
+}";
+
+        var generated = Run(source);
+
+        // A defaulted parameter is optional for callers; min/max/range are evaluated by ASP.NET as long.
+        Assert.Contains("public static global::Cairn.LinkTarget GetLegacy(string? id = null)", generated);
+        Assert.Contains("public static global::Cairn.LinkTarget GetBig(long size)", generated);
+    }
+
+    [Fact]
+    public void Mixes_required_and_optional_parameters_in_one_route()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/users/{userId:int}/posts/{page:int?}"", handler).WithName(""GetUserPosts"");
+    }
+}";
+
+        var generated = Run(source);
+
+        Assert.Contains("public static global::Cairn.LinkTarget GetUserPosts(int userId, int? page = null)", generated);
+        Assert.Contains(@"values[""userId""] = userId;", generated);
+        Assert.Contains("if (page is not null)", generated);
+        Assert.DoesNotContain(CSharpSyntaxTree.ParseText(generated).GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
     }
 
     [Fact]
@@ -274,7 +321,7 @@ class Program
 
         // Without the empty class, user code referencing Cairn.Routes fails to compile until the
         // first endpoint is named.
-        Assert.Contains("public static partial class Routes", generated);
+        Assert.Contains("internal static partial class Routes", generated);
         Assert.DoesNotContain("public static global::Cairn.LinkTarget", generated);
         Assert.DoesNotContain(CSharpSyntaxTree.ParseText(generated).GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
     }

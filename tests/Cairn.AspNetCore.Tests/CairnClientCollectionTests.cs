@@ -52,6 +52,27 @@ public class CairnClientCollectionTests
     }
 
     [Fact]
+    public async Task Following_with_a_null_second_argument_throws_a_clear_ArgumentNullException()
+    {
+        await using var app = await StartAsync(a =>
+        {
+            a.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new ColOrder(id))).WithName("ColGetOrder").WithLinks();
+            a.MapGet("/paged", (int page = 1) => TypedResults.Ok(
+                    new PagedResource<ColOrder>([new ColOrder(1)], page, PageSize: 10, TotalCount: 25)))
+                .WithLinks();
+        });
+        using var httpClient = app.GetTestClient();
+
+        var page = (await new CairnClient(httpClient).GetCollectionAsync<ColOrder>("/paged?page=2")).EnsureSuccess();
+
+        // A bare null binds to the (relation, itemsProperty) overload, not (relation, variables) — the guard
+        // must explain the trap instead of null-refing while reading the items property.
+        var exception = await Assert.ThrowsAsync<ArgumentNullException>(() => page.FollowAsync("next", null!));
+        Assert.Equal("itemsProperty", exception.ParamName);
+        Assert.Contains("variables", exception.Message);
+    }
+
+    [Fact]
     public async Task Reads_a_custom_items_property()
     {
         await using var app = await StartAsync(a =>

@@ -298,11 +298,6 @@ public sealed class HypermediaResponse
 /// <summary>Extension methods for reading a <see cref="HypermediaResponse"/> in tests.</summary>
 public static class HypermediaResponseExtensions
 {
-    /// <summary>Parses a hypermedia response from a JSON string.</summary>
-    /// <exception cref="ArgumentNullException"><paramref name="json"/> is null.</exception>
-    /// <exception cref="FormatException">A link or action has a missing or empty <c>href</c>.</exception>
-    public static HypermediaResponse Hypermedia(this string json) => HypermediaResponse.Parse(json);
-
     /// <summary>Reads and parses a hypermedia response from an <see cref="HttpResponseMessage"/> body.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="response"/> is null.</exception>
     /// <exception cref="FormatException">A link or action has a missing or empty <c>href</c>.</exception>

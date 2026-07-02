@@ -1,7 +1,6 @@
 using System.Globalization;
+using Cairn.AspNetCore.Internal;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Net.Http.Headers;
 
 namespace Cairn.AspNetCore;
 
@@ -15,6 +14,8 @@ public static class CairnDeprecationExtensions
     /// <c>Link</c> header with <c>rel="deprecation"</c> when <paramref name="link"/> points at documentation.
     /// This complements the link-level <c>Deprecated(...)</c>/<c>WithDeprecation(...)</c> hypermedia attribute:
     /// the headers mark the endpoint itself, so clients that never parse the body still see the deprecation.
+    /// The headers are declared as endpoint metadata and emitted by a middleware <c>AddCairn</c> registers, so
+    /// they reach MVC controller endpoints (e.g. a <c>MapControllers()</c> group) as well as minimal-API handlers.
     /// </summary>
     /// <typeparam name="TBuilder">The endpoint or route group builder type.</typeparam>
     /// <param name="builder">The endpoint or route group builder.</param>
@@ -34,21 +35,6 @@ public static class CairnDeprecationExtensions
         var sunsetDate = sunset?.UtcDateTime.ToString("R", CultureInfo.InvariantCulture);
         var linkHeader = link is null ? null : $"<{link}>; rel=\"deprecation\"";
 
-        return builder.AddEndpointFilter(async (invocation, next) =>
-        {
-            var headers = invocation.HttpContext.Response.Headers;
-            headers["Deprecation"] = deprecation;
-            if (sunsetDate is not null)
-            {
-                headers["Sunset"] = sunsetDate;
-            }
-
-            if (linkHeader is not null)
-            {
-                headers.Append(HeaderNames.Link, linkHeader);
-            }
-
-            return await next(invocation);
-        });
+        return builder.WithMetadata(new DeprecationMetadata(deprecation, sunsetDate, linkHeader));
     }
 }

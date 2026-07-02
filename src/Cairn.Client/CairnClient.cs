@@ -297,21 +297,26 @@ public sealed class CairnClient
     // us pre-encoded, so fail loudly rather than mislabel a JSON payload.
     private HttpContent CreateContent(object body, string? contentType)
     {
-        if (contentType is null || string.Equals(contentType, "application/json", StringComparison.OrdinalIgnoreCase))
+        if (contentType is null)
         {
             return JsonContent.Create(body, options: _json);
         }
 
+        // Parse first, then compare the parsed media type: a parameterized declaration such as
+        // "application/json; charset=utf-8" is still JSON and keeps its parameters on the request.
         if (System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(contentType, out var mediaType)
-            && mediaType.MediaType is { } label
-            && label.EndsWith("+json", StringComparison.OrdinalIgnoreCase))
+            && mediaType.MediaType is { } label)
         {
-            return JsonContent.Create(body, mediaType, _json);
-        }
+            if (string.Equals(label, "application/json", StringComparison.OrdinalIgnoreCase)
+                || label.EndsWith("+json", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonContent.Create(body, mediaType, _json);
+            }
 
-        if (string.Equals(mediaType?.MediaType, "application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
-        {
-            return new FormUrlEncodedContent(FormPairs(body));
+            if (string.Equals(label, "application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
+            {
+                return new FormUrlEncodedContent(FormPairs(body));
+            }
         }
 
         throw new NotSupportedException(

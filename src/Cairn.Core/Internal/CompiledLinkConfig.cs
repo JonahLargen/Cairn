@@ -14,7 +14,33 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
     {
         var builder = new LinkBuilder<T>();
         config.Configure(builder);
+        ThrowOnDefaultTemplateCollision(builder);
         return new CompiledLinkConfig<T>(builder);
+    }
+
+    // An affordance marked AsDefault() emits under the reserved "default" HAL-FORMS template key — as does one
+    // literally named "default" (template keys compare case-insensitively). Two claimants would collide
+    // last-wins on the wire with no trace, so fail deterministically at registration time instead.
+    private static void ThrowOnDefaultTemplateCollision(LinkBuilder<T> builder)
+    {
+        AffordanceSpec<T>? claimant = null;
+        foreach (var spec in builder.AffordanceSpecs)
+        {
+            if (!spec.IsDefault && !string.Equals(spec.Relation.Value, "default", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (claimant is not null)
+            {
+                throw new InvalidOperationException(
+                    $"The link configuration for {typeof(T).Name} declares more than one affordance claiming the reserved 'default' HAL-FORMS template key: " +
+                    $"'{claimant.Relation.Value}'{(claimant.IsDefault ? " (AsDefault)" : string.Empty)} and '{spec.Relation.Value}'{(spec.IsDefault ? " (AsDefault)" : string.Empty)}. " +
+                    "Mark only one affordance AsDefault(), and don't combine AsDefault() with an affordance named 'default'.");
+            }
+
+            claimant = spec;
+        }
     }
 
     public async ValueTask<LinkSet> BuildAsync(object resource, LinkContext context, CancellationToken cancellationToken = default)

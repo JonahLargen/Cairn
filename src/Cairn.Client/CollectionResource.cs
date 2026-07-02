@@ -45,11 +45,23 @@ public sealed class CollectionResource<TItem>
     /// Follows a collection link (e.g. <c>next</c>) to another page of the same item type. A templated link
     /// expands with no variables, so its optional expressions collapse per RFC 6570.
     /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="itemsProperty"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The collection has no link with that relation.</exception>
     public Task<CollectionResult<TItem>> FollowAsync(string relation, string itemsProperty = "items", CancellationToken cancellationToken = default)
-        => Links.TryGetValue(relation, out var link)
+    {
+        // A bare null second argument binds here (string is more specific than object), not to the
+        // (relation, variables) overload — catch it now rather than null-ref reading the items property later.
+        if (itemsProperty is null)
+        {
+            throw new ArgumentNullException(
+                nameof(itemsProperty),
+                "itemsProperty must not be null. To follow the link with no template variables, call FollowAsync(relation, (object?)null) — a bare null second argument binds to this overload's itemsProperty instead.");
+        }
+
+        return Links.TryGetValue(relation, out var link)
             ? _client.FollowCollectionAsync<TItem>(link, variables: null, itemsProperty, cancellationToken)
             : throw new InvalidOperationException($"The collection has no '{relation}' link.");
+    }
 
     /// <summary>Follows a collection link, expanding it as an RFC 6570 URI template with <paramref name="variables"/> (e.g. <c>new { page = 2 }</c>).</summary>
     /// <exception cref="InvalidOperationException">The collection has no link with that relation.</exception>
