@@ -1,49 +1,152 @@
-<h1>Cairn</h1>
+<div align="center">
 
-<p>Opt-in HATEOAS for .NET — hypermedia you add only where it helps.</p>
+# Cairn
+
+**Opt-in HATEOAS for ASP.NET Core — hypermedia links and actions, added only where they help.**
+
+[![NuGet](https://img.shields.io/nuget/v/Cairn.AspNetCore.svg?logo=nuget&label=NuGet)](https://www.nuget.org/packages/Cairn.AspNetCore)
+[![Downloads](https://img.shields.io/nuget/dt/Cairn.AspNetCore.svg?label=Downloads)](https://www.nuget.org/packages/Cairn.AspNetCore)
+[![CI](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml/badge.svg)](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-jonahlargen.github.io%2FCairn-blue)](https://jonahlargen.github.io/Cairn)
+[![License: MIT](https://img.shields.io/github/license/JonahLargen/Cairn?color=green)](LICENSE)
+![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0%20%7C%2010.0-512BD4)
+
+[Documentation](https://jonahlargen.github.io/Cairn) ·
+[Getting started](https://jonahlargen.github.io/Cairn/articles/getting-started.html) ·
+[Sample API](samples/Cairn.Sample.Api) ·
+[Changelog](CHANGELOG.md)
+
+</div>
 
 ---
 
-## What is Cairn?
+Cairn adds hypermedia to ASP.NET Core APIs without touching your models. DTOs stay plain `record` types, link rules live in a separate `LinkConfig<T>`, and endpoints opt in one at a time — everything you don't opt in serializes exactly as before, so Cairn is safe to introduce incrementally into an existing API.
 
-A cairn is a small stack of stones a traveler leaves along a trail so the next traveler can find the way — placed only where the path is unclear, and followed by choice. Cairn brings that idea to your APIs: **hypermedia links and affordances you add per endpoint, only where they help.**
+## What is HATEOAS?
 
-## Design principles
+*Hypermedia As The Engine of Application State* is the idea that an API response should tell the client **where it can go** and **what it can do next**, instead of leaving the client to hardcode URLs and business rules.
 
-- **Clean DTOs.** Add links to a plain `record` — no base class, no marker interface, no required attributes. Links are projected at serialization time via a `System.Text.Json` contract modifier, so your models stay untouched.
-- **Opt-in by default.** Endpoints you don't opt in to serialize exactly as before, so Cairn is safe to add incrementally to an existing API.
-- **Minimal-API-first.** Register with `AddCairn()` and opt endpoints in with `.WithLinks()`.
-- **Affordances that authorize.** A `cancel` link can be advertised only when the resource is in a cancellable state **and** the caller satisfies an ASP.NET Core authorization policy — the same policy that guards the action.
-- **System.Text.Json-native.** Links are injected through contract customization, and Cairn's own wire types (`_links`/`_actions`/`_templates` payloads) ship with a source-generated `JsonSerializerContext`, so hypermedia serializes even when the app uses a source-gen-only `TypeInfoResolver`. Registration and HAL-FORMS schema derivation use reflection (once per type, cached), so full Native AOT publishing is not yet a supported claim.
-- **Pragmatic formats.** A flat `{ href, rel, method }` shape, with HAL and HAL-FORMS built in via content negotiation — so links fit whatever your clients already expect.
+A typical API returns bare data:
 
-## Usage
-
-```csharp
-// Your DTO stays a plain record — Cairn never touches it.
-public record OrderDto(int Id, OrderStatus Status);
-
-// Link/affordance rules live outside the DTO.
-public sealed class OrderLinks : LinkConfig<OrderDto>
-{
-    public override void Configure(ILinkBuilder<OrderDto> b)
-    {
-        b.Self(o => Routes.GetOrderById(o.Id));         // Routes.* generated from named endpoints
-        b.Affordance("cancel", o => Routes.CancelOrder(o.Id))
-         .Method("POST")
-         .When(o => o.Status == OrderStatus.Pending)   // advertise only when applicable
-         .RequireAuthorization("CanCancelOrders");      // ASP.NET Core authorization policy
-    }
-}
-
-builder.Services.AddCairn(o => o.AddLinks(new OrderLinks()));
-// ...
-app.MapGet("/orders/{id:int}", (int id, IOrderRepo repo) => TypedResults.Ok(repo.Get(id)))
-   .WithName("GetOrderById")
-   .WithLinks();   // links projected at serialization time; the DTO is never modified
+```json
+{ "id": 42, "status": "Pending" }
 ```
 
-Controllers work the same way — opt in with `[CairnLinks]`, using the same `LinkConfig<T>`:
+To act on this, the client has to already know things that aren't in the response: how to build the order's URL, that orders can only be cancelled while pending, and whether *this* user is allowed to cancel. That knowledge gets duplicated into every client — and silently breaks when the server changes.
+
+A hypermedia response carries the knowledge with the data:
+
+```json
+{
+  "id": 42,
+  "status": "Pending",
+  "_links": {
+    "self": { "href": "https://api.example.com/orders/42" }
+  },
+  "_actions": {
+    "cancel": { "href": "https://api.example.com/orders/42/cancel", "method": "POST" }
+  }
+}
+```
+
+Reading it top to bottom:
+
+- **`_links`** answers *"where can I go from here?"* Each key is a **relation** — `self` is the canonical URL of this resource; a collection page adds relations like `next` and `prev`.
+- **`_actions`** answers *"what can I do right now?"* Each entry is an **affordance**: a state transition with a target URL and HTTP method.
+- **`cancel` is present because it's currently valid** — the order is `Pending`, and the caller passed the authorization policy that guards cancellation.
+
+Fetch the same order after it ships, and the response changes:
+
+```json
+{
+  "id": 42,
+  "status": "Shipped",
+  "_links": {
+    "self": { "href": "https://api.example.com/orders/42" }
+  }
+}
+```
+
+The `cancel` action is gone. That is the "engine of application state" part: the server — the only party that actually knows the rules — tells the client what is possible, and the client's job reduces to *"render a Cancel button if `_actions.cancel` exists."* No duplicated state machine, no duplicated permission checks, no hardcoded URLs.
+
+New to the concept? The docs have a longer, gentler introduction: [What is HATEOAS?](https://jonahlargen.github.io/Cairn/articles/hateoas.html)
+
+## Why Cairn?
+
+Most hypermedia libraries want to own your whole API: base classes on your DTOs, wrapper types on your responses, a global formatter over every endpoint. Cairn deliberately does the opposite.
+
+- **Clean DTOs.** Links are declared *outside* the model and injected at serialization time through a `System.Text.Json` contract modifier — no base class, no marker interface, no attributes on your types.
+- **Opt-in per endpoint.** `.WithLinks()` on a minimal-API endpoint or `[CairnLinks]` on a controller action. Everything else is byte-for-byte unchanged.
+- **Affordances that authorize.** An action can be advertised only when the resource is in the right state *and* the caller satisfies an ASP.NET Core authorization policy — the same policy that guards the endpoint itself.
+- **One config, three formats.** Declare links once; serve Cairn's flat default shape, HAL, or HAL-FORMS via `Accept`-header negotiation, or plug in your own format.
+- **Tooling that keeps it honest.** Roslyn analyzers catch broken route names and unconfigured types at compile time, a source generator gives you a typed `Routes.*` catalog instead of magic strings, and dedicated packages cover OpenAPI/Swagger docs, test assertions, and a typed client.
+
+## Quick start
+
+Install the ASP.NET Core package:
+
+```bash
+dotnet add package Cairn.AspNetCore
+```
+
+**1. Your DTO stays a plain record** — Cairn never modifies it:
+
+```csharp
+public enum OrderStatus { Pending, Shipped, Cancelled }
+
+public record OrderDto(int Id, OrderStatus Status);
+```
+
+**2. Declare the hypermedia in a `LinkConfig<T>`**, separate from the model:
+
+```csharp
+public sealed class OrderLinks : LinkConfig<OrderDto>
+{
+    public override void Configure(ILinkBuilder<OrderDto> builder)
+    {
+        builder.Self(order => LinkTarget.Route("GetOrderById", new { id = order.Id }));
+
+        builder.Affordance("cancel", order => LinkTarget.Route("CancelOrder", new { id = order.Id }))
+            .Post()
+            .When(order => order.Status == OrderStatus.Pending);
+    }
+}
+```
+
+**3. Register Cairn and opt the endpoint in.** `LinkTarget.Route` resolves against endpoint names, so name the routes with `.WithName(...)`:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddCairn(options => options.AddLinks(new OrderLinks()));
+
+var app = builder.Build();
+
+app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new OrderDto(id, OrderStatus.Pending)))
+   .WithName("GetOrderById")
+   .WithLinks();                       // ← this endpoint's responses now carry hypermedia
+
+app.MapPost("/orders/{id:int}/cancel", (int id) => TypedResults.NoContent())
+   .WithName("CancelOrder");
+
+app.Run();
+```
+
+**4. Call it.** `GET /orders/42` now returns the DTO with its links and — because the order is pending — the `cancel` action:
+
+```json
+{
+  "id": 42,
+  "status": "Pending",
+  "_links": {
+    "self": { "href": "https://localhost:7043/orders/42" }
+  },
+  "_actions": {
+    "cancel": { "href": "https://localhost:7043/orders/42/cancel", "method": "POST" }
+  }
+}
+```
+
+Controllers work the same way with the same `LinkConfig<T>` — opt an action (or the whole controller) in with `[CairnLinks]`:
 
 ```csharp
 [ApiController]
@@ -56,142 +159,143 @@ public class OrdersController(IOrderRepo repo) : ControllerBase
 }
 ```
 
-## Service-aware links
+The step-by-step walkthrough — including what to do when links *don't* appear — is in [Getting started](https://jonahlargen.github.io/Cairn/articles/getting-started.html).
 
-When a link or affordance depends on something not on the DTO — a service, or a field you didn't project — use the async overloads, which give you the request's services:
+## A tour of the toolbox
+
+### Actions gated by state *and* permissions
+
+`When(...)` gates an affordance on resource state; `RequireAuthorization(...)` gates it on the caller — evaluated against real ASP.NET Core policies, memoized per request. The response advertises exactly the actions this caller can take on this resource, right now:
 
 ```csharp
-b.Affordance("cancel", o => Routes.CancelOrder(o.Id))
- .RequireAuthorization("CanCancel")
- .When(async (o, ctx) =>
-     await ctx.Services.GetRequiredService<IOrderService>().IsCancelableAsync(o.Id, ctx.CancellationToken));
+builder.Affordance("cancel", o => LinkTarget.Route("CancelOrder", new { id = o.Id }))
+    .Post()
+    .When(o => o.Status == OrderStatus.Pending)
+    .RequireAuthorization("CanCancelOrders");   // same policy that guards the endpoint
 ```
 
-For collections, don't query per item — that's an N+1. Load the facts once in your handler into a scoped holder, then have the condition read it:
+Conditions can also be service-aware and async when the decision needs more than the DTO — see [Link configurations](https://jonahlargen.github.io/Cairn/articles/link-configs.html).
+
+### One declaration, three wire formats
+
+The same `LinkConfig<T>` serves three built-in shapes, selected by the request's `Accept` header (or forced per endpoint):
+
+| `Accept` | Format | Affordances emitted as |
+| --- | --- | --- |
+| `application/json` | Default (flat) | `_actions` |
+| `application/hal+json` | [HAL](https://datatracker.ietf.org/doc/html/draft-kelly-json-hal) | — (HAL has no actions) |
+| `application/prs.hal-forms+json` | [HAL-FORMS](https://rwcbook.github.io/hal-forms/) | `_templates` |
+
+HAL-FORMS templates go further than a URL and a method: `Accepts<TInput>()` derives full form field descriptions (types, required flags, ranges, enum options) from your input type's data annotations, so a client can *render the form* without knowing the type. Custom formats such as Siren plug in through `IHypermediaFormatter` and participate in the same negotiation. See [Wire formats](https://jonahlargen.github.io/Cairn/articles/formats.html) and [Affordances & HAL-FORMS](https://jonahlargen.github.io/Cairn/articles/affordances-and-forms.html).
+
+### Pagination links for free
+
+Return a `PagedResource<T>` (offset) or `CursorPage<T>` (keyset) and the envelope gets `self`/`first`/`prev`/`next`/`last` links derived from the request URL — while each item on the page still gets its own links:
+
+```json
+"_links": {
+  "self":  { "href": "https://api.example.com/orders?page=2" },
+  "prev":  { "href": "https://api.example.com/orders?page=1" },
+  "next":  { "href": "https://api.example.com/orders?page=3" }
+}
+```
+
+Existing envelope types can join in without being changed, via `AddPaging<T>`. See [Pagination](https://jonahlargen.github.io/Cairn/articles/pagination.html).
+
+### A typed client that walks the links
+
+`Cairn.Client` consumes what the server emits — follow relations, check for affordances, and invoke them, without building a URL anywhere:
 
 ```csharp
-app.MapGet("/orders", (IOrderService svc, OrderFacts facts) =>
+var order = (await client.GetAsync<Order>("/orders/42")).Resource!;
+
+if (order.HasAffordance("cancel"))
 {
-    facts.Cancelable = svc.GetCancelable(ids);   // one batch query
-    return TypedResults.Ok(orders);
-}).WithLinks();
-
-// in the config: .When((o, ctx) => new(ctx.Services.GetRequiredService<OrderFacts>().Cancelable.Contains(o.Id)))
+    await order.InvokeAsync("cancel");
+}
 ```
 
-## Runtime-type dispatch and diagnostics
+See [The typed client](https://jonahlargen.github.io/Cairn/articles/client.html).
 
-Configs dispatch by the value's **runtime type**, falling back to the nearest registered base class — a `LinkConfig<OrderDto>` also covers a returned `RushOrderDto : OrderDto` (interfaces are not considered). Handlers can return the value bare or wrapped (`TypedResults.Ok(...)`, `ObjectResult`); both are linked the same way.
+### Test assertions for your hypermedia contract
 
-Cairn correlates hypermedia to your instances by reference between computing links and serializing the response, so shapes that break that correlation can't carry links — instead of silently dropping them, Cairn logs a one-time warning per type:
-
-- **Deferred sequences** (`IQueryable`, LINQ projections) returned bare are materialized once and handed to the serializer, so links survive and the underlying query runs once. Inside an immutable result like `TypedResults.Ok(...)` the sequence can't be swapped for its buffer — if its re-enumeration produces new instances the links are lost, and Cairn warns that computed hypermedia was never emitted. Prefer materializing (`ToList()`) before wrapping.
-- **`IAsyncEnumerable<T>`** streams cannot be enumerated twice and are not supported — materialize first (e.g. `ToListAsync()`).
-- **Value-type resources** (structs) box to a different instance at each stage and cannot carry links — use a class or record.
-- **Unregistered types** returned from an endpoint that opted in via `.WithLinks()`/`[CairnLinks]` get a warning naming the missing `LinkConfig<T>`.
-
-## Caching and authorization-gated links
-
-Two properties of hypermedia responses matter when a cache sits in front of your API:
-
-- **Responses vary by `Accept`.** With format negotiation enabled (the default), the same URL can return three different body shapes and media types. Cairn adds `Vary: Accept` to negotiable responses so shared caches key on it — leave that intact if you post-process headers.
-- **Authorization-gated links personalize the body.** A link guarded by `RequireAuthorization(...)` (or a caller-dependent `When`) makes the response body *per-caller*: output-caching such an endpoint (ASP.NET Core `OutputCache`, a CDN) will replay the **first caller's affordance set to every other caller** — leaking what actions that caller could take, and advertising actions the current caller can't. Don't output-cache endpoints whose links are caller-dependent, or vary the cache by the credential.
-
-`RequireAuthorization("Policy")` evaluates the policy against the **caller**, once per request (results are memoized, so a 200-item page evaluates each policy once, not 200 times). It is *not* a per-resource decision: a policy named `CanCancelThisOrder` still can't see the order. For per-resource decisions, combine a caller check with a resource predicate, or call `IAuthorizationService.AuthorizeAsync(user, resource, policy)` yourself in a service-aware `When`.
-
-## Embedding and the response body
-
-`Embed`/`EmbedMany` place a child resource in HAL `_embedded`, decorated with its own links. The child is typically also a normal property of your DTO, and Cairn never removes properties — so it will appear **twice** (in the body and in `_embedded`) unless you mark the property `[JsonIgnore]` or project a DTO without it. That attribute is the one exception to "Cairn never touches your DTO" being enough on its own.
-
-## API versioning
-
-Cairn composes with `Asp.Versioning`. Because links resolve through the standard `LinkGenerator`, **URL-segment versioning works automatically** — the current request's version flows into links (a `/v1` request links to `/v1/...`). For **query-string** versioning, carry the version onto links with `TransformUrl`:
+`Cairn.Testing` parses a response and asserts on links, actions, and forms — framework-agnostic, with URL patterns that survive the random port of an in-memory test server:
 
 ```csharp
-builder.Services.AddCairn(o => o.TransformUrl = (http, url) =>
-    http.Request.Query.TryGetValue("api-version", out var v) && v.Count > 0
-        ? QueryHelpers.AddQueryString(url, "api-version", v.ToString())
-        : url);
+var hypermedia = await client.GetHypermediaAsync("/orders/42");
+
+hypermedia.Should()
+    .HaveSelfLink()
+    .And.HaveAffordance("cancel").WithMethod(HttpMethod.Post)
+    .And.NotHaveAffordance("delete");
 ```
 
-Header and media-type versioning keep the version out of the URL by design, so links stay version-neutral and the client re-applies its version.
+`HypermediaSnapshot` renders stable, snapshot-friendly JSON for approval-style tests. See [Testing](https://jonahlargen.github.io/Cairn/articles/testing.html).
 
-## Link URL policy
+### Compile-time route safety
 
-Links resolve to absolute URLs from the incoming request by default. Behind a proxy or gateway whose forwarded headers you can't fix, that leaks internal hostnames — pin the public origin instead, or emit path-relative links:
+Link targets reference routes by name, and magic strings rot. `Cairn.AspNetCore` bundles Roslyn analyzers and a source generator — nothing extra to install — that close the loop:
 
-```csharp
-builder.Services.AddCairn(o => o.PublicBaseUri = new Uri("https://api.example.com/v2"));
-// or: o.UrlStyle = LinkUrlStyle.PathRelative;   // links like "/orders/1", immune to host misconfiguration
-```
+- **CAIRN001** flags a `LinkTarget.Route("name")` that no endpoint declares (with a code fix).
+- **CAIRN002** flags a `.WithLinks()` endpoint returning a type that has no `LinkConfig<T>` — the classic silent no-op.
+- The source generator builds a typed `Routes.*` catalog from your named endpoints, so configs can say `Routes.GetOrderById(order.Id)` and get compile errors instead of broken links.
 
-Both apply to route-resolved links and pagination links; `TransformUrl` still runs afterwards.
+See [Route safety](https://jonahlargen.github.io/Cairn/articles/route-safety.html).
 
-## Conditional requests and OPTIONS
+### Also in the box
 
-`CairnClient` already sends `If-None-Match`/`If-Match`; the server side completes the round trip:
+- **[Embedded resources](https://jonahlargen.github.io/Cairn/articles/embedded-resources.html)** — HAL `_embedded`, link arrays, and CURIEs.
+- **[API versioning](https://jonahlargen.github.io/Cairn/articles/versioning.html)** — composes with `Asp.Versioning`; URL-segment versions flow into links automatically.
+- **[Link URL policy](https://jonahlargen.github.io/Cairn/articles/url-policy.html)** — absolute URLs by default, with `PublicBaseUri` pinning and path-relative mode for proxied deployments.
+- **[Conditional requests](https://jonahlargen.github.io/Cairn/articles/conditional-requests.html)** — `WithETag(...)`, precondition evaluation (304/412/428), an OPTIONS handler, and deprecation headers.
+- **[Error responses](https://jonahlargen.github.io/Cairn/articles/error-responses.html)** — problem details (RFC 9457) that carry links and actions.
+- **[OpenAPI & Swagger](https://jonahlargen.github.io/Cairn/articles/openapi.html)** — hypermedia properties documented in your OpenAPI schema.
+- **[Diagnostics & observability](https://jonahlargen.github.io/Cairn/articles/diagnostics.html)** — an `ActivitySource`, a `Meter`, and one-time warnings for every silent-failure mode.
 
-```csharp
-app.MapGet("/orders/{id:int}", (int id, IOrderRepo repo) => TypedResults.Ok(repo.Get(id)))
-   .WithLinks()
-   .WithETag((OrderDto o) => o.Version);   // emits ETag, answers matching If-None-Match with 304
+## When is hypermedia worth it?
 
-app.MapPut("/orders/{id:int}", (int id, OrderDto dto, HttpRequest req, IOrderRepo repo) =>
-    CairnPreconditions.Evaluate(req, repo.Get(id).Version, requireIfMatch: true)   // 412 / 428
-        ?? Results.NoContent());
+Cairn is opt-in because hypermedia isn't free and isn't always the right call. It pays off when:
 
-app.UseCairnOptionsHandler();   // OPTIONS /orders/1 → 204 + Allow: GET, HEAD, PUT, OPTIONS
-```
+- **Resources are state machines.** Orders, approvals, subscriptions, tickets — anything where "what you can do" depends on "what state it's in". The server owns the transition rules once, instead of every client reimplementing them.
+- **UIs are permission-aware.** Rendering buttons from `_actions` means the frontend never re-implements authorization logic — and never shows an action the API would reject.
+- **Clients navigate rather than construct.** Pagination, search results, and workflow chains where following `next` beats string-building URLs.
+- **URLs need freedom to change.** Clients that follow links survive route restructuring; clients that build URLs from templates don't.
 
-## Custom wire formats
-
-The built-in formats (flat, HAL, HAL-FORMS) are joined by anything you register — a formatter's media type participates in `Accept` negotiation and can be forced per endpoint:
-
-```csharp
-builder.Services.AddCairn(o => o.AddFormatter(new SirenFormatter()));   // IHypermediaFormatter
-// per endpoint: .WithHypermediaFormat("application/vnd.siren+json")
-```
-
-A formatter declares the JSON properties it injects and projects each resource's `HypermediaDocument` (links, affordances, embedded) into them; when active it supersedes the built-in `_links`/`_actions`/`_templates` and the response is labeled with its media type.
-
-## Observability
-
-Cairn publishes an `ActivitySource` and a `Meter`, both named `Cairn.AspNetCore` (see `CairnDiagnostics`): compute-stage spans plus counters for resources linked, links/affordances computed, **lax-mode drops** (`cairn.links.unresolved` — the silent failure mode, also logged once per type/relation), and computed-but-never-emitted hypermedia. Subscribe with OpenTelemetry via `AddSource`/`AddMeter`.
-
-## Analyzers
-
-- **CAIRN001** — a `LinkTarget.Route("name")` whose name no `WithName`/`[Http*(Name = ...)]` declares (constants and `nameof` are resolved). Names declared in other projects can be listed via `cairn_additional_route_names` in `.editorconfig` or the `CairnAdditionalRouteNames` MSBuild property.
-- **CAIRN002** — a `.WithLinks()` endpoint returning a type with no `LinkConfig<T>` in the compilation: the classic silent no-op.
+If your API is internal, its clients are generated from an OpenAPI spec, and its resources have no interesting state — plain JSON is fine, and Cairn will happily stay out of those endpoints. Opt in the ones where it helps.
 
 ## Packages
 
 | Package | Purpose | Frameworks |
 | --- | --- | --- |
-| `Cairn.Core` | Transport-agnostic hypermedia model (links, relations, affordances). No ASP.NET dependency. | net8.0, net9.0, net10.0 |
-| `Cairn.AspNetCore` | ASP.NET Core integration for both minimal APIs (`.WithLinks()`) and MVC controllers (`[CairnLinks]`). | net8.0, net9.0, net10.0 |
-| `Cairn.Client` | Typed client for consuming Cairn hypermedia APIs. | net8.0, net9.0, net10.0 |
-| `Cairn.OpenApi` | Documents hypermedia in `Microsoft.AspNetCore.OpenApi` documents (`AddOpenApi()`). | net10.0 |
-| `Cairn.Swashbuckle` | Documents hypermedia in Swashbuckle Swagger documents. | net8.0, net9.0, net10.0 |
-| `Cairn.Testing` | Test assertion helpers for links and affordances. | net8.0, net9.0, net10.0 |
+| [`Cairn.Core`](https://www.nuget.org/packages/Cairn.Core) | Transport-agnostic hypermedia model (links, relations, affordances). No ASP.NET dependency. | net8.0 · net9.0 · net10.0 |
+| [`Cairn.AspNetCore`](https://www.nuget.org/packages/Cairn.AspNetCore) | ASP.NET Core integration: minimal APIs (`.WithLinks()`) and MVC (`[CairnLinks]`), formats, pagination. Bundles the analyzers, code fixes, and `Routes.*` source generator. | net8.0 · net9.0 · net10.0 |
+| [`Cairn.Client`](https://www.nuget.org/packages/Cairn.Client) | Typed client for consuming hypermedia APIs. | net8.0 · net9.0 · net10.0 |
+| [`Cairn.Testing`](https://www.nuget.org/packages/Cairn.Testing) | Assertions and snapshots for links and affordances. | net8.0 · net9.0 · net10.0 |
+| [`Cairn.Swashbuckle`](https://www.nuget.org/packages/Cairn.Swashbuckle) | Hypermedia in Swashbuckle Swagger documents. | net8.0 · net9.0 · net10.0 |
+| [`Cairn.OpenApi`](https://www.nuget.org/packages/Cairn.OpenApi) | Hypermedia in `Microsoft.AspNetCore.OpenApi` documents. | net10.0 |
 
-`Cairn.OpenApi` plugs into the `Microsoft.AspNetCore.OpenApi` schema-transformer pipeline, which only exists in the shape Cairn builds on in .NET 10; that API is absent on .NET 8 and uses an incompatible object model on .NET 9. On .NET 8/9, use `Cairn.Swashbuckle` to surface hypermedia in your OpenAPI document instead.
+`Cairn.OpenApi` builds on the schema-transformer pipeline that only exists in this shape on .NET 10; on .NET 8/9, use `Cairn.Swashbuckle` instead. Details in [Packages](https://jonahlargen.github.io/Cairn/articles/packages.html).
 
-## Building
+## Performance
+
+Hypermedia is computed per response, so the overhead is measurable — and measured. The [benchmarks](benchmarks/Cairn.Benchmarks) compare a 1,000-item page with and without Cairn end to end, and isolate the serializer-level cost of the injected properties:
+
+```bash
+dotnet run -c Release --project benchmarks/Cairn.Benchmarks
+```
+
+## Building from source
 
 ```bash
 dotnet build Cairn.slnx
 dotnet test Cairn.slnx
 ```
 
-Building requires the .NET 10 SDK; running the test suite on every target framework additionally needs the .NET 8 and .NET 9 runtimes. The shipped packages run on .NET 8 (LTS) and later.
+Building requires the .NET 10 SDK; running the full multi-targeted test suite additionally needs the .NET 8 and .NET 9 runtimes. The shipped packages run on .NET 8 (LTS) and later. A complete runnable example lives in [`samples/Cairn.Sample.Api`](samples/Cairn.Sample.Api).
 
-"What does this cost per response?" — run the benchmarks:
+## Why "Cairn"?
 
-```bash
-dotnet run -c Release --project benchmarks/Cairn.Benchmarks
-```
-
-They compare a 1,000-item page with and without Cairn end to end, and isolate the serializer-level overhead of the injected hypermedia properties.
+A cairn is a small stack of stones a traveler leaves along a trail so the next traveler can find the way — placed only where the path is unclear, and followed by choice. That's the design philosophy: hypermedia added deliberately, where it guides, never imposed everywhere.
 
 ## License
 

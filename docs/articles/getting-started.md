@@ -1,29 +1,40 @@
 # Getting started
 
-This guide wires Cairn into a minimal API for the first time: install the package, define a plain DTO, declare its hypermedia in a `LinkConfig<T>`, register it with `AddCairn`, opt an endpoint in with `.WithLinks()`, and read the linked response. The same model drives controllers (see [controllers.md](controllers.md)).
+In this guide you'll wire Cairn into a minimal API and watch the responses change. By the end, a `GET /orders/1` will return this — a plain DTO carrying a `self` link and a `cancel` action that appears and disappears with the order's state:
 
-## The opt-in model
+```json
+{
+  "id": 1,
+  "status": "Pending",
+  "_links": {
+    "self": { "href": "http://localhost:5000/orders/1" },
+    "collection": { "href": "http://localhost:5000/orders" }
+  },
+  "_actions": {
+    "cancel": { "href": "http://localhost:5000/orders/1/cancel", "method": "POST" }
+  }
+}
+```
 
-Cairn changes nothing until you ask it to. Registering services with `AddCairn` makes the link projection *available*, but a response only gains links when its endpoint opts in:
+It takes about ten minutes. If you're not sure what `_links` and `_actions` are *for*, read [What is HATEOAS?](hateoas.md) first — it's five minutes and makes everything here more meaningful.
 
-- Minimal APIs opt in per endpoint or route group with `.WithLinks()`.
-- MVC actions opt in with the `[CairnLinks]` attribute (see [controllers.md](controllers.md)).
+> [!NOTE]
+> Cairn changes nothing until you ask it to. Registering it makes link projection *available*; a response only gains hypermedia when its endpoint opts in — `.WithLinks()` for minimal APIs, `[CairnLinks]` for [controllers](controllers.md). Every other endpoint serializes exactly as before, so you can adopt Cairn one endpoint at a time in an existing API.
 
-An endpoint without `.WithLinks()` or `[CairnLinks]` serializes exactly as it would have. There is no global filter, no convention scanning your responses, and no change to DTOs — Cairn attaches links to a value's serialized form based on its runtime type's registered configuration.
+## Prerequisites
 
-## Install
+- The .NET 8 SDK or later.
+- A web project — either an existing API or a fresh one: `dotnet new web -n OrdersApi`.
 
-Add the ASP.NET Core integration package. It depends on `Cairn.Core`, which carries `LinkConfig<T>` and the builder types:
+Install the ASP.NET Core integration package (it brings `Cairn.Core`, which carries `LinkConfig<T>` and the builder types, with it):
 
 ```bash
 dotnet add package Cairn.AspNetCore
 ```
 
-See [packages.md](packages.md) for the full package list.
+## Step 1 — Start with a plain endpoint
 
-## 1. Define a DTO
-
-The DTO stays a plain record. Cairn requires no base type, interface, or attribute on it:
+Nothing Cairn-specific yet. A DTO and two endpoints — one that returns an order, one that cancels it:
 
 ```csharp
 public enum OrderStatus
@@ -36,11 +47,39 @@ public enum OrderStatus
 public record OrderDto(int Id, OrderStatus Status);
 ```
 
-## 2. Declare the links
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
 
-Derive a `LinkConfig<T>` for the DTO and override `Configure(ILinkBuilder<T> builder)`. Here the order gets a `self` link, a related link, and a state-conditional `cancel` affordance:
+app.MapGet("/orders/{id:int}", (int id) =>
+    TypedResults.Ok(new OrderDto(id, id % 2 == 0 ? OrderStatus.Shipped : OrderStatus.Pending)));
+
+app.MapPost("/orders/{id:int}/cancel", (int id) => TypedResults.NoContent());
+
+app.Run();
+```
+
+(The odd/even status is a stand-in for a real data store, so we can observe both states in a moment.)
+
+Run it and request an order (your port will differ — use the one `dotnet run` prints):
+
+```bash
+curl http://localhost:5000/orders/1
+```
+
+```json
+{ "id": 1, "status": "Pending" }
+```
+
+Correct, but mute: a client that wants to cancel this order has to know the cancel URL and the "only while pending" rule on its own. Let's make the response say it.
+
+## Step 2 — Describe the hypermedia in a `LinkConfig<T>`
+
+Cairn never touches the DTO. Instead, its links and actions are declared in a separate class — a `LinkConfig<T>` — which keeps the model clean and puts all hypermedia rules for a type in one place:
 
 ```csharp
+using Cairn;
+
 public sealed class OrderLinks : LinkConfig<OrderDto>
 {
     public override void Configure(ILinkBuilder<OrderDto> builder)
@@ -50,49 +89,41 @@ public sealed class OrderLinks : LinkConfig<OrderDto>
         builder.Link("collection", _ => LinkTarget.Route("ListOrders"));
 
         builder.Affordance("cancel", order => LinkTarget.Route("CancelOrder", new { id = order.Id }))
-            .Method("POST")
+            .Post()
             .When(order => order.Status == OrderStatus.Pending);
     }
 }
 ```
 
-- `Self`, `Link`, and `Affordance` take a delegate from the resource to a `LinkTarget`. `LinkTarget.Route(routeName, routeValues?)` points at a named endpoint and is resolved to a URL by the host; `LinkTarget.Uri(href, templated?)` points at an explicit URI or URI template; `LinkTarget.RouteTemplate(routeName, routeValues?)` renders a named route as an RFC 6570 URI template, leaving unbound route parameters as `{placeholders}`.
-- A `LinkRelation` (the `rel`, here `"collection"` and `"cancel"`) is created implicitly from a string.
-- `.When(...)` includes a link or affordance only when the predicate holds — `cancel` is omitted unless the order is `Pending`.
-- `.Method("POST")` sets the affordance's HTTP method (the shorthands `Get()`, `Post()`, `Put()`, `Patch()`, and `Delete()` exist too).
+Line by line:
 
-The builder also exposes link arrays, service-aware and async targets, embedding, titles, and authorization — see [link-configs.md](link-configs.md) and [affordances-and-forms.md](affordances-and-forms.md).
+- **`Self(...)`** declares the resource's canonical URL — the `self` relation every well-behaved resource carries.
+- **`LinkTarget.Route("GetOrderById", new { id = order.Id })`** points at a *named endpoint* and lets ASP.NET Core's `LinkGenerator` build the URL. No hand-assembled strings, and the link follows the route if it moves. (`LinkTarget.Uri(...)` exists for explicit URLs, and `LinkTarget.RouteTemplate(...)` for RFC 6570 templates.)
+- **`Link("collection", ...)`** adds an ordinary link. The first argument is the **relation** — the name a client looks the link up by.
+- **`Affordance("cancel", ...)`** declares an *action*: something a client can do to the order, with a target and an HTTP method (`.Post()`; `Get()`, `Put()`, `Patch()`, `Delete()`, and `Method(...)` also exist).
+- **`.When(...)`** is the state rule: the `cancel` action is only advertised while the order is `Pending`. This one line replaces the same rule re-implemented in every client.
 
-## 3. Register with AddCairn
+The builder can do much more — service-aware and async targets, authorization-gated links, titles, embedding — but this is the shape of all of it. See [Link configurations](link-configs.md).
 
-Call `AddCairn` and register each configuration with `AddLinks`:
+## Step 3 — Register Cairn and opt the endpoints in
+
+Three changes to `Program.cs`, marked below: register the config with `AddCairn`, **name** the routes (that's what `LinkTarget.Route` resolves against), and add `.WithLinks()` to the endpoints whose responses should carry hypermedia:
 
 ```csharp
+using Cairn.AspNetCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddCairn(options =>
-{
-    options.AddLinks(new OrderLinks());
-});
+builder.Services.AddCairn(options => options.AddLinks(new OrderLinks()));   // 1. register
 
 var app = builder.Build();
-```
 
-To register every `LinkConfig<T>` in an assembly instead of one at a time, use `options.AddLinksFromAssembly(assembly)` or `options.AddLinksFromAssemblyContaining<T>()`.
+app.MapGet("/orders/{id:int}", (int id) =>
+        TypedResults.Ok(new OrderDto(id, id % 2 == 0 ? OrderStatus.Shipped : OrderStatus.Pending)))
+    .WithName("GetOrderById")    // 2. name the route...
+    .WithLinks();                // 3. ...and opt in
 
-## 4. Name the endpoint and opt in
-
-`LinkTarget.Route` resolves against named routes, so give the target endpoint a name with `.WithName(...)`, and add `.WithLinks()` to each endpoint whose response should carry links:
-
-```csharp
-var orders = app.MapGroup("/orders");
-
-orders.MapGet("/{id:int}", (int id) =>
-        TypedResults.Ok(new OrderDto(id, OrderStatus.Pending)))
-    .WithName("GetOrderById")
-    .WithLinks();
-
-orders.MapGet("/", () => TypedResults.Ok(new[]
+app.MapGet("/orders", () => TypedResults.Ok(new[]
     {
         new OrderDto(1, OrderStatus.Pending),
         new OrderDto(2, OrderStatus.Shipped),
@@ -100,63 +131,127 @@ orders.MapGet("/", () => TypedResults.Ok(new[]
     .WithName("ListOrders")
     .WithLinks();
 
-// The target the 'cancel' affordance points at — no .WithLinks() needed; it returns no body.
-orders.MapPost("/{id:int}/cancel", (int id) => TypedResults.NoContent())
+// The cancel target needs a name (links point at it) but no .WithLinks() — it returns no body.
+app.MapPost("/orders/{id:int}/cancel", (int id) => TypedResults.NoContent())
     .WithName("CancelOrder");
 
 app.Run();
 ```
 
-`.WithLinks()` applies to a single endpoint or to a whole route group (any `IEndpointConventionBuilder`). Each returned value — and each element of a returned collection — is linked according to its runtime type's configuration, so the collection endpoint above links every `OrderDto` it returns. It also unwraps `Results<,>` unions, linking the inner value when one is present.
+Two details worth noticing:
 
-## 5. Read the response
+- The route **name** (`WithName("GetOrderById")`) is the contract between the endpoint and the config. If they drift apart, the link can't resolve — [Strict mode](#strict-mode-catch-broken-links-early) and the [CAIRN001 analyzer](route-safety.md) both exist to catch exactly that.
+- Registering configs one by one is fine to start; real apps usually use `options.AddLinksFromAssemblyContaining<Program>()` to pick up every `LinkConfig<T>` in the assembly.
 
-`GET /orders/1` now returns the DTO with a `_links` object and, because the order is `Pending`, a `cancel` affordance:
+## Step 4 — See the state machine in the response
+
+Request a **pending** order:
+
+```bash
+curl http://localhost:5000/orders/1
+```
 
 ```json
 {
   "id": 1,
   "status": "Pending",
   "_links": {
-    "self": { "href": "/orders/1" },
-    "collection": { "href": "/orders" }
+    "self": { "href": "http://localhost:5000/orders/1" },
+    "collection": { "href": "http://localhost:5000/orders" }
   },
   "_actions": {
-    "cancel": { "href": "/orders/1/cancel", "method": "POST" }
+    "cancel": { "href": "http://localhost:5000/orders/1/cancel", "method": "POST" }
   }
 }
 ```
 
-This is the Default wire format. Cairn can also emit HAL and HAL-FORMS, selected by content negotiation or forced per endpoint — see [formats.md](formats.md).
+Now a **shipped** one:
 
-## Resolution mode: Lax vs Strict
+```bash
+curl http://localhost:5000/orders/2
+```
 
-`CairnOptions.Mode` controls what happens when a `LinkTarget` cannot be resolved to a URL — for example, a route name that matches no endpoint:
+```json
+{
+  "id": 2,
+  "status": "Shipped",
+  "_links": {
+    "self": { "href": "http://localhost:5000/orders/2" },
+    "collection": { "href": "http://localhost:5000/orders" }
+  }
+}
+```
 
-- `LinkResolutionMode.Lax` (the default) omits links that fail to resolve. The drop is not silent: each one increments the `cairn.links.unresolved` counter and is logged once per resource type and relation — see [diagnostics.md](diagnostics.md).
-- `LinkResolutionMode.Strict` throws a `LinkResolutionException` instead.
+Same endpoint, same config — but the `cancel` action is gone, because `.When(...)` said so. A client decides whether to show a Cancel button by checking for `_actions.cancel`, and the business rule lives in exactly one place: the server.
 
-Use `Strict` in development and tests to catch broken targets early; the response either has the link or fails loudly:
+The collection endpoint works too — each element is linked according to its runtime type, so `GET /orders` returns an array where every order carries its own `_links` (and `cancel` only on the pending one). Endpoints returning `Results<Ok<T>, NotFound>` unions are also unwrapped and linked when a value is present.
+
+> [!TIP]
+> Links are absolute URLs built from the incoming request by default (hence `http://localhost:5000/...` above). Behind a proxy, or if you prefer path-relative links like `"/orders/1"`, see [Link URL policy](url-policy.md).
+
+This response shape is Cairn's **Default** format. The same declaration can also be served as HAL or HAL-FORMS, selected by the request's `Accept` header — try `curl -H "Accept: application/hal+json" http://localhost:5000/orders/1` and watch `_actions` change shape. See [Wire formats & negotiation](formats.md).
+
+## How it works
+
+There's no magic middleware rewriting your JSON. For an opted-in endpoint:
+
+1. Your handler runs and returns the DTO as usual.
+2. Cairn looks up the value's **runtime type** in the registered configs (a collection is looked up per element) and computes its links and actions — resolving route names through the standard `LinkGenerator`, evaluating each `When(...)` and authorization gate.
+3. At serialization time, a `System.Text.Json` contract modifier projects `_links`/`_actions` into the type's JSON — the DTO instance itself is never modified.
+
+Endpoints without `.WithLinks()` never reach step 2, which is why the rest of your API is untouched.
+
+## Strict mode: catch broken links early
+
+What if a config names a route that doesn't exist — a typo, or an endpoint that was renamed? `CairnOptions.Mode` decides:
+
+- **`LinkResolutionMode.Lax`** (the default) omits the unresolvable link. Production keeps serving; the drop is logged once per type/relation and counted on the `cairn.links.unresolved` metric ([diagnostics](diagnostics.md)).
+- **`LinkResolutionMode.Strict`** throws a `LinkResolutionException` instead — the response either has the link or fails loudly.
+
+Use Strict in development and tests so broken targets surface immediately:
 
 ```csharp
 builder.Services.AddCairn(options =>
 {
-    options.Mode = LinkResolutionMode.Strict;
+    options.Mode = builder.Environment.IsDevelopment()
+        ? LinkResolutionMode.Strict
+        : LinkResolutionMode.Lax;
     options.AddLinks(new OrderLinks());
 });
 ```
 
-To eliminate magic route-name strings entirely, the analyzer and source-generator packages provide a compile-checked `Routes.*` catalog (e.g. `Routes.GetOrderById(order.Id)`) and flag unknown route names — see [route-safety.md](route-safety.md).
+To rule out route-name typos at *compile* time instead, the analyzers and source generator bundled in `Cairn.AspNetCore` check names and generate a typed `Routes.*` catalog (`Routes.GetOrderById(order.Id)`) — nothing extra to install. See [Route safety](route-safety.md).
 
-## The sample app
+## Troubleshooting
 
-A complete, runnable example lives in `samples/Cairn.Sample.Api`. It registers `OrderLinks` and `CustomerLinks`, opts minimal-API endpoints in with `.WithLinks()`, opts an MVC controller in with `[CairnLinks]`, and demonstrates collections, offset and cursor pagination ([pagination.md](pagination.md)), and `Results<,>` unions — all over plain record DTOs.
+The failure modes below are by far the most common first-run issues. Cairn logs a one-time warning for each of them — check your application log before anything else.
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| No `_links` at all | The endpoint never opted in | Add `.WithLinks()` (or `[CairnLinks]` on the action) |
+| No `_links`, endpoint is opted in | No `LinkConfig<T>` registered for the returned type — configs dispatch on the value's **runtime type** (base classes count, interfaces don't) | Register the config with `AddLinks(...)` / `AddLinksFromAssemblyContaining<T>()`; the [CAIRN002 analyzer](route-safety.md) catches this at build time |
+| One specific link/action missing | Route-name typo (Lax mode drops it), a `When(...)` that's false, or an unmet `RequireAuthorization(...)` policy | Switch to Strict mode in dev; check the predicate and policy against your test request |
+| Links missing on a wrapped `IQueryable`/LINQ projection | Re-enumeration inside `TypedResults.Ok(...)` produced new instances, so computed links couldn't be matched back up | Materialize first: `.ToList()` before wrapping ([diagnostics](diagnostics.md)) |
+| `IAsyncEnumerable<T>` response has no links | Streams can't be enumerated twice; not supported | Materialize first (e.g. `ToListAsync()`) |
+| A struct resource has no links | Value types box to different instances between compute and serialize | Use a class or record |
+
+## Try the sample
+
+A complete runnable example lives in [`samples/Cairn.Sample.Api`](https://github.com/JonahLargen/Cairn/tree/main/samples/Cairn.Sample.Api): minimal-API endpoints and an MVC controller, collections, offset and cursor pagination, and `Results<,>` unions — all over plain record DTOs.
 
 ## Next steps
 
-- [link-configs.md](link-configs.md) — the builder, conditions, service-aware targets, and authorization.
-- [affordances-and-forms.md](affordances-and-forms.md) — affordances and HAL-FORMS fields.
-- [formats.md](formats.md) — Default, HAL, and HAL-FORMS wire formats and negotiation.
-- [controllers.md](controllers.md) — opting MVC actions in with `[CairnLinks]`.
-- [diagnostics.md](diagnostics.md) — logged warnings, metrics, and tracing for hypermedia failures.
-- [client.md](client.md) — consuming linked responses with the typed client.
+**Shape richer responses**
+
+- [Link configurations](link-configs.md) — conditions, service-aware targets, authorization, titles.
+- [Affordances & HAL-FORMS](affordances-and-forms.md) — actions with typed input forms.
+- [Wire formats & negotiation](formats.md) — Default, HAL, and HAL-FORMS.
+- [Pagination](pagination.md) — `self`/`prev`/`next` links on paged envelopes.
+- [Embedded resources](embedded-resources.md) — inline related resources with their own links.
+
+**Round out the API**
+
+- [Controllers (MVC)](controllers.md) — the same model with `[CairnLinks]`.
+- [OpenAPI & Swagger](openapi.md) — document the hypermedia.
+- [Testing](testing.md) — assert on links and actions in integration tests.
+- [The typed client](client.md) — consume the links you just emitted.
