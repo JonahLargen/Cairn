@@ -1,0 +1,56 @@
+#nullable enable
+Cairn.Testing.HypermediaAffordance
+Cairn.Testing.HypermediaAffordance.<Clone>$() -> Cairn.Testing.HypermediaAffordance!
+Cairn.Testing.HypermediaAffordance.Deconstruct(out string! Href, out string! Method, out string? Title) -> void
+Cairn.Testing.HypermediaAffordance.Equals(Cairn.Testing.HypermediaAffordance? other) -> bool
+Cairn.Testing.HypermediaAffordance.Href.get -> string!
+Cairn.Testing.HypermediaAffordance.Href.init -> void
+Cairn.Testing.HypermediaAffordance.HypermediaAffordance(string! Href, string! Method, string? Title) -> void
+Cairn.Testing.HypermediaAffordance.Method.get -> string!
+Cairn.Testing.HypermediaAffordance.Method.init -> void
+Cairn.Testing.HypermediaAffordance.Title.get -> string?
+Cairn.Testing.HypermediaAffordance.Title.init -> void
+Cairn.Testing.HypermediaAffordanceAssertions
+Cairn.Testing.HypermediaAffordanceAssertions.And.get -> Cairn.Testing.HypermediaResponseAssertions!
+Cairn.Testing.HypermediaAffordanceAssertions.WithHref(string! href) -> Cairn.Testing.HypermediaAffordanceAssertions!
+Cairn.Testing.HypermediaAffordanceAssertions.WithMethod(System.Net.Http.HttpMethod! method) -> Cairn.Testing.HypermediaAffordanceAssertions!
+Cairn.Testing.HypermediaLink
+Cairn.Testing.HypermediaLink.<Clone>$() -> Cairn.Testing.HypermediaLink!
+Cairn.Testing.HypermediaLink.Deconstruct(out string! Href, out string? Title) -> void
+Cairn.Testing.HypermediaLink.Equals(Cairn.Testing.HypermediaLink? other) -> bool
+Cairn.Testing.HypermediaLink.Href.get -> string!
+Cairn.Testing.HypermediaLink.Href.init -> void
+Cairn.Testing.HypermediaLink.HypermediaLink(string! Href, string? Title) -> void
+Cairn.Testing.HypermediaLink.Name.get -> string?
+Cairn.Testing.HypermediaLink.Name.init -> void
+Cairn.Testing.HypermediaLink.Title.get -> string?
+Cairn.Testing.HypermediaLink.Title.init -> void
+Cairn.Testing.HypermediaResponse
+Cairn.Testing.HypermediaResponse.Affordances.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Cairn.Testing.HypermediaAffordance!>!
+Cairn.Testing.HypermediaResponse.AllLinks.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<Cairn.Testing.HypermediaLink!>!>!
+Cairn.Testing.HypermediaResponse.HypermediaResponse(System.Collections.Generic.IReadOnlyDictionary<string!, Cairn.Testing.HypermediaLink!>! links, System.Collections.Generic.IReadOnlyDictionary<string!, Cairn.Testing.HypermediaAffordance!>! affordances, System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<Cairn.Testing.HypermediaLink!>!>? allLinks = null) -> void
+Cairn.Testing.HypermediaResponse.Links.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Cairn.Testing.HypermediaLink!>!
+Cairn.Testing.HypermediaResponseAssertions
+Cairn.Testing.HypermediaResponseAssertions.And.get -> Cairn.Testing.HypermediaResponseAssertions!
+Cairn.Testing.HypermediaResponseAssertions.HaveAffordance(string! name) -> Cairn.Testing.HypermediaAffordanceAssertions!
+Cairn.Testing.HypermediaResponseAssertions.HaveLink(string! relation) -> Cairn.Testing.HypermediaResponseAssertions!
+Cairn.Testing.HypermediaResponseAssertions.HaveLink(string! relation, string! href) -> Cairn.Testing.HypermediaResponseAssertions!
+Cairn.Testing.HypermediaResponseAssertions.HaveSelfLink() -> Cairn.Testing.HypermediaResponseAssertions!
+Cairn.Testing.HypermediaResponseAssertions.NotHaveAffordance(string! name) -> Cairn.Testing.HypermediaResponseAssertions!
+Cairn.Testing.HypermediaResponseAssertions.NotHaveLink(string! relation) -> Cairn.Testing.HypermediaResponseAssertions!
+Cairn.Testing.HypermediaResponseAssertionsExtensions
+Cairn.Testing.HypermediaResponseExtensions
+override Cairn.Testing.HypermediaAffordance.Equals(object? obj) -> bool
+override Cairn.Testing.HypermediaAffordance.GetHashCode() -> int
+override Cairn.Testing.HypermediaAffordance.ToString() -> string!
+override Cairn.Testing.HypermediaLink.Equals(object? obj) -> bool
+override Cairn.Testing.HypermediaLink.GetHashCode() -> int
+override Cairn.Testing.HypermediaLink.ToString() -> string!
+static Cairn.Testing.HypermediaAffordance.operator !=(Cairn.Testing.HypermediaAffordance? left, Cairn.Testing.HypermediaAffordance? right) -> bool
+static Cairn.Testing.HypermediaAffordance.operator ==(Cairn.Testing.HypermediaAffordance? left, Cairn.Testing.HypermediaAffordance? right) -> bool
+static Cairn.Testing.HypermediaLink.operator !=(Cairn.Testing.HypermediaLink? left, Cairn.Testing.HypermediaLink? right) -> bool
+static Cairn.Testing.HypermediaLink.operator ==(Cairn.Testing.HypermediaLink? left, Cairn.Testing.HypermediaLink? right) -> bool
+static Cairn.Testing.HypermediaResponse.Parse(string! json) -> Cairn.Testing.HypermediaResponse!
+static Cairn.Testing.HypermediaResponseAssertionsExtensions.Should(this Cairn.Testing.HypermediaResponse! response) -> Cairn.Testing.HypermediaResponseAssertions!
+static Cairn.Testing.HypermediaResponseExtensions.Hypermedia(this string! json) -> Cairn.Testing.HypermediaResponse!
+static Cairn.Testing.HypermediaResponseExtensions.ReadHypermediaAsync(this System.Net.Http.HttpResponseMessage! response, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Testing.HypermediaResponse!>!
