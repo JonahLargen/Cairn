@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using Cairn.Internal;
 
@@ -18,10 +19,18 @@ public interface ILinkConfigProvider
     ICompiledLinkConfig? GetConfig(Type resourceType);
 }
 
-/// <summary>An in-memory registry of link configurations keyed by resource type.</summary>
+/// <summary>
+/// An in-memory registry of link configurations keyed by resource type. Lookup honors inheritance: a
+/// resource type with no config of its own uses the config of its nearest registered base class (so a
+/// <c>LinkConfig&lt;OrderDto&gt;</c> also covers <c>RushOrderDto : OrderDto</c>). Interfaces are not
+/// considered.
+/// </summary>
 public sealed class LinkConfigRegistry : ILinkConfigProvider
 {
     private readonly Dictionary<Type, ICompiledLinkConfig> _configs = [];
+
+    // Caches the per-runtime-type resolution (including negative results); invalidated on Add.
+    private readonly ConcurrentDictionary<Type, ICompiledLinkConfig?> _resolved = new();
 
     /// <summary>Registers the config for <typeparamref name="T"/>, replacing any existing one.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="config"/> is null.</exception>
@@ -29,6 +38,7 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
     {
         ArgumentNullException.ThrowIfNull(config);
         _configs[typeof(T)] = CompiledLinkConfig<T>.Compile(config);
+        _resolved.Clear();
         return this;
     }
 
@@ -45,6 +55,7 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
             .MakeGenericType(resourceType)
             .GetMethod(nameof(CompiledLinkConfig<object>.Compile), BindingFlags.Public | BindingFlags.Static)!
             .Invoke(null, [config])!;
+        _resolved.Clear();
         return this;
     }
 
@@ -61,10 +72,26 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
         return null;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Returns the config registered for <paramref name="resourceType"/>, falling back to its nearest
+    /// registered base class, or <see langword="null"/> if neither exists.
+    /// </summary>
     public ICompiledLinkConfig? GetConfig(Type resourceType)
     {
         ArgumentNullException.ThrowIfNull(resourceType);
-        return _configs.TryGetValue(resourceType, out var config) ? config : null;
+        return _resolved.GetOrAdd(resourceType, Resolve);
+    }
+
+    private ICompiledLinkConfig? Resolve(Type resourceType)
+    {
+        for (var type = resourceType; type is not null; type = type.BaseType)
+        {
+            if (_configs.TryGetValue(type, out var config))
+            {
+                return config;
+            }
+        }
+
+        return null;
     }
 }

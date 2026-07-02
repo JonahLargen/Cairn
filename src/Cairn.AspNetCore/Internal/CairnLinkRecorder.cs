@@ -14,26 +14,57 @@ namespace Cairn.AspNetCore.Internal;
 /// </summary>
 internal static class CairnLinkRecorder
 {
+    private const string EmitDiagnosticKey = "Cairn.EmitDiagnostic";
+
     private static readonly ConcurrentDictionary<Type, byte> WarnedHalActionTypes = new();
     private static readonly ConcurrentDictionary<Type, byte> WarnedValueTypes = new();
+    private static readonly ConcurrentDictionary<Type, byte> WarnedAsyncEnumerableTypes = new();
+    private static readonly ConcurrentDictionary<Type, byte> WarnedUnconfiguredTypes = new();
+    private static readonly ConcurrentDictionary<Type, byte> WarnedUnemittedTypes = new();
 
-    // Minimal-API entry point: peel the IResult to its value, then record it.
-    public static ValueTask RecordResultAsync(HttpContext http, object? result)
-        => Unwrap(result) is IValueHttpResult { Value: { } value } ? RecordValueAsync(http, value) : ValueTask.CompletedTask;
-
-    // MVC entry point: the resource value (e.g. ObjectResult.Value) is recorded directly.
-    public static async ValueTask RecordValueAsync(HttpContext http, object? value)
+    // Minimal-API entry point: a handler may return an IResult carrying the value, or the bare value itself.
+    // Returns the (possibly substituted) result the endpoint filter should pass down the pipeline.
+    public static async ValueTask<object?> RecordResultAsync(HttpContext http, object? result)
     {
-        if (value is null)
+        switch (Unwrap(result))
         {
-            return;
-        }
+            // TypedResults.Ok(...) and friends: record the carried value. The result instance is immutable,
+            // so a deferred sequence cannot be swapped for its buffer here; if its re-enumeration yields new
+            // instances, the emit-stage diagnostic reports the miss.
+            case IValueHttpResult { Value: { } value }:
+                await RecordValueAsync(http, value);
+                return result;
 
+            // Any other IResult carries no value; a bare string serializes as text/plain — nothing to link.
+            case IResult or string or null:
+                return result;
+
+            // Bare return: the handler returned the DTO (or sequence) itself. Record it, handing forward the
+            // buffered copy of a deferred sequence so links stay correlated by reference.
+            case var value:
+                return await RecordValueAsync(http, value);
+        }
+    }
+
+    // MVC entry point: the resource value (e.g. ObjectResult.Value) is recorded directly. Returns the value
+    // to serialize — the buffered copy when the input was a deferred sequence, otherwise the input itself.
+    public static async ValueTask<object> RecordValueAsync(HttpContext http, object value)
+    {
         var services = http.RequestServices;
         var options = services.GetRequiredService<CairnOptions>();
 
         var format = ResolveFormat(http, options);
         CairnLinkStore.SetFormat(http, format);
+
+        var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore");
+
+        // An async stream is fundamentally incompatible with the two-pass design: links are computed before
+        // serialization, and the stream cannot be enumerated twice. Warn once rather than fail silently.
+        if (AsyncEnumerableElementType(value) is { } elementType)
+        {
+            WarnAsyncEnumerable(logger, elementType);
+            return value;
+        }
 
         var scope = new RecordScope(
             services.GetRequiredService<ILinkEngine>(),
@@ -45,22 +76,37 @@ internal static class CairnLinkRecorder
                 http.RequestAborted),
             options,
             format,
-            services.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore"),
+            logger,
+            services.GetService<ILinkConfigProvider>(),
             new HashSet<object>(ReferenceEqualityComparer.Instance));
 
-        await RecordAsync(http, value, scope);
+        // A deferred sequence (LINQ query, IQueryable, iterator) would be enumerated here and again by the
+        // serializer — running any underlying query twice and, if the second pass yields new instances,
+        // losing every link. Materialize it once and hand the buffer forward instead.
+        if (value is IEnumerable enumerable and not string
+            && value is not IPagedResource and not ICursorPagedResource
+            && !options.IsPagingEnvelope(value.GetType())
+            && !IsMaterialized(enumerable))
+        {
+            value = BufferSequence(enumerable);
+        }
+
+        await RecordAsync(http, value, scope, warnIfUnconfigured: true);
 
         // Only relabel the response media type when the top-level value itself is a decorated resource object
         // (a configured single resource, or a paged/cursor envelope). A problem document or uncovered body keeps
         // its content type per RFC 9457; and a bare collection serializes as a JSON array, which is not a HAL
         // document even though its elements carry _links — so it stays application/json.
-        if (CairnLinkStore.Lookup(http, value) is not null)
+        if (CairnLinkStore.Has(http, value))
         {
             ApplyContentType(http, format);
         }
+
+        RegisterEmitMissDiagnostic(http, logger);
+        return value;
     }
 
-    private static async ValueTask RecordAsync(HttpContext http, object? value, RecordScope scope)
+    private static async ValueTask RecordAsync(HttpContext http, object? value, RecordScope scope, bool warnIfUnconfigured)
     {
         if (value is null)
         {
@@ -98,7 +144,7 @@ internal static class CairnLinkRecorder
         {
             foreach (var item in enumerable)
             {
-                await RecordAsync(http, item, scope);
+                await RecordAsync(http, item, scope, warnIfUnconfigured);
             }
 
             return;
@@ -112,30 +158,38 @@ internal static class CairnLinkRecorder
         var linkSet = await scope.Engine.BuildAsync(value, scope.Context, http.RequestAborted);
         WarnIfActionsBlocked(scope, value, linkSet);
 
-        if (!linkSet.IsEmpty)
+        if (linkSet.IsEmpty)
         {
-            WarnIfValueType(scope, value);
-
-            // Record each embedded child first (recursing so it gets its own _links), then capture the map.
-            IReadOnlyDictionary<string, object>? embedded = null;
-            if (linkSet.Embedded.Count > 0)
+            if (warnIfUnconfigured)
             {
-                var map = new Dictionary<string, object>(StringComparer.Ordinal);
-                foreach (var group in linkSet.Embedded)
-                {
-                    foreach (var child in group.Resources)
-                    {
-                        await RecordAsync(http, child, scope);
-                    }
-
-                    map[group.Relation.Value] = group.Single ? group.Resources[0] : group.Resources;
-                }
-
-                embedded = map;
+                WarnIfUnconfigured(scope, value);
             }
 
-            CairnLinkStore.Record(http, value, ToPayload(linkSet, embedded, scope.Options.Curies));
+            return;
         }
+
+        WarnIfValueType(scope, value);
+
+        // Record each embedded child first (recursing so it gets its own _links), then capture the map.
+        IReadOnlyDictionary<string, object>? embedded = null;
+        if (linkSet.Embedded.Count > 0)
+        {
+            var map = new Dictionary<string, object>(StringComparer.Ordinal);
+            foreach (var group in linkSet.Embedded)
+            {
+                foreach (var child in group.Resources)
+                {
+                    // An embedded child without its own config is a normal shape — no unconfigured warning.
+                    await RecordAsync(http, child, scope, warnIfUnconfigured: false);
+                }
+
+                map[group.Relation.Value] = group.Single ? group.Resources[0] : group.Resources;
+            }
+
+            embedded = map;
+        }
+
+        CairnLinkStore.Record(http, value, ToPayload(linkSet, embedded, scope.Options.Curies));
     }
 
     // Shared: record the envelope's navigation links, then link each of its items.
@@ -154,7 +208,7 @@ internal static class CairnLinkRecorder
 
         foreach (var item in items)
         {
-            await RecordAsync(http, item, scope);
+            await RecordAsync(http, item, scope, warnIfUnconfigured: true);
         }
     }
 
@@ -289,6 +343,128 @@ internal static class CairnLinkRecorder
         }
     }
 
+    private static void WarnAsyncEnumerable(ILogger? logger, Type elementType)
+    {
+        if (logger is not null && WarnedAsyncEnumerableTypes.TryAdd(elementType, 0))
+        {
+            logger.LogWarning(
+                "Cairn: hypermedia cannot be attached to an IAsyncEnumerable<{ResourceType}> response (links are computed before serialization, and an async stream cannot be enumerated twice). Materialize it first (e.g. ToListAsync()). No links will be emitted for it.",
+                elementType.Name);
+        }
+    }
+
+    // A response value whose runtime type (and base classes) has no registered config yields no links at all.
+    // On an endpoint that explicitly opted in via WithLinks()/[CairnLinks], that is far more likely a missing
+    // registration than intent — warn once per type instead of no-oping silently.
+    private static void WarnIfUnconfigured(RecordScope scope, object value)
+    {
+        var type = value.GetType();
+        if (value is string or Microsoft.AspNetCore.Mvc.ProblemDetails
+            || type.IsValueType
+            || scope.Logger is not { } logger
+            || scope.Configs is null
+            || scope.Configs.GetConfig(type) is not null)
+        {
+            return;
+        }
+
+        if (WarnedUnconfiguredTypes.TryAdd(type, 0))
+        {
+            logger.LogWarning(
+                "Cairn: no link configuration is registered for {ResourceType} or any of its base types; it will serialize without hypermedia. Register a LinkConfig<{ResourceType}> (AddLinks / AddLinksFromAssembly), or remove WithLinks()/[CairnLinks] if this is intended.",
+                type.Name,
+                type.Name);
+        }
+    }
+
+    // After the response completes, report any recorded hypermedia the serializer never asked for — the
+    // reference correlation between compute and emit broke (typically a deferred sequence inside an immutable
+    // result, re-enumerated into fresh instances). Without this, the links just vanish with no trace.
+    private static void RegisterEmitMissDiagnostic(HttpContext http, ILogger? logger)
+    {
+        if (logger is null || !CairnLinkStore.HasEntries(http) || !http.Items.TryAdd(EmitDiagnosticKey, true))
+        {
+            return;
+        }
+
+        http.Response.OnCompleted(() =>
+        {
+            // An error response may legitimately skip serializing the recorded value.
+            if (http.Response.StatusCode < 400)
+            {
+                foreach (var type in CairnLinkStore.UnemittedTypes(http))
+                {
+                    if (WarnedUnemittedTypes.TryAdd(type, 0))
+                    {
+                        logger.LogWarning(
+                            "Cairn: hypermedia was computed for {ResourceType} but never emitted. Links are correlated by reference between compute and serialization; this usually means a deferred sequence (LINQ projection, IQueryable) produced different instances when serialized. Materialize the sequence (e.g. ToList()) before returning it.",
+                            type.Name);
+                    }
+                }
+            }
+
+            return Task.CompletedTask;
+        });
+    }
+
+    private static Type? AsyncEnumerableElementType(object value)
+    {
+        foreach (var iface in value.GetType().GetInterfaces())
+        {
+            if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IAsyncEnumerable<>))
+            {
+                return iface.GetGenericArguments()[0];
+            }
+        }
+
+        return null;
+    }
+
+    // Materialized collections (arrays, lists, sets, ...) expose a count; a deferred sequence (LINQ query,
+    // IQueryable, iterator) does not.
+    private static bool IsMaterialized(IEnumerable value)
+    {
+        if (value is ICollection)
+        {
+            return true;
+        }
+
+        foreach (var iface in value.GetType().GetInterfaces())
+        {
+            if (iface.IsGenericType
+                && iface.GetGenericTypeDefinition() is var definition
+                && (definition == typeof(ICollection<>) || definition == typeof(IReadOnlyCollection<>)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Enumerate the deferred sequence exactly once into a List<T> (preserving the element type so the
+    // serialization contract is unchanged) that both the recorder and the serializer share.
+    private static IEnumerable BufferSequence(IEnumerable source)
+    {
+        Type? elementType = null;
+        foreach (var iface in source.GetType().GetInterfaces())
+        {
+            if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+            {
+                elementType = iface.GetGenericArguments()[0];
+                break;
+            }
+        }
+
+        var buffer = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(elementType ?? typeof(object)))!;
+        foreach (var item in source)
+        {
+            buffer.Add(item);
+        }
+
+        return buffer;
+    }
+
     // Per-route .WithPageLinks() wins over the global PageLink, which wins over the default query-swap.
     private static Func<int, string> ResolvePageUrl(HttpContext http, CairnOptions options)
     {
@@ -413,5 +589,6 @@ internal static class CairnLinkRecorder
         CairnOptions Options,
         HypermediaFormat Format,
         ILogger? Logger,
+        ILinkConfigProvider? Configs,
         HashSet<object> Visited);
 }

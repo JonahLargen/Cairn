@@ -146,18 +146,72 @@ internal static class CairnLinkStore
 
     public static void Record(HttpContext http, object instance, ResourceHypermedia payload)
     {
-        if (http.Items[ItemsKey] is not Dictionary<object, ResourceHypermedia> store)
+        if (http.Items[ItemsKey] is not Dictionary<object, Entry> store)
         {
-            store = new Dictionary<object, ResourceHypermedia>(ReferenceEqualityComparer.Instance);
+            store = new Dictionary<object, Entry>(ReferenceEqualityComparer.Instance);
             http.Items[ItemsKey] = store;
         }
 
-        store[instance] = payload;
+        store[instance] = new Entry(payload);
     }
 
+    /// <summary>Emit-stage lookup: returns the hypermedia for <paramref name="instance"/> and marks it emitted.</summary>
     public static ResourceHypermedia? Lookup(HttpContext http, object instance)
-        => http.Items[ItemsKey] is Dictionary<object, ResourceHypermedia> store
-            && store.TryGetValue(instance, out var payload)
-                ? payload
-                : null;
+    {
+        if (Store(http) is { } store && store.TryGetValue(instance, out var entry))
+        {
+            entry.Emitted = true;
+            return entry.Payload;
+        }
+
+        return null;
+    }
+
+    /// <summary>Whether hypermedia was recorded for <paramref name="instance"/>, without marking it emitted.</summary>
+    public static bool Has(HttpContext http, object instance)
+        => Store(http)?.ContainsKey(instance) == true;
+
+    public static bool HasEntries(HttpContext http) => Store(http) is { Count: > 0 };
+
+    /// <summary>
+    /// The distinct types whose recorded hypermedia was never looked up by the emit stage — the reference
+    /// correlation between compute and serialization broke for them. Boxed value types are excluded; they
+    /// already get a dedicated warning at record time.
+    /// </summary>
+    public static IReadOnlyList<Type> UnemittedTypes(HttpContext http)
+    {
+        if (Store(http) is not { } store)
+        {
+            return [];
+        }
+
+        List<Type>? missed = null;
+        foreach (var (instance, entry) in store)
+        {
+            var type = instance.GetType();
+            if (entry.Emitted || type.IsValueType)
+            {
+                continue;
+            }
+
+            missed ??= [];
+            if (!missed.Contains(type))
+            {
+                missed.Add(type);
+            }
+        }
+
+        return missed ?? [];
+    }
+
+    private static Dictionary<object, Entry>? Store(HttpContext http)
+        => http.Items[ItemsKey] as Dictionary<object, Entry>;
+
+    // Emitted flips when the serializer looks the instance up, powering the never-emitted diagnostic.
+    private sealed class Entry(ResourceHypermedia payload)
+    {
+        public ResourceHypermedia Payload { get; } = payload;
+
+        public bool Emitted { get; set; }
+    }
 }

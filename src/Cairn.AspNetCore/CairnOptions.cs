@@ -129,6 +129,8 @@ public sealed class CairnOptions
         return this;
     }
 
+    internal bool IsPagingEnvelope(Type type) => _paging.ContainsKey(type) || _cursorPaging.ContainsKey(type);
+
     internal bool TryGetPagedView(object value, out IPagedResource paged)
     {
         if (_paging.TryGetValue(value.GetType(), out var factory))
