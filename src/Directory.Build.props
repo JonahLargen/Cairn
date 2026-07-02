@@ -7,7 +7,6 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!-- Single place to set the package version for every shippable project. -->
     <Version>1.0.0</Version>

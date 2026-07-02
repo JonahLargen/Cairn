@@ -6,3 +6,4 @@
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
 CAIRN001 | Cairn | Warning | Link route name does not match any endpoint
+CAIRN002 | Cairn | Warning | WithLinks endpoint returns a type with no LinkConfig
