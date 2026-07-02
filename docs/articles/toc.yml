@@ -4,6 +4,8 @@
   href: link-configs.md
 - name: Wire formats &amp; negotiation
   href: formats.md
+- name: Custom wire formats
+  href: custom-formats.md
 - name: Pagination
   href: pagination.md
 - name: Embedded resources, link arrays &amp; CURIEs
@@ -16,12 +18,18 @@
   href: error-responses.md
 - name: API versioning
   href: versioning.md
+- name: Link URL policy
+  href: url-policy.md
+- name: Conditional requests, OPTIONS &amp; deprecation
+  href: conditional-requests.md
 - name: The typed client
   href: client.md
 - name: OpenAPI &amp; Swagger
   href: openapi.md
 - name: Route safety
   href: route-safety.md
+- name: Diagnostics &amp; observability
+  href: diagnostics.md
 - name: Testing
   href: testing.md
 - name: Packages

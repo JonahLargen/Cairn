@@ -162,6 +162,23 @@ When no `[EmailAddress]` attribute is present, `type` is inferred from the unwra
 
 Properties and their derived schema are cached per input type, so the annotations on a given type are read once.
 
+## The default template: `AsDefault()`
+
+HAL-FORMS reserves the template key `default` for a resource's primary action. Mark an affordance with `AsDefault()` to emit it under that key:
+
+```csharp
+builder.Affordance("update", o => LinkTarget.Route("PutOrder", new { id = o.Id }))
+    .Put()
+    .Accepts<UpdateOrderInput>()
+    .AsDefault();
+
+builder.Affordance("cancel", o => LinkTarget.Route("CancelOrder", new { id = o.Id }));
+```
+
+In HAL-FORMS this renders `_templates.default` (the `update` name is dropped from `_templates`) alongside `_templates.cancel`. Other formats are unaffected: the Default format still emits `_actions.update` under its declared name. An affordance literally named `default` (any casing) behaves the same way.
+
+Because `default` can only mean one thing, registration throws an `InvalidOperationException` if more than one affordance *unconditionally* claims it — two `AsDefault()` calls, or an `AsDefault()` plus an affordance named `default`. Claimants gated with `When(...)` or `RequireAuthorization(...)` are exempt, so mutually exclusive defaults are fine ("approve is the default when pending, reopen when closed").
+
 ## Invoking affordances from a client
 
 The [typed client](client.md) reads affordances back from a response and submits them. `Resource<T>.Fields(name)` exposes the parsed `AffordanceField` list for a named template, and `Resource<T>.InvokeAsync(name, body?, ifMatch?)` sends the request:
@@ -176,7 +193,7 @@ if (order.HasAffordance("cancel"))
 }
 ```
 
-`Fields("create")` returns each field as an `AffordanceField` (its `Name`, `Prompt`, `Required`, `ReadOnly`, `Type`, `Placeholder`, `Regex`, `MaxLength`, `Min`, `Max`, and `Options`) so a caller can build the request body before invoking. See [The typed client](client.md) for `Resource<T>`, `AffordanceField`, and `InvokeAsync`.
+`Fields("create")` returns each field as an `AffordanceField` (its `Name`, `Prompt`, `Required`, `ReadOnly`, `Type`, `Placeholder`, `Regex`, `MaxLength`, `Min`, `Max`, and `Options`) so a caller can build the request body before invoking. For form-aware submission — where the client validates the body against those fields *before* sending — use `Resource<T>.SubmitAsync(name, values)` instead. See [The typed client](client.md) for `Resource<T>`, `AffordanceField`, `InvokeAsync`, and `SubmitAsync`.
 
 ## See also
 

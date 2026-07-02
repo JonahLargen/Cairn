@@ -1,6 +1,6 @@
 # Cairn
 
-Opt-in HATEOAS for .NET 10. Your DTOs stay plain `record` types — no base class, no marker interface, no attributes. Links and affordances are declared separately in a `LinkConfig<T>` and injected at serialization time through a `System.Text.Json` contract modifier, so your models are never modified. Endpoints you don't opt in serialize exactly as before, which makes Cairn safe to add incrementally to an existing API.
+Opt-in HATEOAS for .NET (8, 9, and 10). Your DTOs stay plain `record` types — no base class, no marker interface, no attributes. Links and affordances are declared separately in a `LinkConfig<T>` and injected at serialization time through a `System.Text.Json` contract modifier, so your models are never modified. Endpoints you don't opt in serialize exactly as before, which makes Cairn safe to add incrementally to an existing API.
 
 ## The package family
 
@@ -9,11 +9,11 @@ Opt-in HATEOAS for .NET 10. Your DTOs stay plain `record` types — no base clas
 | `Cairn.Core` | Transport-agnostic hypermedia model: `Link`, `LinkRelation`, `Affordance`, `LinkTarget`, and the `LinkConfig<T>` builder. No ASP.NET Core dependency. |
 | `Cairn.AspNetCore` | ASP.NET Core integration: `AddCairn`, minimal-API `.WithLinks()`, MVC `[CairnLinks]`, pagination, wire formats (Default/HAL/HAL-FORMS), and problem details. |
 | `Cairn.Client` | Typed hypermedia client: `CairnClient`, `Resource<T>`, link following, and affordance invocation. |
-| `Cairn.OpenApi` | `AddCairnHypermedia()` for the built-in OpenAPI document generator. |
+| `Cairn.OpenApi` | `AddCairnHypermedia()` for the built-in OpenAPI document generator (.NET 10 only). |
 | `Cairn.Swashbuckle` | `AddCairnHypermedia()` for Swashbuckle/Swagger. |
-| `Cairn.Analyzers` / `Cairn.CodeFixes` | Diagnostics for unknown (`CAIRN001`) and colliding (`CAIRN002`) route names, with fixes. |
-| `Cairn.SourceGenerators` | Generates a `Routes.*` catalog from named endpoints and controller route attributes. |
-| `Cairn.Testing` | `HypermediaResponse` and `.Should()` assertions for links and affordances. |
+| `Cairn.Analyzers` / `Cairn.CodeFixes` | Diagnostics for unknown route names (`CAIRN001`, with a code fix) and `WithLinks` endpoints whose return type has no `LinkConfig` (`CAIRN002`). |
+| `Cairn.SourceGenerators` | Generates a `Routes.*` catalog from named endpoints and controller route attributes; reports colliding names (`CAIRN003`). |
+| `Cairn.Testing` | `HypermediaResponse`, `.Should()` assertions, and `HypermediaSnapshot` for links and affordances. |
 
 ## Install
 
@@ -80,11 +80,15 @@ A request to `/orders/42` returns the DTO with a `_links` object projected in:
 - [Pagination](articles/pagination.md) — offset and cursor paging.
 - [Embedded resources](articles/embedded-resources.md) — `_embedded`, link arrays, and CURIEs.
 - [Affordances & HAL-FORMS](articles/affordances-and-forms.md) — actions, methods, and form fields.
+- [Custom wire formats](articles/custom-formats.md) — plugging in Siren or a house format with `IHypermediaFormatter`.
 - [Controllers / MVC](articles/controllers.md) — opting in with `[CairnLinks]`.
 - [Error responses](articles/error-responses.md) — problem details with links and actions.
 - [API versioning](articles/versioning.md) — composing with versioned routes.
-- [The typed client](articles/client.md) — `CairnClient`, `Resource<T>`, and following links.
+- [Link URL policy](articles/url-policy.md) — absolute vs path-relative links, `PublicBaseUri`, `TransformUrl`.
+- [Conditional requests, OPTIONS & deprecation](articles/conditional-requests.md) — `WithETag`, preconditions, `Allow`, and deprecation headers.
+- [The typed client](articles/client.md) — `CairnClient`, `Resource<T>`, following links, and submitting forms.
 - [OpenAPI & Swagger](articles/openapi.md) — documenting hypermedia responses.
-- [Analyzers & generated routes](articles/route-safety.md) — `CAIRN001`/`CAIRN002` and the `Routes.*` catalog.
+- [Analyzers & generated routes](articles/route-safety.md) — `CAIRN001`–`CAIRN003` and the `Routes.*` catalog.
+- [Diagnostics & observability](articles/diagnostics.md) — logged warnings, metrics, and tracing.
 - [Testing](articles/testing.md) — asserting on links and affordances.
 - [Packages](articles/packages.md) — the full package family in detail.

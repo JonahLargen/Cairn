@@ -162,7 +162,9 @@ public sealed class GadgetLinks : LinkConfig<Gadget>
 }
 ```
 
-A registered prefix appears in `_links.curies` only for a resource that uses a relation with that prefix. `_links.curies` is a HAL construct, so it surfaces in the HAL and HAL-FORMS [wire formats](formats.md).
+A registered prefix appears in `_links.curies` only for a resource that uses a relation with that prefix — and any rel-keyed section counts, not just `_links`: an affordance named `acme:reorder` (surfacing in `_actions`/`_templates`) or an embedded relation `acme:child` (surfacing in `_embedded`) also brings the `acme` curie into `_links.curies`. `_links.curies` is a HAL construct, so it surfaces in the HAL and HAL-FORMS [wire formats](formats.md).
+
+Relation keys — including CURIE prefixes — compare case-insensitively per RFC 8288, so `acme:Widget` and `acme:widget` group under one key (the first-declared casing), and they are emitted verbatim regardless of the host's JSON dictionary-key policy.
 
 ## See also
 

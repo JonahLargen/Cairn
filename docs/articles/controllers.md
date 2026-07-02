@@ -99,7 +99,7 @@ public sealed class OrderLinks : LinkConfig<Order>
 }
 ```
 
-The same route names feed route safety: the source generator emits a `Routes.*` catalog from controller route attributes, and the analyzer reports `CAIRN001` when a `LinkTarget.Route` name does not match any named endpoint (and `CAIRN002` on collisions). You can therefore replace the string literals with the generated helpers and get compile-time checking — exactly as for minimal APIs:
+The same route names feed route safety: the source generator emits a `Routes.*` catalog from controller route attributes (reporting `CAIRN003` when two names collide in the catalog), and the analyzer reports `CAIRN001` when a `LinkTarget.Route` name does not match any named endpoint. You can therefore replace the string literals with the generated helpers and get compile-time checking — exactly as for minimal APIs:
 
 ```csharp
 public override void Configure(ILinkBuilder<Order> builder)

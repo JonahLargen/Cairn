@@ -46,7 +46,7 @@ public override void Configure(ILinkBuilder<Order> builder)
 }
 ```
 
-The relation argument is a `LinkRelation`. A `string` converts implicitly (`"invoice"` above), or use one of the `IanaLinkRelations` constants.
+The relation argument is a `LinkRelation`. A `string` converts implicitly (`"invoice"` above), or use one of the `IanaLinkRelations` constants. Relations compare case-insensitively, per RFC 8288 — `"Related"` and `"related"` are the same relation, and links declared under case variants merge under one wire key (the first-declared casing is emitted).
 
 ## Links (HAL link arrays)
 
@@ -64,11 +64,12 @@ A service-aware async overload is available when the targets depend on request s
 ILinkSpec<T> Links(LinkRelation relation, Func<T, LinkContext, ValueTask<IEnumerable<LinkTarget>>> targets);
 ```
 
-## Link targets: Route vs Uri
+## Link targets: Route, RouteTemplate & Uri
 
 A `LinkTarget` describes where a link points; the host resolves it to a URL.
 
 - `LinkTarget.Route(string routeName, object? routeValues = null)` — points at a named route, optionally with route values. Resolution honors the configured route, so the URL stays correct if the route template changes.
+- `LinkTarget.RouteTemplate(string routeName, object? routeValues = null)` — renders a named route as an RFC 6570 URI template: the supplied route values are bound, and any remaining route parameters stay as `{placeholders}`. The link is emitted with `templated: true`.
 - `LinkTarget.Uri(string href, bool templated = false)` — points at an explicit URI. Set `templated: true` to emit an RFC 6570 URI template.
 
 ```csharp
@@ -76,11 +77,15 @@ builder.Self(o => LinkTarget.Route("GetOrder", new { id = o.Id }));
 
 builder.Link("docs", _ => LinkTarget.Uri("https://example.com/docs"));
 
+// Template derived from the route itself — no hand-written URI to drift:
+builder.Link("note", o => LinkTarget.RouteTemplate("GetNote", new { id = o.Id }));
+// href: "/orders/1/notes/{noteId}", templated: true
+
 builder.Link(IanaLinkRelations.Search,
     _ => LinkTarget.Uri("/orders{?status,page}", templated: true));
 ```
 
-A templated target produces a `Link` whose `Templated` flag is `true` on the wire.
+A templated target produces a `Link` whose `Templated` flag is `true` on the wire. `RouteTemplate` keeps the template synchronized with the actual route — if the route's path changes, the emitted template follows — which `LinkTarget.Uri` cannot do.
 
 ## Per-link attributes
 
@@ -103,6 +108,16 @@ builder.Link(IanaLinkRelations.Alternate, o => LinkTarget.Route("GetOrderPdf", n
 
 builder.Link("legacy-status", o => LinkTarget.Route("GetStatus", new { id = o.Id }))
     .Deprecated("https://example.com/deprecations/legacy-status");
+```
+
+The same attributes also exist on `LinkTarget` itself (`WithName`, `WithTitle`, `WithType`, `WithHreflang`, `WithDeprecation`, `WithProfile`, or the equivalent init properties), where they override the spec-level value for that one target. This matters for `Links(...)` arrays, where a spec-level attribute applies to every member — a per-target `WithName` disambiguates individual links within the relation:
+
+```csharp
+builder.Links(IanaLinkRelations.Alternate, o => new[]
+{
+    LinkTarget.Route("GetOrderPdf", new { id = o.Id }).WithName("pdf"),
+    LinkTarget.Route("GetOrderCsv", new { id = o.Id }).WithName("csv"),
+});
 ```
 
 ## Conditions
@@ -148,12 +163,19 @@ builder.Link("audit-log", o => LinkTarget.Route("GetOrderAudit", new { id = o.Id
 
 Authorization gating uses the engine's `ILinkAuthorizer`, which evaluates the policy against the current caller. The default policy admits an authenticated caller. Authorization-gated affordances also show up on controllers — see [controllers.md](controllers.md) — and a denied transition surfaces as a problem response — see [error-responses.md](error-responses.md).
 
+Two things to keep in mind:
+
+- **The policy sees the caller, not the resource.** It is evaluated once per request per policy (results are memoized, so a 200-item page evaluates each policy once, not 200 times). A policy named `CanCancelThisOrder` still can't see the order — for per-resource decisions, combine a caller check with a resource predicate in `When`, or call `IAuthorizationService.AuthorizeAsync(user, resource, policy)` yourself in a service-aware condition.
+- **Gated links personalize the body.** A response whose links depend on the caller must not be output-cached (ASP.NET Core `OutputCache`, a CDN) without varying by credential — otherwise the first caller's affordance set replays to everyone.
+
 ## Service-aware targets and conditions
 
 The service-aware overloads pass a `LinkContext`, which exposes:
 
 - `Services` — the request's `IServiceProvider`, for data not on the DTO.
 - `CancellationToken` — the request's cancellation token.
+
+(It also carries the resolution machinery — the URL resolver, the authorizer, the active `Mode`, and an `OnUnresolvedLink` callback invoked on each Lax-mode drop; see [diagnostics.md](diagnostics.md).)
 
 Resolve dependencies from `ctx.Services` to compute a target or evaluate a condition:
 
@@ -208,6 +230,21 @@ builder.Link(IanaLinkRelations.Next, o => LinkTarget.Route("ListOrders", new { p
 ```
 
 For any relation not in the list, pass a `string` (it converts to `LinkRelation` implicitly) or a custom relation URI.
+
+## Which config applies: runtime-type dispatch
+
+Configs are selected by the value's **runtime type**, with fallback to the nearest registered base class. A `LinkConfig<OrderDto>` therefore also covers a returned `RushOrderDto : OrderDto` — the derived type inherits the base type's links without any extra registration. An exact-type config wins over a base-type config, and interfaces are not considered:
+
+```csharp
+public record OrderDto(int Id);
+public record RushOrderDto(int Id) : OrderDto(Id);
+
+options.AddLinks(new OrderLinks());          // LinkConfig<OrderDto>
+// endpoints returning RushOrderDto get OrderLinks' hypermedia;
+// registering a LinkConfig<RushOrderDto> later would take precedence for RushOrderDto.
+```
+
+This is also how handlers can declare a base type and return derived instances — each element of a collection dispatches on its own runtime type.
 
 ## Related pages
 

@@ -50,4 +50,5 @@ The version parameter (`v=1.0`) carries onto the relabeled `application/hal+json
 ## Related
 
 - [Link configurations](link-configs.md) — building service-aware link and affordance targets.
+- [Link URL policy](url-policy.md) — `TransformUrl` in general, plus `UrlStyle` and `PublicBaseUri`.
 - [The typed client](client.md) — following links and re-applying out-of-band versions on the client.

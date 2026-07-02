@@ -39,6 +39,8 @@ Inject `CairnClient` wherever you need it. To construct one directly — for exa
 var client = new CairnClient(httpClient, jsonOptions: null, allowLink: null);
 ```
 
+Construction is non-invasive: the injected `HttpClient`'s default headers are never mutated. If the client declares no default `Accept`, Cairn negotiates per request with `application/prs.hal-forms+json`, `application/hal+json; q=0.9`, `application/json; q=0.8`; a caller-declared default `Accept` wins and is left untouched. Caller-supplied `JsonOptions` are used as-is (not copied); when omitted, all clients share one cached `JsonSerializerDefaults.Web` instance.
+
 ## Fetching a resource
 
 `GetAsync<T>` reads a resource and its hypermedia, returning a `ClientResult<T>`:
@@ -59,7 +61,7 @@ else
 
 `ClientResult<T>` members:
 
-- `IsSuccess` — `true` for a 2xx status. When `true`, `Resource` is non-null; otherwise `Problem` is non-null.
+- `IsSuccess` — `true` for a 2xx status, or a `304 Not Modified` answer to a conditional request. When `true`, `Resource` is non-null; otherwise `Problem` is non-null.
 - `Status` — the HTTP status code as an `int`.
 - `IsNotModified` — `true` when the status is `304` (see [Conditional requests](#conditional-requests)).
 - `Resource` — the `Resource<T>?` on success.
@@ -91,6 +93,8 @@ Other navigation members on `Resource<T>`:
 
 `FollowAsync<TNext>(relation)` throws `InvalidOperationException` if the resource has no link with that relation, so guard with `HasLink` when a relation is optional.
 
+Two curie helpers round out navigation: `Curies` lists the [CURIEs](embedded-resources.md) the response declared (`Curie(Name, Href, Templated)` records from `_links.curies`), and `DocumentationFor(relation)` expands a prefixed relation like `"acme:widget"` against its curie template into the documentation URL (`null` for unprefixed relations or unknown prefixes).
+
 ### Templated links
 
 When a link is an RFC 6570 URI template (`Link.Templated` is `true`), pass `variables` — an anonymous object or dictionary — and the client expands the template before fetching:
@@ -103,6 +107,8 @@ ClientResult<OrderList> page = await resource.FollowAsync<OrderList>(
 ```
 
 Following a templated `Link` without variables throws `NotSupportedException`. You can also follow a `Link` value directly via `client.FollowAsync<T>(link)` or `client.FollowAsync<T>(link, variables)`.
+
+Template expansion implements RFC 6570 levels 1–4 (`{var}`, `{+var}`, `{#var}`, `{.var}`, `{/var}`, `{;var}`, `{?a,b}`, `{&var}`, the prefix modifier `{var:n}`, and explode `{list*}` over lists and maps), with careful encoding: reserved expansion percent-encodes a bare `%` that isn't a valid escape, and the prefix modifier counts code points, so it never splits a surrogate pair.
 
 ## Collections
 
@@ -127,7 +133,9 @@ if (orders.HasLink("next"))
 }
 ```
 
-`CollectionResult<TItem>` exposes `IsSuccess`, `Status`, `Collection`, `Problem`, and `EnsureSuccess()`. See [Pagination](pagination.md) for the server side that emits `next`/`prev`/`first`/`last`.
+A second overload, `FollowAsync(relation, variables, itemsProperty = "items")`, handles templated pagination links. A templated `next` is followable even with no variables — unresolved expressions collapse per RFC 6570, so `/orders/2{?verbose}` follows as `/orders/2` — and passing variables expands them. Two guard rails: passing variables for a *non-templated* link throws `ArgumentException`, and calling `FollowAsync("next", null)` throws `ArgumentNullException` explaining the overload trap (a bare `null` binds to `itemsProperty`; write `FollowAsync("next", (object?)null)` to mean "no variables").
+
+`CollectionResult<TItem>` exposes `IsSuccess`, `Status`, `IsNotModified`, `Collection`, `Problem`, and `EnsureSuccess()`. See [Pagination](pagination.md) for the server side that emits `next`/`prev`/`first`/`last`.
 
 ## Invoking affordances
 
@@ -161,6 +169,26 @@ foreach (AffordanceField field in order.Fields("ship"))
 
 `AffordanceField` carries `Name`, `Prompt`, `Required`, `ReadOnly`, `Type`, `Placeholder`, `Regex`, `MaxLength`, `Min`, `Max`, and `Options` — enough to render or validate a form before invoking.
 
+### Form-aware submission: `SubmitAsync`
+
+Where `InvokeAsync` sends whatever body you give it, `SubmitAsync(name, values, ifMatch?)` (and `SubmitAsync<TResult>`) validates the values against the affordance's HAL-FORMS fields **before anything is sent**:
+
+```csharp
+ClientResult<Order> result = await order.SubmitAsync<Order>(
+    "update",
+    new { reason = "customer request", severity = 3 });
+```
+
+Violations — a missing required field, a value set for a read-only field, a regex mismatch (HTML5 whole-value semantics), `maxLength`/`min`/`max` breaches, a value outside the field's `options` — are aggregated into a single `ArgumentException` listing every problem, and the server is never contacted. On success the request goes out with the affordance's method and declared content type.
+
+### Request bodies and content types
+
+For both `InvokeAsync` and `SubmitAsync`, the affordance's declared `contentType` decides how the body is encoded:
+
+- No declared content type, `application/json`, or any `+json` suffix — sent as JSON with the declared media type and parameters preserved (`application/json; charset=utf-8` stays as-is; `application/merge-patch+json` is honored).
+- `application/x-www-form-urlencoded` — top-level scalar values are form-encoded (`null` values skipped); a nested object or array throws `NotSupportedException`.
+- Anything else — `NotSupportedException`.
+
 ## Conditional requests
 
 The client supports ETag-based conditional GETs and optimistic concurrency.
@@ -177,6 +205,8 @@ if (again.IsNotModified)
     // Unchanged — keep the previously cached resource.
 }
 ```
+
+A 304 is a success, not a failure: `IsSuccess` is `true`, `Problem` is `null`, and `EnsureSuccess()` yields a bodiless resource (`Value` is `null`) whose `ETag` is preserved. The same holds for a 304 answered to an invoked affordance or a collection request. The server side of this round trip is [`WithETag`](conditional-requests.md).
 
 For writes, pass the same `ETag` as `ifMatch` to an affordance so the server can reject a stale update (`412 Precondition Failed`):
 
@@ -206,6 +236,8 @@ builder.Services.AddCairnClient(o =>
 
 The policy fails closed: if a target cannot be resolved to an absolute URI (no `BaseAddress` set), the link is rejected rather than followed unchecked. A rejected target throws `InvalidOperationException`. When `AllowLink` is `null`, any server-supplied link is followed.
 
+When `AllowLink` is set through `AddCairnClient`, the policy is also enforced on **every redirect hop**: automatic redirect following moves into a Cairn handler that re-checks each 3xx target (up to 10 hops), applies the standard method rewrites (303 → GET; 301/302 from POST → GET; 307/308 preserve the method), strips the `Authorization` header on cross-origin redirects, and hands a body-preserving redirect it can't safely replay back to the caller as the 3xx response.
+
 ## Error handling
 
 Every result exposes the parsed `Problem` on failure — an [RFC 9457 problem detail](error-responses.md) with `Type`, `Title`, `Status`, `Detail`, `Instance`, and an `Extensions` dictionary (`IReadOnlyDictionary<string, JsonElement>`) of any non-standard members (such as validation `errors`). When the error body is not `application/problem+json`, the client reads a status-only `Problem`.
@@ -222,6 +254,8 @@ if (!result.IsSuccess)
 }
 ```
 
+A malformed *success* response follows the same no-throw model: a 2xx body that isn't valid JSON, or that can't bind to `T`, returns a failed result whose `Problem` carries the original status, the title "The response body is not valid JSON.", and a detail naming the content type, the parse error, and a short snippet of the body. An empty or whitespace body is not a parse failure — it's a bodiless success.
+
 `EnsureSuccess()` (on `ClientResult`, `ClientResult<T>`, and `CollectionResult<TItem>`) throws `CairnClientException`, which carries the status and the `Problem`, when you prefer exceptions over branching.
 
 ## See also
@@ -230,5 +264,6 @@ if (!result.IsSuccess)
 - [Pagination](pagination.md)
 - [Embedded resources, link arrays & CURIEs](embedded-resources.md)
 - [Affordances & HAL-FORMS](affordances-and-forms.md)
+- [Conditional requests, OPTIONS & deprecation](conditional-requests.md)
 - [Error responses & problem details](error-responses.md)
 - [Packages](packages.md)

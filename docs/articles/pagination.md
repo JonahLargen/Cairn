@@ -49,7 +49,7 @@ builder.Services.AddCairn(cairn =>
 
 ### Customizing the page URL
 
-By default the offset links swap the `page` query parameter on the current request URL, preserving any other query parameters. Change the parameter name globally with `PageQueryParameter`:
+By default the offset links swap the `page` query parameter on the current request URL, preserving any other query parameters. Matching is case-insensitive and keeps the incoming casing: a request with `?Page=2` gets links with `Page=3`, not a duplicate `page` parameter. Change the parameter name globally with `PageQueryParameter`:
 
 ```csharp
 cairn.PageQueryParameter = "p";
@@ -132,3 +132,9 @@ app.MapGet("/events", Handler)
 ## Item links
 
 Pagination links are added alongside the page's items — they do not replace per-item links. Every element of the returned page is linked according to its own runtime type's [link configuration](link-configs.md), and renders into the active [wire format](formats.md). On the [typed client](client.md), follow `next`/`prev`/`first`/`last` with `FollowAsync` to page through results.
+
+## Details that keep envelopes safe
+
+- **Deferred `Items` are materialized once.** An envelope carrying an unmaterialized sequence (an `IQueryable`, a LINQ projection) is buffered before serialization, so the underlying query runs once and the per-item links survive re-enumeration.
+- **URL policy applies.** Pagination links honor `CairnOptions.UrlStyle` and `PublicBaseUri` like every other link — see [url-policy.md](url-policy.md). They are not passed through `TransformUrl` (they already derive from the request URL, query string included).
+- **Documents stay honest.** The OpenAPI/Swagger integrations describe pagination envelopes — including types adapted via `AddPaging`/`AddCursorPaging` — with their navigation `_links` and negotiable media types; see [openapi.md](openapi.md).

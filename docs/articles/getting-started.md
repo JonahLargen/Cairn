@@ -56,7 +56,7 @@ public sealed class OrderLinks : LinkConfig<OrderDto>
 }
 ```
 
-- `Self`, `Link`, and `Affordance` take a delegate from the resource to a `LinkTarget`. `LinkTarget.Route(routeName, routeValues?)` points at a named endpoint and is resolved to a URL by the host; `LinkTarget.Uri(href, templated?)` points at an explicit URI or URI template.
+- `Self`, `Link`, and `Affordance` take a delegate from the resource to a `LinkTarget`. `LinkTarget.Route(routeName, routeValues?)` points at a named endpoint and is resolved to a URL by the host; `LinkTarget.Uri(href, templated?)` points at an explicit URI or URI template; `LinkTarget.RouteTemplate(routeName, routeValues?)` renders a named route as an RFC 6570 URI template, leaving unbound route parameters as `{placeholders}`.
 - A `LinkRelation` (the `rel`, here `"collection"` and `"cancel"`) is created implicitly from a string.
 - `.When(...)` includes a link or affordance only when the predicate holds — `cancel` is omitted unless the order is `Pending`.
 - `.Method("POST")` sets the affordance's HTTP method (the shorthands `Get()`, `Post()`, `Put()`, `Patch()`, and `Delete()` exist too).
@@ -133,7 +133,7 @@ This is the Default wire format. Cairn can also emit HAL and HAL-FORMS, selected
 
 `CairnOptions.Mode` controls what happens when a `LinkTarget` cannot be resolved to a URL — for example, a route name that matches no endpoint:
 
-- `LinkResolutionMode.Lax` (the default) silently omits links that fail to resolve.
+- `LinkResolutionMode.Lax` (the default) omits links that fail to resolve. The drop is not silent: each one increments the `cairn.links.unresolved` counter and is logged once per resource type and relation — see [diagnostics.md](diagnostics.md).
 - `LinkResolutionMode.Strict` throws a `LinkResolutionException` instead.
 
 Use `Strict` in development and tests to catch broken targets early; the response either has the link or fails loudly:
@@ -158,4 +158,5 @@ A complete, runnable example lives in `samples/Cairn.Sample.Api`. It registers `
 - [affordances-and-forms.md](affordances-and-forms.md) — affordances and HAL-FORMS fields.
 - [formats.md](formats.md) — Default, HAL, and HAL-FORMS wire formats and negotiation.
 - [controllers.md](controllers.md) — opting MVC actions in with `[CairnLinks]`.
+- [diagnostics.md](diagnostics.md) — logged warnings, metrics, and tracing for hypermedia failures.
 - [client.md](client.md) — consuming linked responses with the typed client.
