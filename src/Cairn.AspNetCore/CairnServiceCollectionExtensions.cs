@@ -1,7 +1,7 @@
-using System.Text.Json.Serialization.Metadata;
 using Cairn.AspNetCore.Internal;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace Cairn.AspNetCore;
 
@@ -9,6 +9,13 @@ namespace Cairn.AspNetCore;
 public static class CairnServiceCollectionExtensions
 {
     /// <summary>Adds Cairn hypermedia services and the response link projection.</summary>
+    /// <remarks>
+    /// Options follow the standard options pattern: calling <c>AddCairn</c> several times composes every
+    /// <paramref name="configure"/> delegate, and configuration that needs other services can be added with
+    /// <c>services.AddOptions&lt;CairnOptions&gt;().Configure&lt;TDep&gt;(...)</c>. The JSON wiring is applied
+    /// as a post-configuration step, so a <c>TypeInfoResolver</c> the app assigns later (e.g. a source-generated
+    /// <c>JsonSerializerContext</c>) is wrapped rather than silently replacing Cairn's link injection.
+    /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional configuration (link registrations and resolution mode).</param>
     /// <returns>The same <see cref="IServiceCollection"/> instance, for chaining.</returns>
@@ -17,34 +24,21 @@ public static class CairnServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        var options = new CairnOptions();
-        configure?.Invoke(options);
+        services.AddOptions();
+        if (configure is not null)
+        {
+            services.Configure(configure);
+        }
 
         services.AddHttpContextAccessor();
-        services.AddSingleton(options);
-        services.AddSingleton<ILinkConfigProvider>(options.Registry);
-        services.AddSingleton<ILinkEngine, LinkEngine>();
-        services.AddScoped<ILinkUrlResolver, LinkGeneratorUrlResolver>();
-        services.AddScoped<ILinkAuthorizer, AuthorizationPolicyLinkAuthorizer>();
+        services.TryAddSingleton<CairnOptions>(static provider => provider.GetRequiredService<IOptions<CairnOptions>>().Value);
+        services.TryAddSingleton<ILinkConfigProvider>(static provider => provider.GetRequiredService<CairnOptions>().Registry);
+        services.TryAddSingleton<ILinkEngine, LinkEngine>();
+        services.TryAddScoped<ILinkUrlResolver, LinkGeneratorUrlResolver>();
+        services.TryAddScoped<ILinkAuthorizer, AuthorizationPolicyLinkAuthorizer>();
 
-        var modifier = new CairnLinkInjectionModifier(new HttpContextAccessor());
-
-        // Minimal APIs (and WriteAsJsonAsync) serialize through Http.Json options.
-        services.ConfigureHttpJsonOptions(json =>
-        {
-            json.SerializerOptions.TypeInfoResolver =
-                (json.SerializerOptions.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver())
-                    .WithAddedModifier(modifier.Modify);
-        });
-
-        // MVC controllers serialize through the System.Text.Json output formatter, which reads Mvc.JsonOptions.
-        // Configuring it is harmless when MVC is not in use.
-        services.Configure<Microsoft.AspNetCore.Mvc.JsonOptions>(mvc =>
-        {
-            mvc.JsonSerializerOptions.TypeInfoResolver =
-                (mvc.JsonSerializerOptions.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver())
-                    .WithAddedModifier(modifier.Modify);
-        });
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>, CairnJsonOptionsSetup>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<Microsoft.AspNetCore.Mvc.JsonOptions>, CairnJsonOptionsSetup>());
 
         return services;
     }

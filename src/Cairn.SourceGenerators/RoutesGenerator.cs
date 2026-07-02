@@ -180,24 +180,7 @@ public sealed class RoutesGenerator : IIncrementalGenerator
     {
         string? endpointTemplate = null;
         var prefixes = new List<string>();
-
-        // Walk the fluent chain outward from .WithName toward the app, collecting the endpoint's own template
-        // plus any inline MapGroup("/prefix") prefixes so group route parameters are included. (Group prefixes
-        // bound to a local variable, e.g. `var g = app.MapGroup(...); g.MapGet(...)`, are not visible here.)
-        while (expression is InvocationExpressionSyntax invocation && invocation.Expression is MemberAccessExpressionSyntax member)
-        {
-            var method = member.Name.Identifier.ValueText;
-            if (endpointTemplate is null && method is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
-            {
-                endpointTemplate = FirstStringLiteral(invocation);
-            }
-            else if (method == "MapGroup" && FirstStringLiteral(invocation) is { } prefix)
-            {
-                prefixes.Add(prefix);
-            }
-
-            expression = member.Expression;
-        }
+        CollectChain(expression, prefixes, ref endpointTemplate, depth: 0);
 
         if (endpointTemplate is null)
         {
@@ -218,6 +201,58 @@ public sealed class RoutesGenerator : IIncrementalGenerator
 
         AppendSegment(builder, endpointTemplate);
         return builder.ToString();
+    }
+
+    // Walks the fluent chain outward from .WithName toward the app, collecting the endpoint's own template
+    // plus any MapGroup("/prefix") prefixes so group route parameters are included. When the chain bottoms out
+    // at a local variable (`var g = app.MapGroup(...); g.MapGet(...)`), continues from the variable's
+    // initializer so group prefixes bound to variables are included too. Prefixes accumulate innermost-first.
+    private static void CollectChain(ExpressionSyntax expression, List<string> prefixes, ref string? endpointTemplate, int depth)
+    {
+        while (expression is InvocationExpressionSyntax invocation && invocation.Expression is MemberAccessExpressionSyntax member)
+        {
+            var method = member.Name.Identifier.ValueText;
+            if (endpointTemplate is null && method is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
+            {
+                endpointTemplate = FirstStringLiteral(invocation);
+            }
+            else if (method == "MapGroup" && FirstStringLiteral(invocation) is { } prefix)
+            {
+                prefixes.Add(prefix);
+            }
+
+            expression = member.Expression;
+        }
+
+        // Depth-bounded to defend against pathological (or cyclic) variable chains.
+        if (depth < 8 && expression is IdentifierNameSyntax identifier && FindLocalInitializer(identifier) is { } initializer)
+        {
+            CollectChain(initializer, prefixes, ref endpointTemplate, depth + 1);
+        }
+    }
+
+    // The initializer of the nearest local variable declaration with the identifier's name, searching the
+    // enclosing scopes outward (a block, a method/local function, or top-level statements).
+    private static ExpressionSyntax? FindLocalInitializer(IdentifierNameSyntax identifier)
+    {
+        var name = identifier.Identifier.ValueText;
+        for (SyntaxNode? scope = identifier.Parent; scope is not null; scope = scope.Parent)
+        {
+            if (scope is not (BlockSyntax or MethodDeclarationSyntax or LocalFunctionStatementSyntax or CompilationUnitSyntax))
+            {
+                continue;
+            }
+
+            foreach (var declarator in scope.DescendantNodes().OfType<VariableDeclaratorSyntax>())
+            {
+                if (declarator.Identifier.ValueText == name && declarator.Initializer is { } initializer)
+                {
+                    return initializer.Value;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static void AppendSegment(StringBuilder builder, string segment)
@@ -354,9 +389,9 @@ public sealed class RoutesGenerator : IIncrementalGenerator
                 ? "null"
                 : "new { " + string.Join(", ", parameters.Select(static p => Escape(p.Name))) + " }";
 
-            builder.AppendLine($"        /// <summary>Route to the '{route.Name}' endpoint.</summary>");
+            builder.AppendLine($"        /// <summary>Route to the '{XmlEscape(route.Name)}' endpoint.</summary>");
             builder.AppendLine($"        public static global::Cairn.LinkTarget {method}({signature})");
-            builder.AppendLine($"            => global::Cairn.LinkTarget.Route(\"{route.Name}\", {values});");
+            builder.AppendLine($"            => global::Cairn.LinkTarget.Route({SymbolDisplay.FormatLiteral(route.Name, quote: true)}, {values});");
             builder.AppendLine();
         }
 
@@ -392,6 +427,9 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         var result = builder.ToString();
         return result.Length > 0 && char.IsDigit(result[0]) ? "_" + result : result;
     }
+
+    private static string XmlEscape(string text)
+        => text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     private static string Escape(string name)
         => SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None || SyntaxFacts.GetContextualKeywordKind(name) != SyntaxKind.None

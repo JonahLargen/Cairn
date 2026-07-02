@@ -14,7 +14,7 @@ A cairn is a small stack of stones a traveler leaves along a trail so the next t
 - **Opt-in by default.** Endpoints you don't opt in to serialize exactly as before, so Cairn is safe to add incrementally to an existing API.
 - **Minimal-API-first.** Register with `AddCairn()` and opt endpoints in with `.WithLinks()`.
 - **Affordances that authorize.** A `cancel` link can be advertised only when the resource is in a cancellable state **and** the caller satisfies an ASP.NET Core authorization policy — the same policy that guards the action.
-- **System.Text.Json-native and AOT-friendly.** No reflection on the hot path.
+- **System.Text.Json-native.** Links are injected through contract customization, and Cairn's own wire types (`_links`/`_actions`/`_templates` payloads) ship with a source-generated `JsonSerializerContext`, so hypermedia serializes even when the app uses a source-gen-only `TypeInfoResolver`. Registration and HAL-FORMS schema derivation use reflection (once per type, cached), so full Native AOT publishing is not yet a supported claim.
 - **Pragmatic formats.** A flat `{ href, rel, method }` shape and HAL by content negotiation, with HAL-FORMS planned — so links fit whatever your clients already expect.
 
 ## Usage
@@ -89,6 +89,19 @@ Cairn correlates hypermedia to your instances by reference between computing lin
 - **`IAsyncEnumerable<T>`** streams cannot be enumerated twice and are not supported — materialize first (e.g. `ToListAsync()`).
 - **Value-type resources** (structs) box to a different instance at each stage and cannot carry links — use a class or record.
 - **Unregistered types** returned from an endpoint that opted in via `.WithLinks()`/`[CairnLinks]` get a warning naming the missing `LinkConfig<T>`.
+
+## Caching and authorization-gated links
+
+Two properties of hypermedia responses matter when a cache sits in front of your API:
+
+- **Responses vary by `Accept`.** With format negotiation enabled (the default), the same URL can return three different body shapes and media types. Cairn adds `Vary: Accept` to negotiable responses so shared caches key on it — leave that intact if you post-process headers.
+- **Authorization-gated links personalize the body.** A link guarded by `RequireAuthorization(...)` (or a caller-dependent `When`) makes the response body *per-caller*: output-caching such an endpoint (ASP.NET Core `OutputCache`, a CDN) will replay the **first caller's affordance set to every other caller** — leaking what actions that caller could take, and advertising actions the current caller can't. Don't output-cache endpoints whose links are caller-dependent, or vary the cache by the credential.
+
+`RequireAuthorization("Policy")` evaluates the policy against the **caller**, once per request (results are memoized, so a 200-item page evaluates each policy once, not 200 times). It is *not* a per-resource decision: a policy named `CanCancelThisOrder` still can't see the order. For per-resource decisions, combine a caller check with a resource predicate, or call `IAuthorizationService.AuthorizeAsync(user, resource, policy)` yourself in a service-aware `When`.
+
+## Embedding and the response body
+
+`Embed`/`EmbedMany` place a child resource in HAL `_embedded`, decorated with its own links. The child is typically also a normal property of your DTO, and Cairn never removes properties — so it will appear **twice** (in the body and in `_embedded`) unless you mark the property `[JsonIgnore]` or project a DTO without it. That attribute is the one exception to "Cairn never touches your DTO" being enough on its own.
 
 ## API versioning
 

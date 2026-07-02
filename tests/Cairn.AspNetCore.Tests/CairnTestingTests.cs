@@ -24,6 +24,45 @@ public class CairnTestingTests
     }
 
     [Fact]
+    public void Parses_multi_link_relations_and_curies_emitted_as_link_arrays()
+    {
+        // Cairn's own output: a multi-link rel and a configured curie both emit JSON arrays.
+        const string json = """
+            {
+                "id": 1,
+                "_links": {
+                    "self": {"href": "/o/1"},
+                    "acme:children": [{"href": "/o/1/c/1", "name": "first"}, {"href": "/o/1/c/2", "name": "second"}],
+                    "curies": [{"href": "/rels/{rel}", "name": "acme", "templated": true}]
+                }
+            }
+            """;
+
+        var hypermedia = json.Hypermedia();
+
+        hypermedia.Should()
+            .HaveLink("self", "/o/1")
+            .And.HaveLink("acme:children", "/o/1/c/2")
+            .And.HaveLink("curies");
+
+        Assert.Equal(2, hypermedia.AllLinks["acme:children"].Count);
+        Assert.Equal("first", hypermedia.AllLinks["acme:children"][0].Name);
+        Assert.Equal("/o/1/c/1", hypermedia.Links["acme:children"].Href);
+    }
+
+    [Fact]
+    public void Skips_malformed_relation_values_instead_of_throwing()
+    {
+        const string json = """
+            {"_links":{"self":{"href":"/o/1"},"broken":"not-a-link-object","empty":[]},"_actions":{"cancel":"nope"}}
+            """;
+
+        var hypermedia = json.Hypermedia();
+
+        hypermedia.Should().HaveLink("self").And.NotHaveLink("broken").And.NotHaveAffordance("cancel");
+    }
+
+    [Fact]
     public async Task Asserts_hypermedia_on_a_live_response()
     {
         var builder = WebApplication.CreateBuilder();

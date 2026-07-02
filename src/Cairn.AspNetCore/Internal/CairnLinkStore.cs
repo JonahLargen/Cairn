@@ -4,27 +4,37 @@ using Microsoft.AspNetCore.Http;
 
 namespace Cairn.AspNetCore.Internal;
 
+// Every wire property below pins its JSON name with [JsonPropertyName]: HAL/HAL-FORMS mandate these exact
+// member names, so the host app's PropertyNamingPolicy (PascalCase, snake_case, ...) must never rename them.
+
 /// <summary>A link in the emitted hypermedia payload.</summary>
-internal sealed record HalLink(string Href)
+internal sealed record HalLink([property: JsonPropertyName("href")] string Href)
 {
+    [JsonPropertyName("name")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Name { get; init; }
 
+    [JsonPropertyName("title")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
+    [JsonPropertyName("templated")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Templated { get; init; }
 
+    [JsonPropertyName("type")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Type { get; init; }
 
+    [JsonPropertyName("deprecation")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Deprecation { get; init; }
 
+    [JsonPropertyName("hreflang")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Hreflang { get; init; }
 
+    [JsonPropertyName("profile")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Profile { get; init; }
 }
@@ -64,8 +74,11 @@ internal sealed class HalLinkValueJsonConverter : JsonConverter<HalLinkValue>
 }
 
 /// <summary>An affordance (action) in the emitted hypermedia payload.</summary>
-internal sealed record HalAction(string Href, string Method)
+internal sealed record HalAction(
+    [property: JsonPropertyName("href")] string Href,
+    [property: JsonPropertyName("method")] string Method)
 {
+    [JsonPropertyName("title")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
@@ -77,55 +90,77 @@ internal sealed record HalAction(string Href, string Method)
 }
 
 /// <summary>An affordance projected into a HAL-FORMS <c>_templates</c> entry.</summary>
-internal sealed record HalFormsTemplate(string Method, string Target)
+internal sealed record HalFormsTemplate(
+    [property: JsonPropertyName("method")] string Method,
+    [property: JsonPropertyName("target")] string Target)
 {
+    [JsonPropertyName("title")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
+    [JsonPropertyName("contentType")]
     public string ContentType { get; init; } = "application/json";
 
+    [JsonPropertyName("properties")]
     public IReadOnlyList<HalFormsProperty> Properties { get; init; } = [];
 }
 
 /// <summary>A field in a HAL-FORMS template, derived from an input type's data annotations.</summary>
-internal sealed record HalFormsProperty(string Name)
+internal sealed record HalFormsProperty([property: JsonPropertyName("name")] string Name)
 {
+    [JsonPropertyName("prompt")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Prompt { get; init; }
 
+    [JsonPropertyName("required")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Required { get; init; }
 
+    [JsonPropertyName("readOnly")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ReadOnly { get; init; }
 
+    [JsonPropertyName("type")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Type { get; init; }
 
+    [JsonPropertyName("placeholder")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Placeholder { get; init; }
 
+    [JsonPropertyName("regex")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Regex { get; init; }
 
+    [JsonPropertyName("maxLength")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxLength { get; init; }
 
+    [JsonPropertyName("min")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? Min { get; init; }
 
+    [JsonPropertyName("max")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? Max { get; init; }
 
+    /// <summary>The field's default value (HAL-FORMS <c>value</c>).</summary>
+    [JsonPropertyName("value")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Value { get; init; }
+
+    [JsonPropertyName("options")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public HalFormsOptions? Options { get; init; }
 }
 
 /// <summary>A HAL-FORMS <c>options</c> block enumerating a field's selectable values.</summary>
-internal sealed record HalFormsOptions(IReadOnlyList<HalFormsOption> Inline);
+internal sealed record HalFormsOptions([property: JsonPropertyName("inline")] IReadOnlyList<HalFormsOption> Inline);
 
 /// <summary>One selectable value in a HAL-FORMS <c>options.inline</c> list.</summary>
-internal sealed record HalFormsOption(string Prompt, string Value);
+internal sealed record HalFormsOption(
+    [property: JsonPropertyName("prompt")] string Prompt,
+    [property: JsonPropertyName("value")] string Value);
 
 /// <summary>The serializable hypermedia computed for a single resource instance.</summary>
 internal sealed record ResourceHypermedia(
