@@ -39,16 +39,53 @@ public class CairnHalFormsFieldTests
 
         var status = props.Single(p => p.GetProperty("name").GetString() == "status");
         Assert.Equal("Order status", status.GetProperty("prompt").GetString());
+
+        // Option values are what the default (numeric) enum binder accepts; names are the human prompts.
         var inline = status.GetProperty("options").GetProperty("inline").EnumerateArray()
-            .Select(o => o.GetProperty("value").GetString()).ToList();
-        Assert.Contains("Pending", inline);
-        Assert.Contains("Shipped", inline);
+            .Select(o => (Prompt: o.GetProperty("prompt").GetString(), Value: o.GetProperty("value").GetString()))
+            .ToList();
+        Assert.Contains(("Pending", "0"), inline);
+        Assert.Contains(("Shipped", "1"), inline);
 
         var id = props.Single(p => p.GetProperty("name").GetString() == "id");
         Assert.True(id.GetProperty("readOnly").GetBoolean());
 
         var note = props.Single(p => p.GetProperty("name").GetString() == "note");
         Assert.Equal("Add a note", note.GetProperty("placeholder").GetString());
+    }
+
+    [Fact]
+    public async Task Template_maps_datetime_default_value_and_required_semantics()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.DefaultFormat = HypermediaFormat.HalForms;
+            o.AddLinks(new FormOrderLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new FormOrder(id))).WithName("FormGetOrder").WithLinks();
+        app.MapPost("/orders/{id:int}/update", (int id) => TypedResults.NoContent()).WithName("FormUpdate");
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var props = JsonDocument.Parse(await client.GetStringAsync("/orders/7")).RootElement
+            .GetProperty("_templates").GetProperty("update").GetProperty("properties")
+            .EnumerateArray().ToDictionary(p => p.GetProperty("name").GetString()!);
+
+        // "datetime" is not a valid HAL-FORMS type; datetime-local is.
+        Assert.Equal("datetime-local", props["scheduledAt"].GetProperty("type").GetString());
+
+        // [DefaultValue] surfaces as the HAL-FORMS "value" key.
+        Assert.Equal("3", props["priority"].GetProperty("value").GetString());
+
+        // The C# `required` modifier and a non-nullable reference type both mean required;
+        // a nullable string does not.
+        Assert.True(props["reference"].GetProperty("required").GetBoolean());
+        Assert.False(props["note"].TryGetProperty("required", out _));
     }
 
     private sealed record FormOrder(int Id);
@@ -70,6 +107,13 @@ public class CairnHalFormsFieldTests
 
         [Display(Prompt = "Add a note")]
         public string? Note { get; init; }
+
+        public DateTime ScheduledAt { get; init; }
+
+        [System.ComponentModel.DefaultValue(3)]
+        public int Priority { get; init; }
+
+        public required string Reference { get; init; }
     }
 
     private sealed class FormOrderLinks : LinkConfig<FormOrder>

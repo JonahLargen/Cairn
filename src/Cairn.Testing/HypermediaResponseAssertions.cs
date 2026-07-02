@@ -34,11 +34,20 @@ public sealed class HypermediaResponseAssertions
         return this;
     }
 
-    /// <summary>Asserts the response exposes a link with the given relation and href.</summary>
+    /// <summary>Asserts the response exposes a link with the given relation and href (any member of a link array may match).</summary>
     public HypermediaResponseAssertions HaveLink(string relation, string href)
     {
         HaveLink(relation);
-        _subject.Links[relation].Href.Should().Be(href, "the '{0}' link should point to the expected href", relation);
+        var links = _subject.AllLinks[relation];
+        if (links.Count == 1)
+        {
+            links[0].Href.Should().Be(href, "the '{0}' link should point to the expected href", relation);
+        }
+        else
+        {
+            links.Select(link => link.Href).Should().Contain(href, "one of the '{0}' links should point to the expected href", relation);
+        }
+
         return this;
     }
 

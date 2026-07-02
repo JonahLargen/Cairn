@@ -170,40 +170,60 @@ internal static class CairnLinkRecorder
 
         WarnIfValueType(scope, value);
 
-        // Record each embedded child first (recursing so it gets its own _links), then capture the map.
-        IReadOnlyDictionary<string, object>? embedded = null;
-        if (linkSet.Embedded.Count > 0)
-        {
-            var map = new Dictionary<string, object>(StringComparer.Ordinal);
-            foreach (var group in linkSet.Embedded)
-            {
-                foreach (var child in group.Resources)
-                {
-                    // An embedded child without its own config is a normal shape — no unconfigured warning.
-                    await RecordAsync(http, child, scope, warnIfUnconfigured: false);
-                }
-
-                map[group.Relation.Value] = group.Single ? group.Resources[0] : group.Resources;
-            }
-
-            embedded = map;
-        }
-
+        var embedded = await RecordEmbeddedAsync(http, linkSet, scope);
         CairnLinkStore.Record(http, value, ToPayload(linkSet, embedded, scope.Options.Curies));
     }
 
-    // Shared: record the envelope's navigation links, then link each of its items.
+    // Record each embedded child first (recursing so it gets its own _links), then capture the map.
+    private static async ValueTask<IReadOnlyDictionary<string, object>?> RecordEmbeddedAsync(HttpContext http, LinkSet linkSet, RecordScope scope)
+    {
+        if (linkSet.Embedded.Count == 0)
+        {
+            return null;
+        }
+
+        var map = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var group in linkSet.Embedded)
+        {
+            foreach (var child in group.Resources)
+            {
+                // An embedded child without its own config is a normal shape — no unconfigured warning.
+                await RecordAsync(http, child, scope, warnIfUnconfigured: false);
+            }
+
+            map[group.Relation.Value] = group.Single ? group.Resources[0] : group.Resources;
+        }
+
+        return map;
+    }
+
+    // Shared: record the envelope's navigation links merged with any hypermedia configured for the envelope
+    // type itself (a create affordance, a templated search link, ...), then link each of its items. On a
+    // relation collision the pagination link wins — it carries the paging state for this request.
     private static async ValueTask RecordEnvelopeAsync(HttpContext http, object envelope, IEnumerable items, Func<IReadOnlyDictionary<string, HalLink>> buildLinks, RecordScope scope)
     {
         if (scope.Visited.Add(envelope))
         {
+            var linkSet = await scope.Engine.BuildAsync(envelope, scope.Context, http.RequestAborted);
+            WarnIfActionsBlocked(scope, envelope, linkSet);
+            var embedded = await RecordEmbeddedAsync(http, linkSet, scope);
+            var configured = ToPayload(linkSet, embedded, scope.Options.Curies);
+
             var links = new Dictionary<string, HalLinkValue>(StringComparer.Ordinal);
+            if (configured.Links is not null)
+            {
+                foreach (var (relation, link) in configured.Links)
+                {
+                    links[relation] = link;
+                }
+            }
+
             foreach (var (relation, link) in buildLinks())
             {
                 links[relation] = new HalLinkValue([link]);
             }
 
-            CairnLinkStore.Record(http, envelope, new ResourceHypermedia(links, null));
+            CairnLinkStore.Record(http, envelope, new ResourceHypermedia(links, configured.Actions, configured.Embedded));
         }
 
         foreach (var item in items)
@@ -213,7 +233,8 @@ internal static class CairnLinkRecorder
     }
 
     // Per-endpoint .WithHypermediaFormat() forces a format; otherwise the Accept header may negotiate one;
-    // otherwise the global default applies.
+    // otherwise the global default applies. A negotiable response varies by Accept — advertise that so
+    // shared caches (CDNs, OutputCache) don't replay one client's shape to another (RFC 9110 §12.5.5).
     private static HypermediaFormat ResolveFormat(HttpContext http, CairnOptions options)
     {
         if (http.GetEndpoint()?.Metadata.GetMetadata<HypermediaFormatMetadata>() is { } forced)
@@ -221,27 +242,53 @@ internal static class CairnLinkRecorder
             return forced.Format;
         }
 
-        if (options.NegotiateFormat && NegotiateFromAccept(http.Request) is { } negotiated)
+        if (options.NegotiateFormat)
         {
-            return negotiated;
+            AddVaryAccept(http.Response);
+            if (NegotiateFromAccept(http.Request) is { } negotiated)
+            {
+                return negotiated;
+            }
         }
 
         return options.DefaultFormat;
     }
 
+    private static void AddVaryAccept(HttpResponse response)
+    {
+        foreach (var existing in response.Headers.Vary)
+        {
+            if (existing is not null && existing.Contains("Accept", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var field in existing.Split(','))
+                {
+                    if (field.Trim().Equals("Accept", StringComparison.OrdinalIgnoreCase) || field.Trim() == "*")
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+
+        response.Headers.Append(HeaderNames.Vary, "Accept");
+    }
+
     // Pick the highest-quality acceptable hypermedia type, honoring q-values (RFC 9110): a q=0 excludes a type,
-    // and a higher-q plain application/json/wildcard wins over hal/hal-forms. Returns null to use the default.
+    // and a higher-q plain application/json or wildcard wins over hal/hal-forms. An explicit application/json
+    // ask negotiates the plain format even when DefaultFormat is hal — the client did not accept a hal media
+    // type. Only a winning wildcard (or no Accept, or one that can't be parsed) returns null to use the default.
     private static HypermediaFormat? NegotiateFromAccept(HttpRequest request)
     {
-        if (request.Headers.Accept.Count == 0)
+        if (request.Headers.Accept.Count == 0
+            || !MediaTypeHeaderValue.TryParseList(request.Headers.Accept, out var accepted))
         {
             return null;
         }
 
-        var winner = HypermediaFormat.Default;
+        NegotiatedFormat? winner = null;
         var bestQuality = 0.0;
 
-        foreach (var media in MediaTypeHeaderValue.ParseList(request.Headers.Accept))
+        foreach (var media in accepted)
         {
             var quality = media.Quality ?? 1.0;
             if (quality <= 0.0 || FormatFor(media.MediaType) is not { } format || quality <= bestQuality)
@@ -253,27 +300,50 @@ internal static class CairnLinkRecorder
             winner = format;
         }
 
-        return winner == HypermediaFormat.Default ? null : winner;
+        return winner switch
+        {
+            NegotiatedFormat.Hal => HypermediaFormat.Hal,
+            NegotiatedFormat.HalForms => HypermediaFormat.HalForms,
+            NegotiatedFormat.PlainJson => HypermediaFormat.Default,
+            _ => null,
+        };
     }
 
-    private static HypermediaFormat? FormatFor(Microsoft.Extensions.Primitives.StringSegment mediaType)
+    private enum NegotiatedFormat
+    {
+        Hal,
+        HalForms,
+
+        // Explicit application/json: the client asked for plain JSON, not merely "anything".
+        PlainJson,
+
+        // A wildcard accepts every format, so it expresses no preference — the configured default applies.
+        AnyFormat,
+    }
+
+    private static NegotiatedFormat? FormatFor(Microsoft.Extensions.Primitives.StringSegment mediaType)
     {
         if (mediaType.Equals("application/prs.hal-forms+json", StringComparison.OrdinalIgnoreCase))
         {
-            return HypermediaFormat.HalForms;
+            return NegotiatedFormat.HalForms;
         }
 
         if (mediaType.Equals("application/hal+json", StringComparison.OrdinalIgnoreCase))
         {
-            return HypermediaFormat.Hal;
+            return NegotiatedFormat.Hal;
         }
 
-        if (mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Equals("application/*+json", StringComparison.OrdinalIgnoreCase)
+        if (mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            return NegotiatedFormat.PlainJson;
+        }
+
+        // application/*+json matches the hal media types too, so it is a wildcard here.
+        if (mediaType.Equals("application/*+json", StringComparison.OrdinalIgnoreCase)
             || mediaType.Equals("application/*", StringComparison.OrdinalIgnoreCase)
             || mediaType.Equals("*/*", StringComparison.OrdinalIgnoreCase))
         {
-            return HypermediaFormat.Default;
+            return NegotiatedFormat.AnyFormat;
         }
 
         return null;

@@ -36,14 +36,17 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
                 if (ResolveHref(spec.Relation, target, context) is { } href)
                 {
                     var templated = target is ExplicitLinkTarget { Templated: true };
+
+                    // Per-target attributes (LinkTarget.With*) override the spec-level ones, so members of a
+                    // multi-link relation can each carry their own name/title/hreflang/....
                     links.Add(new Link(spec.Relation, href, templated)
                     {
-                        Title = spec.TitleText,
-                        Type = spec.TypeText,
-                        Name = spec.NameText,
-                        Deprecation = spec.DeprecationText,
-                        Hreflang = spec.HreflangText,
-                        Profile = spec.ProfileText,
+                        Title = target.Title ?? spec.TitleText,
+                        Type = target.Type ?? spec.TypeText,
+                        Name = target.Name ?? spec.NameText,
+                        Deprecation = target.Deprecation ?? spec.DeprecationText,
+                        Hreflang = target.Hreflang ?? spec.HreflangText,
+                        Profile = target.Profile ?? spec.ProfileText,
                     });
                 }
             }
@@ -60,7 +63,7 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
             var target = await spec.Target(typed, context).ConfigureAwait(false);
             if (ResolveHref(spec.Relation, target, context) is { } href)
             {
-                affordances.Add(new Affordance(spec.Relation, href, spec.HttpMethod) { Title = spec.TitleText, Input = spec.InputType, ContentType = spec.ContentTypeText });
+                affordances.Add(new Affordance(spec.Relation, href, spec.HttpMethod) { Title = target.Title ?? spec.TitleText, Input = spec.InputType, ContentType = spec.ContentTypeText });
             }
         }
 

@@ -27,7 +27,9 @@ public interface ILinkConfigProvider
 /// </summary>
 public sealed class LinkConfigRegistry : ILinkConfigProvider
 {
-    private readonly Dictionary<Type, ICompiledLinkConfig> _configs = [];
+    // Concurrent because registration is not confined to startup (Add is public) while requests resolve
+    // configs concurrently through GetConfig.
+    private readonly ConcurrentDictionary<Type, ICompiledLinkConfig> _configs = new();
 
     // Caches the per-runtime-type resolution (including negative results); invalidated on Add.
     private readonly ConcurrentDictionary<Type, ICompiledLinkConfig?> _resolved = new();
