@@ -84,6 +84,46 @@ class Program
     }
 
     [Fact]
+    public void Includes_map_group_prefix_bound_to_a_variable()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        var users = app.MapGroup(""/users/{userId:int}"");
+        var orders = users.MapGroup(""/orders"");
+        orders.MapGet(""/{id:int}"", handler).WithName(""GetUserOrderViaVariable"");
+    }
+}";
+
+        var generated = Run(source);
+
+        // Group prefixes bound to locals are the common MapGroup shape; their route parameters must survive.
+        Assert.Contains("public static global::Cairn.LinkTarget GetUserOrderViaVariable(int userId, int id)", generated);
+        Assert.Contains(@"Route(""GetUserOrderViaVariable"", new { userId, id })", generated);
+    }
+
+    [Fact]
+    public void Escapes_route_names_that_contain_quotes_or_backslashes()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/odd"", handler).WithName(""Get\""Odd\\Name"");
+    }
+}";
+
+        var generated = Run(source);
+
+        // The name must round-trip as a valid C# string literal, not break the generated file.
+        Assert.Contains(@"Route(""Get\""Odd\\Name"", null)", generated);
+        Assert.Empty(CSharpSyntaxTree.ParseText(generated).GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
     public void Generates_route_methods_from_controller_attributes()
     {
         const string source = @"

@@ -5,7 +5,11 @@ namespace Cairn.Testing;
 /// <summary>A link parsed from a Cairn hypermedia response.</summary>
 /// <param name="Href">The link's target URI.</param>
 /// <param name="Title">An optional human-readable title.</param>
-public sealed record HypermediaLink(string Href, string? Title);
+public sealed record HypermediaLink(string Href, string? Title)
+{
+    /// <summary>An optional secondary key for selecting between links that share a relation (HAL <c>name</c>).</summary>
+    public string? Name { get; init; }
+}
 
 /// <summary>An affordance (action) parsed from a Cairn hypermedia response.</summary>
 /// <param name="Href">The action's target URI.</param>
@@ -19,14 +23,19 @@ public sealed class HypermediaResponse
     /// <summary>Creates a parsed hypermedia response.</summary>
     public HypermediaResponse(
         IReadOnlyDictionary<string, HypermediaLink> links,
-        IReadOnlyDictionary<string, HypermediaAffordance> affordances)
+        IReadOnlyDictionary<string, HypermediaAffordance> affordances,
+        IReadOnlyDictionary<string, IReadOnlyList<HypermediaLink>>? allLinks = null)
     {
         Links = links;
         Affordances = affordances;
+        AllLinks = allLinks ?? links.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<HypermediaLink>)[pair.Value], StringComparer.Ordinal);
     }
 
-    /// <summary>The links, keyed by relation.</summary>
+    /// <summary>The links, keyed by relation. A relation with several links (a HAL link array) maps to its first; see <see cref="AllLinks"/> for the full set.</summary>
     public IReadOnlyDictionary<string, HypermediaLink> Links { get; }
+
+    /// <summary>Every link for each relation, in document order — including relations emitted as HAL link arrays (e.g. <c>curies</c> or multi-link rels).</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<HypermediaLink>> AllLinks { get; }
 
     /// <summary>The affordances, keyed by name (from <c>_actions</c> or HAL-FORMS <c>_templates</c>).</summary>
     public IReadOnlyDictionary<string, HypermediaAffordance> Affordances { get; }
@@ -38,6 +47,7 @@ public sealed class HypermediaResponse
         ArgumentNullException.ThrowIfNull(json);
 
         var links = new Dictionary<string, HypermediaLink>(StringComparer.Ordinal);
+        var allLinks = new Dictionary<string, IReadOnlyList<HypermediaLink>>(StringComparer.Ordinal);
         var affordances = new Dictionary<string, HypermediaAffordance>(StringComparer.Ordinal);
 
         using var document = JsonDocument.Parse(json);
@@ -49,7 +59,13 @@ public sealed class HypermediaResponse
             {
                 foreach (var link in linksElement.EnumerateObject())
                 {
-                    links[link.Name] = new HypermediaLink(GetString(link.Value, "href") ?? string.Empty, GetString(link.Value, "title"));
+                    // A relation's value is a single link object, or a HAL link array (multi-link rels, curies).
+                    var parsed = ParseLinkValue(link.Value);
+                    if (parsed.Count > 0)
+                    {
+                        allLinks[link.Name] = parsed;
+                        links[link.Name] = parsed[0];
+                    }
                 }
             }
 
@@ -57,7 +73,10 @@ public sealed class HypermediaResponse
             {
                 foreach (var action in actionsElement.EnumerateObject())
                 {
-                    affordances[action.Name] = new HypermediaAffordance(GetString(action.Value, "href") ?? string.Empty, GetString(action.Value, "method") ?? string.Empty, GetString(action.Value, "title"));
+                    if (action.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        affordances[action.Name] = new HypermediaAffordance(GetString(action.Value, "href") ?? string.Empty, GetString(action.Value, "method") ?? string.Empty, GetString(action.Value, "title"));
+                    }
                 }
             }
 
@@ -65,16 +84,48 @@ public sealed class HypermediaResponse
             {
                 foreach (var template in templatesElement.EnumerateObject())
                 {
-                    affordances[template.Name] = new HypermediaAffordance(GetString(template.Value, "target") ?? string.Empty, GetString(template.Value, "method") ?? string.Empty, GetString(template.Value, "title"));
+                    if (template.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        affordances[template.Name] = new HypermediaAffordance(GetString(template.Value, "target") ?? string.Empty, GetString(template.Value, "method") ?? string.Empty, GetString(template.Value, "title"));
+                    }
                 }
             }
         }
 
-        return new HypermediaResponse(links, affordances);
+        return new HypermediaResponse(links, affordances, allLinks);
     }
 
+    private static IReadOnlyList<HypermediaLink> ParseLinkValue(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            return [ParseLink(value)];
+        }
+
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            var parsed = new List<HypermediaLink>();
+            foreach (var element in value.EnumerateArray())
+            {
+                if (element.ValueKind == JsonValueKind.Object)
+                {
+                    parsed.Add(ParseLink(element));
+                }
+            }
+
+            return parsed;
+        }
+
+        // A scalar or null relation value is malformed; skip it rather than throw.
+        return [];
+    }
+
+    private static HypermediaLink ParseLink(JsonElement element)
+        => new(GetString(element, "href") ?? string.Empty, GetString(element, "title")) { Name = GetString(element, "name") };
+
+    // Guard on Object: TryGetProperty throws InvalidOperationException on a non-object element.
     private static string? GetString(JsonElement element, string property)
-        => element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 }
 
 /// <summary>Extension methods for reading a <see cref="HypermediaResponse"/> in tests.</summary>
