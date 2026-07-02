@@ -8,8 +8,11 @@
     <IsPackable>true</IsPackable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-    <!-- Single place to set the package version for every shippable project. -->
-    <Version>1.0.0</Version>
+    <!-- Versioning is tag-driven via MinVer: a `vX.Y.Z` git tag builds exactly X.Y.Z, and every
+         commit after it builds X.Y.(Z+1)-preview.0.<height>. Nothing is edited by hand; releasing
+         is pushing a tag (see RELEASING.md). -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
 
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -24,6 +27,12 @@
 
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)../README.md" Pack="true" PackagePath="\" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)../README.md')" />
+  </ItemGroup>
+
+  <!-- Applied to every src project (not just packables) so the analyzer/generator assemblies that
+       ship inside the packages carry the same version as the libraries. -->
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

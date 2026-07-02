@@ -1,0 +1,82 @@
+name: Release
+
+# Releasing is tag-driven (see RELEASING.md): pushing a `vX.Y.Z` tag builds, tests, packs at
+# exactly that version (via MinVer), publishes to NuGet.org, and creates the GitHub release.
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write # create the GitHub release
+  id-token: write # GitHub OIDC token for NuGet.org Trusted Publishing
+
+jobs:
+  release:
+    name: Publish to NuGet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # MinVer derives the version from tag history, so the full history is required.
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # The .NET 10 SDK builds every target; the 8.0/9.0 runtimes are needed to run the
+          # multi-targeted test projects on their lower TFMs.
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore Cairn.slnx
+
+      - name: Build
+        run: dotnet build Cairn.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Cairn.slnx --configuration Release --no-build --verbosity normal
+
+      - name: Pack
+        run: dotnet pack Cairn.slnx --configuration Release --no-build --output artifacts
+
+      # Trusted Publishing: exchange this run's OIDC token for a short-lived (1h) NuGet.org
+      # API key — no stored secret to rotate. Requires a trusted publishing policy on
+      # nuget.org pointing at this repo + workflow file (see RELEASING.md).
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to NuGet.org
+        # --skip-duplicate makes re-runs idempotent; matching .snupkg symbol packages are
+        # pushed automatically alongside each .nupkg.
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $tag already exists; skipping creation."
+            exit 0
+          fi
+          prerelease=""
+          case "$tag" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+          gh release create "$tag" artifacts/*.nupkg artifacts/*.snupkg \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$tag" \
+            --verify-tag \
+            --generate-notes \
+            $prerelease
