@@ -166,18 +166,76 @@ internal sealed record HalFormsOption(
 internal sealed record ResourceHypermedia(
     IReadOnlyDictionary<string, HalLinkValue>? Links,
     IReadOnlyDictionary<string, HalAction>? Actions,
-    IReadOnlyDictionary<string, object>? Embedded = null);
+    IReadOnlyDictionary<string, object>? Embedded = null)
+{
+    private HypermediaDocument? _document;
+
+    /// <summary>The formatter-facing view of this hypermedia, built once per resource on first use.</summary>
+    public HypermediaDocument ToDocument() => _document ??= Build();
+
+    private HypermediaDocument Build()
+    {
+        List<Link> links = [];
+        if (Links is not null)
+        {
+            foreach (var (relation, value) in Links)
+            {
+                foreach (var link in value.Links)
+                {
+                    links.Add(new Link(relation, link.Href, link.Templated ?? false)
+                    {
+                        Name = link.Name,
+                        Title = link.Title,
+                        Type = link.Type,
+                        Deprecation = link.Deprecation,
+                        Hreflang = link.Hreflang,
+                        Profile = link.Profile,
+                    });
+                }
+            }
+        }
+
+        List<Affordance> affordances = [];
+        if (Actions is not null)
+        {
+            foreach (var (name, action) in Actions)
+            {
+                affordances.Add(new Affordance(name, action.Href, action.Method)
+                {
+                    Title = action.Title,
+                    Input = action.Input,
+                    ContentType = action.ContentType,
+                });
+            }
+        }
+
+        return new HypermediaDocument(links, affordances, Embedded);
+    }
+}
 
 /// <summary>Per-request map from a serializable instance to its computed hypermedia (by reference).</summary>
 internal static class CairnLinkStore
 {
     private const string ItemsKey = "Cairn.LinkStore";
     private const string FormatKey = "Cairn.Format";
+    private const string FormatterKey = "Cairn.Formatter";
 
     public static void SetFormat(HttpContext http, HypermediaFormat format) => http.Items[FormatKey] = format;
 
     public static HypermediaFormat GetFormat(HttpContext http)
         => http.Items[FormatKey] is HypermediaFormat format ? format : HypermediaFormat.Default;
+
+    /// <summary>The custom formatter selected for this request, if any — it supersedes the built-in emission.</summary>
+    public static void SetFormatter(HttpContext http, IHypermediaFormatter? formatter)
+    {
+        if (formatter is not null)
+        {
+            http.Items[FormatterKey] = formatter;
+        }
+    }
+
+    public static IHypermediaFormatter? GetFormatter(HttpContext http)
+        => http.Items[FormatterKey] as IHypermediaFormatter;
 
     public static void Record(HttpContext http, object instance, ResourceHypermedia payload)
     {

@@ -70,4 +70,20 @@ public static class CairnEndpointExtensions
 
         return builder.WithMetadata(new HypermediaFormatMetadata(format));
     }
+
+    /// <summary>
+    /// Forces a custom hypermedia format (registered with <see cref="CairnOptions.AddFormatter"/>) for this
+    /// endpoint or route group by its <paramref name="mediaType"/>, overriding content negotiation and the
+    /// global default. Requests fail if no formatter is registered for the media type.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="mediaType"/> is null or whitespace.</exception>
+    public static TBuilder WithHypermediaFormat<TBuilder>(this TBuilder builder, string mediaType)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(mediaType);
+
+        return builder.WithMetadata(new HypermediaFormatMetadata(mediaType));
+    }
 }
