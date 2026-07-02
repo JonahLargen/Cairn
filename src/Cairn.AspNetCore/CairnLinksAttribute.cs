@@ -19,9 +19,15 @@ public sealed class CairnLinksAttribute : Attribute, IAsyncResultFilter
         ArgumentNullException.ThrowIfNull(next);
 
         // Record before the result executes so the payload is stashed when the formatter serializes the value.
-        if (context.Result is ObjectResult { Value: { } value })
+        // A deferred sequence comes back as its buffered copy — serialize that so links stay correlated by
+        // reference (and the sequence isn't enumerated a second time).
+        if (context.Result is ObjectResult { Value: { } value } objectResult)
         {
-            await CairnLinkRecorder.RecordValueAsync(context.HttpContext, value);
+            var recorded = await CairnLinkRecorder.RecordValueAsync(context.HttpContext, value);
+            if (!ReferenceEquals(recorded, value))
+            {
+                objectResult.Value = recorded;
+            }
         }
 
         await next();

@@ -79,6 +79,17 @@ app.MapGet("/orders", (IOrderService svc, OrderFacts facts) =>
 // in the config: .When((o, ctx) => new(ctx.Services.GetRequiredService<OrderFacts>().Cancelable.Contains(o.Id)))
 ```
 
+## Runtime-type dispatch and diagnostics
+
+Configs dispatch by the value's **runtime type**, falling back to the nearest registered base class — a `LinkConfig<OrderDto>` also covers a returned `RushOrderDto : OrderDto` (interfaces are not considered). Handlers can return the value bare or wrapped (`TypedResults.Ok(...)`, `ObjectResult`); both are linked the same way.
+
+Cairn correlates hypermedia to your instances by reference between computing links and serializing the response, so shapes that break that correlation can't carry links — instead of silently dropping them, Cairn logs a one-time warning per type:
+
+- **Deferred sequences** (`IQueryable`, LINQ projections) returned bare are materialized once and handed to the serializer, so links survive and the underlying query runs once. Inside an immutable result like `TypedResults.Ok(...)` the sequence can't be swapped for its buffer — if its re-enumeration produces new instances the links are lost, and Cairn warns that computed hypermedia was never emitted. Prefer materializing (`ToList()`) before wrapping.
+- **`IAsyncEnumerable<T>`** streams cannot be enumerated twice and are not supported — materialize first (e.g. `ToListAsync()`).
+- **Value-type resources** (structs) box to a different instance at each stage and cannot carry links — use a class or record.
+- **Unregistered types** returned from an endpoint that opted in via `.WithLinks()`/`[CairnLinks]` get a warning naming the missing `LinkConfig<T>`.
+
 ## API versioning
 
 Cairn composes with `Asp.Versioning`. Because links resolve through the standard `LinkGenerator`, **URL-segment versioning works automatically** — the current request's version flows into links (a `/v1` request links to `/v1/...`). For **query-string** versioning, carry the version onto links with `TransformUrl`:

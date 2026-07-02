@@ -9,8 +9,10 @@ public static class CairnEndpointExtensions
 {
     /// <summary>
     /// Projects hypermedia links and affordances onto this endpoint's (or route group's) responses. The
-    /// returned value — and each element of a returned collection — is linked according to its runtime
-    /// type's configuration.
+    /// returned value — carried by an <c>IResult</c> (e.g. <c>TypedResults.Ok(...)</c>) or returned bare —
+    /// and each element of a returned collection is linked according to its runtime type's configuration.
+    /// A bare deferred sequence (LINQ query, <c>IQueryable</c>) is materialized once so it is not enumerated
+    /// a second time by the serializer.
     /// </summary>
     /// <param name="builder">The endpoint or route group builder.</param>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
@@ -22,8 +24,7 @@ public static class CairnEndpointExtensions
         return builder.AddEndpointFilterFactory((_, next) => async invocation =>
         {
             var result = await next(invocation);
-            await CairnLinkRecorder.RecordResultAsync(invocation.HttpContext, result);
-            return result;
+            return await CairnLinkRecorder.RecordResultAsync(invocation.HttpContext, result);
         });
     }
 
