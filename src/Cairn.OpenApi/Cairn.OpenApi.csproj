@@ -13,4 +13,9 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
   </ItemGroup>
 
+  <!-- Shared with Cairn.Swashbuckle (linked source, no shared assembly) so both documents describe the same wire format. -->
+  <ItemGroup>
+    <Compile Include="..\Shared\HypermediaJsonSchemas.cs" Link="HypermediaJsonSchemas.cs" />
+  </ItemGroup>
+
 </Project>

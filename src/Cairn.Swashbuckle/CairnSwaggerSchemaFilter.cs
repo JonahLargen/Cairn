@@ -1,65 +1,25 @@
+using Cairn.Hypermedia;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace Cairn.Swashbuckle;
 
-/// <summary>Adds the <c>_links</c> and <c>_actions</c> shape to the schemas of Cairn-linked resource types.</summary>
-internal sealed class CairnSwaggerSchemaFilter(ILinkConfigProvider provider) : ISchemaFilter
+/// <summary>
+/// Adds the <c>_links</c>, <c>_embedded</c>, <c>_actions</c>, and <c>_templates</c> shape to the schemas of
+/// Cairn-linked resource types. Takes the service provider rather than <see cref="ILinkConfigProvider"/>
+/// directly so generation degrades to a no-op — instead of failing DI activation — when Cairn itself is not
+/// registered (<c>AddCairn</c> was not called).
+/// </summary>
+internal sealed class CairnSwaggerSchemaFilter(IServiceProvider services) : ISchemaFilter
 {
     public void Apply(IOpenApiSchema schema, SchemaFilterContext context)
     {
-        if (schema is not OpenApiSchema concrete || provider.GetConfig(context.Type) is null)
+        if (schema is OpenApiSchema concrete
+            && services.GetService<ILinkConfigProvider>() is { } provider
+            && provider.GetConfig(context.Type) is not null)
         {
-            return;
+            HypermediaJsonSchemas.Apply(concrete);
         }
-
-        concrete.Properties ??= new Dictionary<string, IOpenApiSchema>();
-        concrete.Properties["_links"] = LinksSchema();
-        concrete.Properties["_embedded"] = EmbeddedSchema();
-        concrete.Properties["_actions"] = ActionsSchema();
     }
-
-    private static OpenApiSchema LinksSchema() => new()
-    {
-        Type = JsonSchemaType.Object,
-        Description = "Hypermedia links keyed by relation; a relation with several links is a JSON array of these objects.",
-        AdditionalProperties = new OpenApiSchema
-        {
-            Type = JsonSchemaType.Object,
-            Properties = new Dictionary<string, IOpenApiSchema>
-            {
-                ["href"] = new OpenApiSchema { Type = JsonSchemaType.String },
-                ["templated"] = new OpenApiSchema { Type = JsonSchemaType.Boolean },
-                ["title"] = new OpenApiSchema { Type = JsonSchemaType.String },
-                ["type"] = new OpenApiSchema { Type = JsonSchemaType.String },
-                ["name"] = new OpenApiSchema { Type = JsonSchemaType.String },
-                ["deprecation"] = new OpenApiSchema { Type = JsonSchemaType.String },
-                ["hreflang"] = new OpenApiSchema { Type = JsonSchemaType.String },
-                ["profile"] = new OpenApiSchema { Type = JsonSchemaType.String },
-            },
-        },
-    };
-
-    private static OpenApiSchema EmbeddedSchema() => new()
-    {
-        Type = JsonSchemaType.Object,
-        Description = "Embedded resources keyed by relation (HAL _embedded); each value is a resource or an array of resources.",
-        AdditionalProperties = new OpenApiSchema(),
-    };
-
-    private static OpenApiSchema ActionsSchema() => new()
-    {
-        Type = JsonSchemaType.Object,
-        Description = "Available actions (affordances) keyed by name.",
-        AdditionalProperties = new OpenApiSchema
-        {
-            Type = JsonSchemaType.Object,
-            Properties = new Dictionary<string, IOpenApiSchema>
-            {
-                ["href"] = new OpenApiSchema { Type = JsonSchemaType.String },
-                ["method"] = new OpenApiSchema { Type = JsonSchemaType.String },
-                ["title"] = new OpenApiSchema { Type = JsonSchemaType.String },
-            },
-        },
-    };
 }
