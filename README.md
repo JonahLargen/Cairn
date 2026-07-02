@@ -165,11 +165,16 @@ Cairn publishes an `ActivitySource` and a `Meter`, both named `Cairn.AspNetCore`
 
 ## Packages
 
-| Package | Purpose |
-| --- | --- |
-| `Cairn.Core` | Transport-agnostic hypermedia model (links, relations, affordances). No ASP.NET dependency. |
-| `Cairn.AspNetCore` | ASP.NET Core integration for both minimal APIs (`.WithLinks()`) and MVC controllers (`[CairnLinks]`). |
-| `Cairn.Testing` | Test assertion helpers for links and affordances. |
+| Package | Purpose | Frameworks |
+| --- | --- | --- |
+| `Cairn.Core` | Transport-agnostic hypermedia model (links, relations, affordances). No ASP.NET dependency. | net8.0, net9.0, net10.0 |
+| `Cairn.AspNetCore` | ASP.NET Core integration for both minimal APIs (`.WithLinks()`) and MVC controllers (`[CairnLinks]`). | net8.0, net9.0, net10.0 |
+| `Cairn.Client` | Typed client for consuming Cairn hypermedia APIs. | net8.0, net9.0, net10.0 |
+| `Cairn.OpenApi` | Documents hypermedia in `Microsoft.AspNetCore.OpenApi` documents (`AddOpenApi()`). | net10.0 |
+| `Cairn.Swashbuckle` | Documents hypermedia in Swashbuckle Swagger documents. | net8.0, net9.0, net10.0 |
+| `Cairn.Testing` | Test assertion helpers for links and affordances. | net8.0, net9.0, net10.0 |
+
+`Cairn.OpenApi` plugs into the `Microsoft.AspNetCore.OpenApi` schema-transformer pipeline, which only exists in the shape Cairn builds on in .NET 10; that API is absent on .NET 8 and uses an incompatible object model on .NET 9. On .NET 8/9, use `Cairn.Swashbuckle` to surface hypermedia in your OpenAPI document instead.
 
 ## Building
 
@@ -178,7 +183,7 @@ dotnet build Cairn.slnx
 dotnet test Cairn.slnx
 ```
 
-Requires the .NET 10 SDK.
+Building requires the .NET 10 SDK; running the test suite on every target framework additionally needs the .NET 8 and .NET 9 runtimes. The shipped packages run on .NET 8 (LTS) and later.
 
 "What does this cost per response?" — run the benchmarks:
 

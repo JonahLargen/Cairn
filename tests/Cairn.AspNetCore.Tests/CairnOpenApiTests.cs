@@ -1,3 +1,5 @@
+// Cairn.OpenApi targets net10.0 only: Microsoft.AspNetCore.OpenApi's document pipeline does not exist on earlier TFMs.
+#if NET10_0_OR_GREATER
 using System.Text.Json;
 using Cairn;
 using Cairn.AspNetCore;
@@ -57,3 +59,4 @@ public class CairnOpenApiTests
             => builder.Self(order => LinkTarget.Route("DocOrderById", new { id = order.Id }));
     }
 }
+#endif

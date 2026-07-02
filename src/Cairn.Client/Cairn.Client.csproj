@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <Description>A typed client for consuming Cairn hypermedia APIs — read a resource's value, links, and affordances; navigate by relation; invoke affordances.</Description>
   </PropertyGroup>
 

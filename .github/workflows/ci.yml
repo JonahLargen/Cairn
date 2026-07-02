@@ -20,7 +20,12 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          # The .NET 10 SDK builds every target; the 8.0/9.0 runtimes are needed to run the
+          # multi-targeted test projects on their lower TFMs.
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
 
       - name: Restore
         run: dotnet restore Cairn.slnx
