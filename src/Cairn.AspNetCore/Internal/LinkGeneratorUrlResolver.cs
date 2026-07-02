@@ -1,15 +1,24 @@
+using System.Globalization;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Patterns;
+using Microsoft.AspNetCore.WebUtilities;
 
 namespace Cairn.AspNetCore.Internal;
 
 /// <summary>Resolves link targets to absolute URLs using the ASP.NET Core <see cref="LinkGenerator"/>.</summary>
-internal sealed class LinkGeneratorUrlResolver(LinkGenerator linkGenerator, IHttpContextAccessor accessor, CairnOptions options) : ILinkUrlResolver
+internal sealed class LinkGeneratorUrlResolver(
+    LinkGenerator linkGenerator,
+    IHttpContextAccessor accessor,
+    CairnOptions options,
+    EndpointDataSource endpoints) : ILinkUrlResolver
 {
     public string? Resolve(LinkTarget target) => target switch
     {
         ExplicitLinkTarget explicitTarget => explicitTarget.Href,
         RouteLinkTarget route => ResolveRoute(route),
+        RouteTemplateLinkTarget template => ResolveRouteTemplate(template),
         _ => null,
     };
 
@@ -26,8 +35,91 @@ internal sealed class LinkGeneratorUrlResolver(LinkGenerator linkGenerator, IHtt
             : options.PublicBaseUri is { } publicBase
                 ? linkGenerator.GetUriByName(route.RouteName, route.RouteValues, publicBase.Scheme, Host(publicBase), BasePath(publicBase))
                 : linkGenerator.GetUriByName(http, route.RouteName, route.RouteValues);
-        return url is not null && options.TransformUrl is { } transform ? transform(http, url) : url;
+        return Transform(http, url);
     }
+
+    // Renders the named route's pattern as an RFC 6570 URI template: supplied route values are bound into the
+    // path (extras become literal query parameters, matching LinkGenerator), and the remaining route parameters
+    // stay as {placeholder} variables for the client to expand.
+    private string? ResolveRouteTemplate(RouteTemplateLinkTarget target)
+    {
+        var http = accessor.HttpContext;
+        if (http is null || FindPattern(target.RouteName) is not { } pattern)
+        {
+            return null;
+        }
+
+        var values = new RouteValueDictionary(target.RouteValues);
+        var consumed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var path = new StringBuilder();
+        foreach (var segment in pattern.PathSegments)
+        {
+            path.Append('/');
+            foreach (var part in segment.Parts)
+            {
+                switch (part)
+                {
+                    case RoutePatternLiteralPart literal:
+                        path.Append(literal.Content);
+                        break;
+                    case RoutePatternSeparatorPart separator:
+                        path.Append(separator.Content);
+                        break;
+                    case RoutePatternParameterPart parameter
+                        when values.TryGetValue(parameter.Name, out var bound) && bound is not null:
+                        consumed.Add(parameter.Name);
+                        path.Append(Uri.EscapeDataString(Convert.ToString(bound, CultureInfo.InvariantCulture) ?? string.Empty));
+                        break;
+                    case RoutePatternParameterPart parameter:
+                        path.Append('{').Append(parameter.Name).Append('}');
+                        break;
+                }
+            }
+        }
+
+        if (path.Length == 0)
+        {
+            path.Append('/');
+        }
+
+        var url = $"{TemplateBase(http)}{path}";
+        foreach (var (key, value) in values)
+        {
+            if (!consumed.Contains(key) && value is not null)
+            {
+                url = QueryHelpers.AddQueryString(url, key, Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
+            }
+        }
+
+        return Transform(http, url);
+    }
+
+    // The prefix ahead of the route path, honoring the configured URL style (mirrors ResolveRoute's handling).
+    private string TemplateBase(HttpContext http)
+        => options.UrlStyle == LinkUrlStyle.PathRelative
+            ? http.Request.PathBase.ToString()
+            : options.PublicBaseUri is { } publicBase
+                ? $"{publicBase.Scheme}://{publicBase.Authority}{BasePath(publicBase)}"
+                : $"{http.Request.Scheme}://{http.Request.Host}{http.Request.PathBase}";
+
+    // Endpoint names are matched case-insensitively, like LinkGenerator's address schemes.
+    private RoutePattern? FindPattern(string routeName)
+    {
+        foreach (var endpoint in endpoints.Endpoints)
+        {
+            if (endpoint is RouteEndpoint route
+                && (string.Equals(route.Metadata.GetMetadata<IRouteNameMetadata>()?.RouteName, routeName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(route.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName, routeName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return route.RoutePattern;
+            }
+        }
+
+        return null;
+    }
+
+    private string? Transform(HttpContext http, string? url)
+        => url is not null && options.TransformUrl is { } transform ? transform(http, url) : url;
 
     // The scheme's default port is omitted, matching Uri.Authority (FromUriComponent would render ":443").
     private static HostString Host(Uri publicBase)
