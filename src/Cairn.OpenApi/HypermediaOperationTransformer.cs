@@ -16,7 +16,7 @@ internal sealed class HypermediaOperationTransformer : IOpenApiOperationTransfor
     {
         if (context.ApplicationServices.GetService<ILinkConfigProvider>() is { } provider)
         {
-            HypermediaJsonSchemas.AddNegotiatedMediaTypes(context.Description, operation, provider);
+            HypermediaJsonSchemas.AddNegotiatedMediaTypes(context.Description, operation, provider, context.ApplicationServices.GetService<IPaginationEnvelopeProvider>());
         }
 
         return Task.CompletedTask;

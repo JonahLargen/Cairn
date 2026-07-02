@@ -414,9 +414,17 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             var name = SymbolDisplay.FormatLiteral(route.Name, quote: true);
             if (parameters.Exists(static p => p.Optional))
             {
+                // The local must not shadow a same-named route parameter (CS0136 in the generated catalog),
+                // so start from an unlikely name and suffix-rename while one still claims it.
+                var local = "__cairnRouteValues";
+                while (parameters.Exists(p => string.Equals(p.Name, local, StringComparison.Ordinal)))
+                {
+                    local += "_";
+                }
+
                 builder.AppendLine($"        public static global::Cairn.LinkTarget {method}({signature})");
                 builder.AppendLine("        {");
-                builder.AppendLine("            var values = new global::System.Collections.Generic.Dictionary<string, object?>();");
+                builder.AppendLine($"            var {local} = new global::System.Collections.Generic.Dictionary<string, object?>();");
                 foreach (var parameter in parameters)
                 {
                     var escaped = Escape(parameter.Name);
@@ -424,17 +432,17 @@ public sealed class RoutesGenerator : IIncrementalGenerator
                     {
                         builder.AppendLine($"            if ({escaped} is not null)");
                         builder.AppendLine("            {");
-                        builder.AppendLine($"                values[{SymbolDisplay.FormatLiteral(parameter.Name, quote: true)}] = {escaped};");
+                        builder.AppendLine($"                {local}[{SymbolDisplay.FormatLiteral(parameter.Name, quote: true)}] = {escaped};");
                         builder.AppendLine("            }");
                         builder.AppendLine();
                     }
                     else
                     {
-                        builder.AppendLine($"            values[{SymbolDisplay.FormatLiteral(parameter.Name, quote: true)}] = {escaped};");
+                        builder.AppendLine($"            {local}[{SymbolDisplay.FormatLiteral(parameter.Name, quote: true)}] = {escaped};");
                     }
                 }
 
-                builder.AppendLine($"            return global::Cairn.LinkTarget.Route({name}, values);");
+                builder.AppendLine($"            return global::Cairn.LinkTarget.Route({name}, {local});");
                 builder.AppendLine("        }");
             }
             else

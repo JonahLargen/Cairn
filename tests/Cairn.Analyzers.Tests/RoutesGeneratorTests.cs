@@ -67,8 +67,8 @@ class Program
         // route values when omitted — so the link resolves without the segment.
         Assert.Contains("public static global::Cairn.LinkTarget GetOptionalOrder(int? id = null)", generated);
         Assert.Contains("if (id is not null)", generated);
-        Assert.Contains(@"values[""id""] = id;", generated);
-        Assert.Contains(@"Route(""GetOptionalOrder"", values)", generated);
+        Assert.Contains(@"__cairnRouteValues[""id""] = id;", generated);
+        Assert.Contains(@"Route(""GetOptionalOrder"", __cairnRouteValues)", generated);
         Assert.DoesNotContain(CSharpSyntaxTree.ParseText(generated).GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
     }
 
@@ -107,9 +107,49 @@ class Program
         var generated = Run(source);
 
         Assert.Contains("public static global::Cairn.LinkTarget GetUserPosts(int userId, int? page = null)", generated);
-        Assert.Contains(@"values[""userId""] = userId;", generated);
+        Assert.Contains(@"__cairnRouteValues[""userId""] = userId;", generated);
         Assert.Contains("if (page is not null)", generated);
         Assert.DoesNotContain(CSharpSyntaxTree.ParseText(generated).GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Route_values_local_does_not_collide_with_a_parameter_named_values()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/lookup/{values}/{page:int?}"", handler).WithName(""Lookup"");
+    }
+}";
+
+        var generated = Run(source);
+
+        // A route parameter named 'values' used to collide with the generated dictionary local (CS0136),
+        // making the whole catalog fail to compile.
+        Assert.Contains("public static global::Cairn.LinkTarget Lookup(string values, int? page = null)", generated);
+        Assert.Contains(@"__cairnRouteValues[""values""] = values;", generated);
+        AssertCatalogCompiles(generated);
+    }
+
+    [Fact]
+    public void Route_values_local_is_suffix_renamed_when_a_parameter_claims_even_the_unlikely_name()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/odd/{__cairnRouteValues}/{page:int?}"", handler).WithName(""OddLookup"");
+    }
+}";
+
+        var generated = Run(source);
+
+        Assert.Contains("var __cairnRouteValues_ = new global::System.Collections.Generic.Dictionary<string, object?>();", generated);
+        Assert.Contains(@"__cairnRouteValues_[""__cairnRouteValues""] = __cairnRouteValues;", generated);
+        AssertCatalogCompiles(generated);
     }
 
     [Fact]
@@ -327,6 +367,32 @@ class Program
     }
 
     private static string Run(string source) => RunDriver(source).GeneratedTrees.Single().ToString();
+
+    // Compiles the generated catalog against a LinkTarget stub, so name-binding errors the parser can't see
+    // (e.g. a CS0136 local/parameter collision) fail the test.
+    private static void AssertCatalogCompiles(string generated)
+    {
+        const string stub = @"
+namespace Cairn
+{
+    public sealed class LinkTarget
+    {
+        public static LinkTarget Route(string routeName, object? values) => new LinkTarget();
+    }
+}";
+        var runtimeDirectory = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        var compilation = CSharpCompilation.Create(
+            "GeneratedCatalog",
+            [CSharpSyntaxTree.ParseText(generated), CSharpSyntaxTree.ParseText(stub)],
+            [
+                MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+                MetadataReference.CreateFromFile(Path.Combine(runtimeDirectory, "System.Runtime.dll")),
+                MetadataReference.CreateFromFile(Path.Combine(runtimeDirectory, "System.Collections.dll")),
+            ],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+
+        Assert.DoesNotContain(compilation.GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
+    }
 
     private static ImmutableArray<Diagnostic> RunDiagnostics(string source) => RunDriver(source).Diagnostics;
 
