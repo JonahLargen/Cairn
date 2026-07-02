@@ -1,4 +1,5 @@
 using Cairn.AspNetCore.Internal;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -31,6 +32,8 @@ public static class CairnServiceCollectionExtensions
         }
 
         services.AddHttpContextAccessor();
+        services.TryAddSingleton<WarnOnce>();
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IStartupFilter, CairnHeadersStartupFilter>());
         services.TryAddSingleton<CairnOptions>(static provider => provider.GetRequiredService<IOptions<CairnOptions>>().Value);
         services.TryAddSingleton<ILinkConfigProvider>(static provider => provider.GetRequiredService<CairnOptions>().Registry);
         services.TryAddSingleton<ILinkEngine, LinkEngine>();

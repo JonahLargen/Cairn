@@ -91,9 +91,9 @@ internal static class UriTemplate
             {
                 case VariableKind.Scalar:
                     var text = Stringify(value)!;
-                    if (prefixLength >= 0 && prefixLength < text.Length)
+                    if (prefixLength >= 0)
                     {
-                        text = text[..prefixLength];
+                        text = TakeCodePoints(text, prefixLength);
                     }
 
                     result.Append(any ? separator : prefix);
@@ -227,13 +227,31 @@ internal static class UriTemplate
             return Uri.EscapeDataString(value);
         }
 
-        // Reserved expansion: leave unreserved + reserved (gen-delims/sub-delims) and existing %-escapes intact.
-        // Iterate by code point, not UTF-16 unit: encoding each half of a surrogate pair separately would
-        // yield U+FFFD replacement bytes (%EF%BF%BD) and corrupt astral characters such as emoji.
+        // Reserved expansion: leave unreserved + reserved (gen-delims/sub-delims) intact. A '%' passes through
+        // only as part of a valid pct-triplet (RFC 6570 §3.2.3); a bare '%' is data and encodes as %25 — else
+        // "50% off" would expand to the invalid URI "50%%20off". Iterate by code point, not UTF-16 unit:
+        // encoding each half of a surrogate pair separately would yield U+FFFD replacement bytes (%EF%BF%BD)
+        // and corrupt astral characters such as emoji.
         var builder = new StringBuilder(value.Length);
         Span<byte> utf8 = stackalloc byte[4];
-        foreach (var rune in value.EnumerateRunes())
+        var index = 0;
+        while (index < value.Length)
         {
+            if (value[index] == '%')
+            {
+                builder.Append(index + 2 < value.Length && char.IsAsciiHexDigit(value[index + 1]) && char.IsAsciiHexDigit(value[index + 2])
+                    ? "%"
+                    : "%25");
+                index++;
+                continue;
+            }
+
+            // A lone surrogate has no valid code point; encode it as U+FFFD, matching EnumerateRunes.
+            if (!Rune.TryGetRuneAt(value, index, out var rune))
+            {
+                rune = Rune.ReplacementChar;
+            }
+
             if (rune.IsAscii && (IsUnreserved((char)rune.Value) || IsReserved((char)rune.Value)))
             {
                 builder.Append((char)rune.Value);
@@ -246,16 +264,39 @@ internal static class UriTemplate
                     builder.Append('%').Append(utf8[i].ToString("X2", CultureInfo.InvariantCulture));
                 }
             }
+
+            // A lone surrogate occupies one UTF-16 unit, matching the replacement rune's sequence length.
+            index += rune.Utf16SequenceLength;
         }
 
         return builder.ToString();
+    }
+
+    // The prefix modifier {var:n} takes the first n characters of the value (RFC 6570 §2.4.1) — code points,
+    // not UTF-16 units, so a surrogate pair (e.g. an emoji) is never split into replacement bytes.
+    private static string TakeCodePoints(string text, int count)
+    {
+        var index = 0;
+        var taken = 0;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (taken == count)
+            {
+                break;
+            }
+
+            index += rune.Utf16SequenceLength;
+            taken++;
+        }
+
+        return index < text.Length ? text[..index] : text;
     }
 
     private static bool IsUnreserved(char c)
         => c is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-' or '.' or '_' or '~';
 
     private static bool IsReserved(char c)
-        => c is ':' or '/' or '?' or '#' or '[' or ']' or '@' or '!' or '$' or '&' or '\'' or '(' or ')' or '*' or '+' or ',' or ';' or '=' or '%';
+        => c is ':' or '/' or '?' or '#' or '[' or ']' or '@' or '!' or '$' or '&' or '\'' or '(' or ')' or '*' or '+' or ',' or ';' or '=';
 
     private enum VariableKind
     {

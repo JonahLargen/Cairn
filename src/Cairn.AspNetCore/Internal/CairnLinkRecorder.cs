@@ -53,6 +53,9 @@ internal static class CairnLinkRecorder
 
         var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore");
 
+        // Per-container (registered by AddCairn), so a second host in the same process keeps its own gate.
+        var warnOnce = services.GetRequiredService<WarnOnce>();
+
         using var activity = CairnTelemetry.Source.StartActivity("Cairn.ComputeHypermedia");
         activity?.SetTag("cairn.format", custom?.MediaType ?? format.ToString());
         activity?.SetTag("cairn.resource_type", value.GetType().Name);
@@ -61,7 +64,7 @@ internal static class CairnLinkRecorder
         // serialization, and the stream cannot be enumerated twice. Warn once rather than fail silently.
         if (AsyncEnumerableElementType(value) is { } elementType)
         {
-            WarnAsyncEnumerable(logger, elementType);
+            WarnAsyncEnumerable(logger, warnOnce, elementType);
             return value;
         }
 
@@ -74,12 +77,13 @@ internal static class CairnLinkRecorder
                 services,
                 http.RequestAborted)
             {
-                OnUnresolvedLink = unresolved => HandleUnresolved(logger, unresolved),
+                OnUnresolvedLink = unresolved => HandleUnresolved(logger, warnOnce, unresolved),
             },
             options,
             format,
             logger,
             services.GetService<ILinkConfigProvider>(),
+            warnOnce,
             new HashSet<object>(ReferenceEqualityComparer.Instance));
 
         // A deferred sequence (LINQ query, IQueryable, iterator) would be enumerated here and again by the
@@ -104,7 +108,7 @@ internal static class CairnLinkRecorder
             ApplyContentType(http, format, custom);
         }
 
-        RegisterEmitMissDiagnostic(http, logger);
+        RegisterEmitMissDiagnostic(http, logger, warnOnce);
         return value;
     }
 
@@ -465,14 +469,14 @@ internal static class CairnLinkRecorder
 
     // A lax-mode drop is the silent failure mode: the link just disappears from the payload. Meter every
     // occurrence and log once per (resource type, relation) so production drops are discoverable.
-    private static void HandleUnresolved(ILogger? logger, UnresolvedLink unresolved)
+    private static void HandleUnresolved(ILogger? logger, WarnOnce warnOnce, UnresolvedLink unresolved)
     {
         CairnTelemetry.LinksUnresolved.Add(
             1,
             new KeyValuePair<string, object?>("cairn.resource_type", unresolved.ResourceType.Name),
             new KeyValuePair<string, object?>("cairn.relation", unresolved.Relation.Value));
 
-        if (logger is not null && WarnOnce.Mark("unresolved-link", $"{unresolved.ResourceType.FullName}|{unresolved.Relation.Value}"))
+        if (logger is not null && warnOnce.Mark("unresolved-link", $"{unresolved.ResourceType.FullName}|{unresolved.Relation.Value}"))
         {
             logger.LogWarning(
                 "Cairn: link '{Relation}' on {ResourceType} targeting {Target} could not be resolved and was dropped (Lax mode). Ensure the endpoint is named (WithName / [Http*(Name=...)]) and all route values are supplied, or use Strict mode to fail instead.",
@@ -494,7 +498,7 @@ internal static class CairnLinkRecorder
             return;
         }
 
-        if (WarnOnce.Mark("hal-actions", value.GetType()))
+        if (scope.WarnOnce.Mark("hal-actions", value.GetType()))
         {
             logger.LogWarning(
                 "Cairn: affordances on {ResourceType} are not emitted in HAL format (HAL has no actions). Use HAL-FORMS to include them.",
@@ -511,7 +515,7 @@ internal static class CairnLinkRecorder
             return;
         }
 
-        if (WarnOnce.Mark("value-type", value.GetType()))
+        if (scope.WarnOnce.Mark("value-type", value.GetType()))
         {
             logger.LogWarning(
                 "Cairn: hypermedia cannot be attached to value type {ResourceType} (links are correlated by reference); use a class or record. No links will be emitted for it.",
@@ -519,9 +523,9 @@ internal static class CairnLinkRecorder
         }
     }
 
-    private static void WarnAsyncEnumerable(ILogger? logger, Type elementType)
+    private static void WarnAsyncEnumerable(ILogger? logger, WarnOnce warnOnce, Type elementType)
     {
-        if (logger is not null && WarnOnce.Mark("async-enumerable", elementType))
+        if (logger is not null && warnOnce.Mark("async-enumerable", elementType))
         {
             logger.LogWarning(
                 "Cairn: hypermedia cannot be attached to an IAsyncEnumerable<{ResourceType}> response (links are computed before serialization, and an async stream cannot be enumerated twice). Materialize it first (e.g. ToListAsync()). No links will be emitted for it.",
@@ -544,7 +548,7 @@ internal static class CairnLinkRecorder
             return;
         }
 
-        if (WarnOnce.Mark("unconfigured", type))
+        if (scope.WarnOnce.Mark("unconfigured", type))
         {
             logger.LogWarning(
                 "Cairn: no link configuration is registered for {ResourceType} or any of its base types; it will serialize without hypermedia. Register a LinkConfig<{ResourceType}> (AddLinks / AddLinksFromAssembly), or remove WithLinks()/[CairnLinks] if this is intended.",
@@ -556,7 +560,7 @@ internal static class CairnLinkRecorder
     // After the response completes, report any recorded hypermedia the serializer never asked for — the
     // reference correlation between compute and emit broke (typically a deferred sequence inside an immutable
     // result, re-enumerated into fresh instances). Without this, the links just vanish with no trace.
-    private static void RegisterEmitMissDiagnostic(HttpContext http, ILogger? logger)
+    private static void RegisterEmitMissDiagnostic(HttpContext http, ILogger? logger, WarnOnce warnOnce)
     {
         if (logger is null || !CairnLinkStore.HasEntries(http) || !http.Items.TryAdd(EmitDiagnosticKey, true))
         {
@@ -574,7 +578,7 @@ internal static class CairnLinkRecorder
                 foreach (var type in CairnLinkStore.UnemittedTypes(http))
                 {
                     CairnTelemetry.HypermediaUnemitted.Add(1, new KeyValuePair<string, object?>("cairn.resource_type", type.Name));
-                    if (WarnOnce.Mark("unemitted", type))
+                    if (warnOnce.Mark("unemitted", type))
                     {
                         logger.LogWarning(
                             "Cairn: hypermedia was computed for {ResourceType} but never emitted. Links are correlated by reference between compute and serialization; this usually means a deferred sequence (LINQ projection, IQueryable) produced different instances when serialized. Materialize the sequence (e.g. ToList()) before returning it.",
@@ -840,5 +844,6 @@ internal static class CairnLinkRecorder
         HypermediaFormat Format,
         ILogger? Logger,
         ILinkConfigProvider? Configs,
+        WarnOnce WarnOnce,
         HashSet<object> Visited);
 }

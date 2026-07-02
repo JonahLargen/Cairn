@@ -20,7 +20,7 @@ public class CairnTestingTests
             {"id":1,"_links":{"self":{"href":"/o/1"}},"_actions":{"cancel":{"href":"/o/1/cancel","method":"POST"}}}
             """;
 
-        json.Hypermedia().Should()
+        HypermediaResponse.Parse(json).Should()
             .HaveLink("self", "/o/1")
             .And.HaveAffordance("cancel").WithMethod(HttpMethod.Post).WithHref("/o/1/cancel");
     }
@@ -40,7 +40,7 @@ public class CairnTestingTests
             }
             """;
 
-        var hypermedia = json.Hypermedia();
+        var hypermedia = HypermediaResponse.Parse(json);
 
         hypermedia.Should()
             .HaveLink("self", "/o/1")
@@ -59,7 +59,7 @@ public class CairnTestingTests
             {"_links":{"self":{"href":"/o/1"},"broken":"not-a-link-object","empty":[]},"_actions":{"cancel":"nope"}}
             """;
 
-        var hypermedia = json.Hypermedia();
+        var hypermedia = HypermediaResponse.Parse(json);
 
         hypermedia.Should().HaveLink("self").And.NotHaveLink("broken").And.NotHaveAffordance("cancel");
     }
@@ -93,18 +93,18 @@ public class CairnTestingTests
     [Fact]
     public void A_link_with_a_missing_or_empty_href_fails_parsing_with_a_clear_message()
     {
-        var missing = Assert.Throws<FormatException>(() => """{"_links":{"self":{"title":"no href"}}}""".Hypermedia());
+        var missing = Assert.Throws<FormatException>(() => HypermediaResponse.Parse("""{"_links":{"self":{"title":"no href"}}}"""));
         Assert.Contains("'self'", missing.Message);
         Assert.Contains("href", missing.Message);
 
-        var empty = Assert.Throws<FormatException>(() => """{"_links":{"self":{"href":""}}}""".Hypermedia());
+        var empty = Assert.Throws<FormatException>(() => HypermediaResponse.Parse("""{"_links":{"self":{"href":""}}}"""));
         Assert.Contains("'self'", empty.Message);
 
         // A member of a HAL link array is validated too.
-        var array = Assert.Throws<FormatException>(() => """{"_links":{"item":[{"href":"/i/1"},{"name":"second"}]}}""".Hypermedia());
+        var array = Assert.Throws<FormatException>(() => HypermediaResponse.Parse("""{"_links":{"item":[{"href":"/i/1"},{"name":"second"}]}}"""));
         Assert.Contains("'item'", array.Message);
 
-        var action = Assert.Throws<FormatException>(() => """{"_actions":{"cancel":{"method":"POST"}}}""".Hypermedia());
+        var action = Assert.Throws<FormatException>(() => HypermediaResponse.Parse("""{"_actions":{"cancel":{"method":"POST"}}}"""));
         Assert.Contains("'cancel'", action.Message);
         Assert.Contains("href", action.Message);
     }
@@ -112,7 +112,7 @@ public class CairnTestingTests
     [Fact]
     public void Failed_assertions_throw_CairnAssertionException_describing_the_actual_hypermedia()
     {
-        var hypermedia = """{"_links":{"self":{"href":"/o/1"}},"_actions":{"cancel":{"href":"/o/1/cancel","method":"POST"}}}""".Hypermedia();
+        var hypermedia = HypermediaResponse.Parse("""{"_links":{"self":{"href":"/o/1"}},"_actions":{"cancel":{"href":"/o/1/cancel","method":"POST"}}}""");
 
         var missingLink = Assert.Throws<CairnAssertionException>(() => hypermedia.Should().HaveLink("parent"));
         Assert.Contains("'parent'", missingLink.Message);
@@ -133,7 +133,7 @@ public class CairnTestingTests
     [Fact]
     public void Asserts_templated_links()
     {
-        var hypermedia = """{"_links":{"self":{"href":"/o/1"},"search":{"href":"/orders{?status,page}","templated":true}}}""".Hypermedia();
+        var hypermedia = HypermediaResponse.Parse("""{"_links":{"self":{"href":"/o/1"},"search":{"href":"/orders{?status,page}","templated":true}}}""");
 
         hypermedia.Should().HaveTemplatedLink("search");
         Assert.True(hypermedia.Links["search"].Templated);
@@ -162,7 +162,7 @@ public class CairnTestingTests
             }
             """;
 
-        var hypermedia = json.Hypermedia();
+        var hypermedia = HypermediaResponse.Parse(json);
 
         hypermedia.Should()
             .HaveSelfLink()
@@ -199,7 +199,7 @@ public class CairnTestingTests
             }
             """;
 
-        var hypermedia = json.Hypermedia();
+        var hypermedia = HypermediaResponse.Parse(json);
 
         hypermedia.Should()
             .HaveTemplate("cancel")
@@ -229,11 +229,70 @@ public class CairnTestingTests
     }
 
     [Fact]
+    public void HaveLinkMatching_matches_placeholders_and_prefixes()
+    {
+        // Host and port vary per test run; the pattern makes assertions robust without Assert.EndsWith.
+        var hypermedia = HypermediaResponse.Parse(
+            """{"_links":{"self":{"href":"http://localhost:5123/orders/42"},"item":[{"href":"/o/1"},{"href":"/o/2"}]}}""");
+
+        hypermedia.Should()
+            .HaveLinkMatching("self", "http://{host}/orders/{id}")
+            .And.HaveLinkMatching("self", "http://localhost:5123/orders/*")
+            .And.HaveLinkMatching("self", "*")
+            .And.HaveLinkMatching("item", "/o/{id}");
+    }
+
+    [Fact]
+    public void HaveLinkMatching_placeholder_matches_exactly_one_segment()
+    {
+        var hypermedia = HypermediaResponse.Parse("""{"_links":{"self":{"href":"/orders/42/items"}}}""");
+
+        // {id} must not swallow "/": "/orders/{id}" cannot match a two-segment tail.
+        var mismatch = Assert.Throws<CairnAssertionException>(
+            () => hypermedia.Should().HaveLinkMatching("self", "/orders/{id}"));
+        Assert.Contains("/orders/42/items", mismatch.Message);
+
+        hypermedia.Should().HaveLinkMatching("self", "/orders/{id}/items");
+    }
+
+    [Fact]
+    public void HaveLinkMatching_escapes_regex_metacharacters_in_literals()
+    {
+        var hypermedia = HypermediaResponse.Parse("""{"_links":{"search":{"href":"/orders?q=a+b"}}}""");
+
+        hypermedia.Should().HaveLinkMatching("search", "/orders?q=a+b");
+
+        // '.' is a literal, not "any character".
+        Assert.Throws<CairnAssertionException>(() => hypermedia.Should().HaveLinkMatching("search", "/orders?q=a.b"));
+    }
+
+    [Fact]
+    public void Affordance_and_template_targets_match_patterns_too()
+    {
+        var hypermedia = HypermediaResponse.Parse(
+            """
+            {
+                "_links": {"self": {"href": "http://localhost:5123/o/42"}},
+                "_actions": {"cancel": {"href": "http://localhost:5123/o/42/cancel", "method": "POST"}},
+                "_templates": {"update": {"method": "PUT", "target": "http://localhost:5123/o/42"}}
+            }
+            """);
+
+        hypermedia.Should()
+            .HaveAffordance("cancel").WithHrefMatching("http://{host}/o/{id}/cancel")
+            .And.HaveTemplate("update").WithTargetMatching("http://{host}/o/{id}");
+
+        var wrong = Assert.Throws<CairnAssertionException>(
+            () => hypermedia.Should().HaveAffordance("cancel").WithHrefMatching("/o/{id}/cancel"));
+        Assert.Contains("cancel", wrong.Message);
+    }
+
+    [Fact]
     public void A_template_without_a_target_falls_back_to_the_self_link()
     {
         const string json = """{"_links":{"self":{"href":"/o/42"}},"_templates":{"default":{"method":"PUT"}}}""";
 
-        json.Hypermedia().Should().HaveTemplate("default").WithMethod(HttpMethod.Put).WithTarget("/o/42");
+        HypermediaResponse.Parse(json).Should().HaveTemplate("default").WithMethod(HttpMethod.Put).WithTarget("/o/42");
     }
 
     [Fact]

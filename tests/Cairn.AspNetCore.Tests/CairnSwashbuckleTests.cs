@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Cairn;
 using Cairn.AspNetCore;
 using Cairn.Swashbuckle;
@@ -103,6 +104,81 @@ public class CairnSwashbuckleTests
     }
 
     [Fact]
+    public async Task Bare_collection_responses_keep_plain_json_only()
+    {
+        using var document = await GetDocumentAsync();
+        var content = document.RootElement
+            .GetProperty("paths").GetProperty("/orders").GetProperty("get")
+            .GetProperty("responses").GetProperty("200").GetProperty("content");
+
+        // The wire deliberately keeps a bare JSON array application/json (its elements carry _links, but the
+        // array is not a HAL document), so the document must not advertise negotiable HAL media types.
+        Assert.True(content.TryGetProperty("application/json", out _));
+        Assert.False(content.TryGetProperty("application/hal+json", out _));
+        Assert.False(content.TryGetProperty("application/prs.hal-forms+json", out _));
+    }
+
+    [Fact]
+    public async Task Paged_envelope_documents_media_types_and_pagination_links()
+    {
+        using var document = await GetDocumentAsync();
+        var content = document.RootElement
+            .GetProperty("paths").GetProperty("/orders/paged").GetProperty("get")
+            .GetProperty("responses").GetProperty("200").GetProperty("content");
+
+        // The wire always decorates and relabels a pagination envelope, so the document advertises both.
+        Assert.True(content.TryGetProperty("application/json", out var json));
+        Assert.True(content.TryGetProperty("application/hal+json", out _));
+        Assert.True(content.TryGetProperty("application/prs.hal-forms+json", out _));
+
+        var links = ResolveSchema(document, json.GetProperty("schema")).GetProperty("properties").GetProperty("_links");
+        foreach (var relation in new[] { "self", "first", "prev", "next", "last" })
+        {
+            Assert.True(links.GetProperty("properties").TryGetProperty(relation, out var link), $"pagination links missing '{relation}'");
+            Assert.True(link.GetProperty("properties").TryGetProperty("href", out _));
+        }
+    }
+
+    [Fact]
+    public async Task Cursor_envelope_documents_media_types_and_cursor_links()
+    {
+        using var document = await GetDocumentAsync();
+        var content = document.RootElement
+            .GetProperty("paths").GetProperty("/orders/cursor").GetProperty("get")
+            .GetProperty("responses").GetProperty("200").GetProperty("content");
+
+        Assert.True(content.TryGetProperty("application/json", out var json));
+        Assert.True(content.TryGetProperty("application/hal+json", out _));
+        Assert.True(content.TryGetProperty("application/prs.hal-forms+json", out _));
+
+        var links = ResolveSchema(document, json.GetProperty("schema")).GetProperty("properties").GetProperty("_links");
+        foreach (var relation in new[] { "self", "next", "prev" })
+        {
+            Assert.True(links.GetProperty("properties").TryGetProperty(relation, out _), $"cursor links missing '{relation}'");
+        }
+
+        Assert.False(links.GetProperty("properties").TryGetProperty("last", out _));
+    }
+
+    [Fact]
+    public async Task Schema_keeps_a_dto_declared_links_property()
+    {
+        using var document = await GetDocumentAsync();
+        var properties = SchemaProperties(document, "SwaggerClashOrder");
+
+        // The wire serializes the DTO's own _links property (the injector skips colliding names), so the
+        // document keeps the user's schema — a string map, not Cairn's link-object shape.
+        var links = properties.GetProperty("_links");
+        Assert.False(links.TryGetProperty("additionalProperties", out var additional) && additional.TryGetProperty("anyOf", out _));
+
+        // The non-colliding hypermedia properties are still documented.
+        Assert.True(properties.TryGetProperty("_actions", out var actions));
+        Assert.True(actions.GetProperty("additionalProperties").GetProperty("properties").TryGetProperty("href", out _));
+        Assert.True(properties.TryGetProperty("_embedded", out _));
+        Assert.True(properties.TryGetProperty("_templates", out _));
+    }
+
+    [Fact]
     public async Task Swagger_generation_without_AddCairn_is_a_noop()
     {
         var builder = WebApplication.CreateBuilder();
@@ -127,7 +203,7 @@ public class CairnSwashbuckleTests
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
-        builder.Services.AddCairn(o => o.AddLinks(new SwaggerOrderLinks()));
+        builder.Services.AddCairn(o => o.AddLinks(new SwaggerOrderLinks()).AddLinks(new SwaggerClashOrderLinks()));
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen(c => c.AddCairnHypermedia());
 
@@ -136,6 +212,10 @@ public class CairnSwashbuckleTests
         app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new SwaggerOrder(id)))
             .WithName("SwaggerOrderById")
             .WithLinks();
+        app.MapGet("/orders", () => TypedResults.Ok(new List<SwaggerOrder> { new(1) })).WithLinks();
+        app.MapGet("/orders/paged", () => TypedResults.Ok(new PagedResource<SwaggerOrder>([new(1)], 1, 10, 25))).WithLinks();
+        app.MapGet("/orders/cursor", () => TypedResults.Ok(new CursorPage<SwaggerOrder>([new(1)], Next: "n"))).WithLinks();
+        app.MapGet("/clash", () => TypedResults.Ok(new SwaggerClashOrder(1, new Dictionary<string, string>()))).WithLinks();
         app.MapGet("/plain", () => TypedResults.Ok(new SwaggerPlainNote("hi")));
 
         await app.StartAsync();
@@ -149,13 +229,32 @@ public class CairnSwashbuckleTests
             .GetProperty("components").GetProperty("schemas")
             .GetProperty(schema).GetProperty("properties");
 
+    // Follows a $ref into components.schemas; an inline schema is returned as-is.
+    private static JsonElement ResolveSchema(JsonDocument document, JsonElement schema)
+        => schema.TryGetProperty("$ref", out var reference)
+            ? document.RootElement.GetProperty("components").GetProperty("schemas")
+                .GetProperty(reference.GetString()!.Split('/')[^1])
+            : schema;
+
     private sealed record SwaggerOrder(int Id);
 
     private sealed record SwaggerPlainNote(string Text);
+
+    // Declares its own _links property; the wire serializes it (the injector skips colliding names).
+    private sealed record SwaggerClashOrder(int Id, [property: JsonPropertyName("_links")] Dictionary<string, string> DeclaredLinks);
 
     private sealed class SwaggerOrderLinks : LinkConfig<SwaggerOrder>
     {
         public override void Configure(ILinkBuilder<SwaggerOrder> builder)
             => builder.Self(order => LinkTarget.Route("SwaggerOrderById", new { id = order.Id }));
+    }
+
+    private sealed class SwaggerClashOrderLinks : LinkConfig<SwaggerClashOrder>
+    {
+        public override void Configure(ILinkBuilder<SwaggerClashOrder> builder)
+        {
+            builder.Self(order => LinkTarget.Uri($"/clash/{order.Id}"));
+            builder.Affordance("touch", order => LinkTarget.Uri($"/clash/{order.Id}/touch"));
+        }
     }
 }

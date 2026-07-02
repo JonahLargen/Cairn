@@ -303,11 +303,20 @@ public sealed class RoutesGenerator : IIncrementalGenerator
 
             var content = template.Substring(index + 1, end - index - 1).TrimStart('*');
 
-            // Strip an inline default value: "{id=5}" / "{id:int=5}".
+            // Both optional markers make the parameter optional for callers too: an inline default
+            // ("{id=5}" / "{id:int=5}") or a trailing '?' ("{id?}" / "{id:int?}") — the route resolves
+            // without the value either way.
+            var optional = false;
             var equals = content.IndexOf('=');
             if (equals >= 0)
             {
                 content = content.Substring(0, equals);
+                optional = true;
+            }
+            else if (content.EndsWith("?", System.StringComparison.Ordinal))
+            {
+                content = content.Substring(0, content.Length - 1);
+                optional = true;
             }
 
             var colon = content.IndexOf(':');
@@ -317,18 +326,15 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             if (colon >= 0)
             {
                 name = content.Substring(0, colon);
-                // TrimEnd('?') so an optional constraint like "{id:int?}" maps to int, not the default string.
-                type = MapConstraint(content.Substring(colon + 1).Split(':')[0].Split('(')[0].TrimEnd('?'));
+                type = MapConstraint(content.Substring(colon + 1).Split(':')[0].Split('(')[0]);
             }
             else
             {
                 name = content;
             }
-
-            name = name.TrimEnd('?');
             if (IsIdentifier(name) && seen.Add(name))
             {
-                parameters.Add(name + " " + type);
+                parameters.Add(name + " " + type + (optional ? " ?" : string.Empty));
             }
 
             index = end + 1;
@@ -347,6 +353,9 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         "decimal" => "decimal",
         "guid" => "global::System.Guid",
         "datetime" => "global::System.DateTime",
+
+        // Numeric range constraints on an otherwise untyped parameter: ASP.NET evaluates them as long.
+        "min" or "max" or "range" => "long",
         _ => "string",
     };
 
@@ -366,7 +375,10 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         builder.AppendLine("namespace Cairn");
         builder.AppendLine("{");
         builder.AppendLine("    /// <summary>Strongly-typed route references generated from named endpoints.</summary>");
-        builder.AppendLine("    public static partial class Routes");
+        // internal: a route catalog is app-internal by nature, and an internal class can neither collide with
+        // a hand-written public Cairn.Routes in a referencing project nor be ambiguous (CS0433) across
+        // assemblies that each generate one. partial already allows same-assembly extension.
+        builder.AppendLine("    internal static partial class Routes");
         builder.AppendLine("    {");
 
         var emitted = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -392,14 +404,48 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             emitted[method] = route.Name;
 
             var parameters = Decode(route.Parameters);
-            var signature = string.Join(", ", parameters.Select(static p => p.Type + " " + Escape(p.Name)));
-            var values = parameters.Count == 0
-                ? "null"
-                : "new { " + string.Join(", ", parameters.Select(static p => Escape(p.Name))) + " }";
+
+            // Optional/defaulted route parameters are optional for callers too: nullable with a null default,
+            // and skipped in the route values when omitted so link generation renders the URL without them.
+            var signature = string.Join(", ", parameters.Select(static p
+                => p.Optional ? p.Type + "? " + Escape(p.Name) + " = null" : p.Type + " " + Escape(p.Name)));
 
             builder.AppendLine($"        /// <summary>Route to the '{XmlEscape(route.Name)}' endpoint.</summary>");
-            builder.AppendLine($"        public static global::Cairn.LinkTarget {method}({signature})");
-            builder.AppendLine($"            => global::Cairn.LinkTarget.Route({SymbolDisplay.FormatLiteral(route.Name, quote: true)}, {values});");
+            var name = SymbolDisplay.FormatLiteral(route.Name, quote: true);
+            if (parameters.Exists(static p => p.Optional))
+            {
+                builder.AppendLine($"        public static global::Cairn.LinkTarget {method}({signature})");
+                builder.AppendLine("        {");
+                builder.AppendLine("            var values = new global::System.Collections.Generic.Dictionary<string, object?>();");
+                foreach (var parameter in parameters)
+                {
+                    var escaped = Escape(parameter.Name);
+                    if (parameter.Optional)
+                    {
+                        builder.AppendLine($"            if ({escaped} is not null)");
+                        builder.AppendLine("            {");
+                        builder.AppendLine($"                values[{SymbolDisplay.FormatLiteral(parameter.Name, quote: true)}] = {escaped};");
+                        builder.AppendLine("            }");
+                        builder.AppendLine();
+                    }
+                    else
+                    {
+                        builder.AppendLine($"            values[{SymbolDisplay.FormatLiteral(parameter.Name, quote: true)}] = {escaped};");
+                    }
+                }
+
+                builder.AppendLine($"            return global::Cairn.LinkTarget.Route({name}, values);");
+                builder.AppendLine("        }");
+            }
+            else
+            {
+                var values = parameters.Count == 0
+                    ? "null"
+                    : "new { " + string.Join(", ", parameters.Select(static p => Escape(p.Name))) + " }";
+                builder.AppendLine($"        public static global::Cairn.LinkTarget {method}({signature})");
+                builder.AppendLine($"            => global::Cairn.LinkTarget.Route({name}, {values});");
+            }
+
             builder.AppendLine();
         }
 
@@ -409,10 +455,10 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         context.AddSource("Cairn.Routes.g.cs", builder.ToString());
     }
 
-    private static List<(string Name, string Type)> Decode(string encoded)
+    private static List<(string Name, string Type, bool Optional)> Decode(string encoded)
         => encoded.Length == 0
-            ? new List<(string, string)>()
-            : encoded.Split('|').Select(static part => part.Split(' ')).Select(static pieces => (pieces[0], pieces[1])).ToList();
+            ? new List<(string, string, bool)>()
+            : encoded.Split('|').Select(static part => part.Split(' ')).Select(static pieces => (pieces[0], pieces[1], pieces.Length > 2)).ToList();
 
     private static string Sanitize(string routeName)
     {

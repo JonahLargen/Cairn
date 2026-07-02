@@ -20,17 +20,60 @@ internal static class HypermediaJsonSchemas
 
     private const string JsonMediaType = "application/json";
 
-    /// <summary>Adds the hypermedia properties to the schema of a Cairn-linked resource type.</summary>
-    public static void Apply(OpenApiSchema schema)
+    // Matched by full name because this file is compiled into projects that don't reference Cairn.AspNetCore.
+    private const string PagedResourceInterface = "Cairn.AspNetCore.IPagedResource";
+    private const string CursorPagedResourceInterface = "Cairn.AspNetCore.ICursorPagedResource";
+
+    /// <summary>
+    /// Adds the hypermedia properties to the schema of a Cairn-linked resource type. Mirrors the emit stage's
+    /// collision guard: a hypermedia property the DTO itself declares is the user's real property — the wire
+    /// serializes their data, so the document must keep their schema rather than clobber it with Cairn's shape.
+    /// <paramref name="declaredByType"/> says whether an already-present schema property is such a real member;
+    /// when unknowable (<see langword="null"/>), any existing property is preserved. Cairn's own emit-stage
+    /// contract properties (present when the schema is generated from the serializer's <c>JsonTypeInfo</c>)
+    /// are not real members and are replaced by the full hypermedia shape.
+    /// </summary>
+    public static void Apply(OpenApiSchema schema, Func<string, bool>? declaredByType = null)
     {
         schema.Properties ??= new Dictionary<string, IOpenApiSchema>();
-        schema.Properties["_links"] = LinksSchema();
-        schema.Properties["_embedded"] = EmbeddedSchema();
-        schema.Properties["_actions"] = ActionsSchema();
-        schema.Properties["_templates"] = TemplatesSchema();
+        Set(schema.Properties, "_links", LinksSchema(), declaredByType);
+        Set(schema.Properties, "_embedded", EmbeddedSchema(), declaredByType);
+        Set(schema.Properties, "_actions", ActionsSchema(), declaredByType);
+        Set(schema.Properties, "_templates", TemplatesSchema(), declaredByType);
     }
 
-    /// <summary>Whether <paramref name="type"/> — or the element type it enumerates — is Cairn-linked.</summary>
+    /// <summary>
+    /// Adds the <c>_links</c> the wire always decorates a pagination envelope with — the navigation relations
+    /// of offset (<c>self/first/prev/next/last</c>) or cursor (<c>self/next/prev</c>) pagination.
+    /// </summary>
+    public static void ApplyPaginationLinks(OpenApiSchema schema, bool cursor, Func<string, bool>? declaredByType = null)
+    {
+        schema.Properties ??= new Dictionary<string, IOpenApiSchema>();
+        Set(
+            schema.Properties,
+            "_links",
+            PaginationLinksSchema(cursor ? ["self", "next", "prev"] : ["self", "first", "prev", "next", "last"]),
+            declaredByType);
+    }
+
+    private static void Set(IDictionary<string, IOpenApiSchema> properties, string name, OpenApiSchema value, Func<string, bool>? declaredByType)
+    {
+        // An existing property that is a real member of the type keeps the user's schema (the wire serializes
+        // their data); one that came from Cairn's serializer contract is a placeholder to replace.
+        if (properties.ContainsKey(name) && (declaredByType?.Invoke(name) ?? true))
+        {
+            return;
+        }
+
+        properties[name] = value;
+    }
+
+    /// <summary>
+    /// Whether the wire decorates (and relabels) a response of <paramref name="type"/>: a configured resource
+    /// type, or a pagination envelope, which always gets navigation links. A bare collection is deliberately
+    /// not linked — its elements carry hypermedia, but a JSON array is not a HAL document and stays
+    /// <c>application/json</c> on the wire.
+    /// </summary>
     public static bool IsLinked(ILinkConfigProvider provider, Type? type)
     {
         if (type is null || type == typeof(void))
@@ -38,13 +81,35 @@ internal static class HypermediaJsonSchemas
             return false;
         }
 
-        if (provider.GetConfig(type) is not null)
+        return provider.GetConfig(type) is not null || IsPaginationEnvelope(type, out _);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="type"/> is a pagination envelope (<c>PagedResource&lt;T&gt;</c>,
+    /// <c>CursorPage&lt;T&gt;</c>, or any implementation of their interfaces); <paramref name="cursor"/> says
+    /// which navigation shape it carries. Envelope types adapted via <c>AddPaging</c>/<c>AddCursorPaging</c>
+    /// are not visible from here (that registration lives in Cairn.AspNetCore's options).
+    /// </summary>
+    public static bool IsPaginationEnvelope(Type type, out bool cursor)
+    {
+        foreach (var candidate in type.GetInterfaces())
         {
-            return true;
+            if (candidate.FullName == PagedResourceInterface)
+            {
+                cursor = false;
+                return true;
+            }
+
+            if (candidate.FullName == CursorPagedResourceInterface)
+            {
+                cursor = true;
+                return true;
+            }
         }
 
-        // A collection response links each element, so its items carry the hypermedia.
-        return ElementTypeOf(type) is { } element && provider.GetConfig(element) is not null;
+        // The declared response type may be the envelope interface itself.
+        cursor = type.FullName == CursorPagedResourceInterface;
+        return cursor || type.FullName == PagedResourceInterface;
     }
 
     /// <summary>
@@ -93,6 +158,32 @@ internal static class HypermediaJsonSchemas
             ],
         },
     };
+
+    // _links on a pagination envelope: the navigation relations the wire emits (absent ones are omitted,
+    // e.g. no prev on the first page), plus any relations configured for the envelope type itself.
+    private static OpenApiSchema PaginationLinksSchema(string[] relations)
+    {
+        var properties = new Dictionary<string, IOpenApiSchema>();
+        foreach (var relation in relations)
+        {
+            properties[relation] = LinkObjectSchema();
+        }
+
+        return new OpenApiSchema
+        {
+            Type = JsonSchemaType.Object,
+            Description = $"Pagination links keyed by relation ({string.Join("/", relations)}); relations without a target page are omitted.",
+            Properties = properties,
+            AdditionalProperties = new OpenApiSchema
+            {
+                AnyOf =
+                [
+                    LinkObjectSchema(),
+                    new OpenApiSchema { Type = JsonSchemaType.Array, Items = LinkObjectSchema() },
+                ],
+            },
+        };
+    }
 
     private static OpenApiSchema LinkObjectSchema() => new()
     {
@@ -200,31 +291,4 @@ internal static class HypermediaJsonSchemas
         },
     };
 
-    private static Type? ElementTypeOf(Type type)
-    {
-        if (type == typeof(string))
-        {
-            return null;
-        }
-
-        if (type.IsArray)
-        {
-            return type.GetElementType();
-        }
-
-        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>))
-        {
-            return type.GetGenericArguments()[0];
-        }
-
-        foreach (var candidate in type.GetInterfaces())
-        {
-            if (candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IEnumerable<>))
-            {
-                return candidate.GetGenericArguments()[0];
-            }
-        }
-
-        return null;
-    }
 }

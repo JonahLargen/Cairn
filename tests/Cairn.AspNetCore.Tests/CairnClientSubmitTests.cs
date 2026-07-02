@@ -30,6 +30,12 @@ public class CairnClientSubmitTests
               "method": "PUT",
               "target": "/note",
               "properties": [ { "name": "text", "required": true } ]
+            },
+            "annotate": {
+              "method": "PUT",
+              "target": "/note",
+              "contentType": "application/json; charset=utf-8",
+              "properties": [ { "name": "text", "required": true } ]
             }
           }
         }
@@ -62,6 +68,25 @@ public class CairnClientSubmitTests
 
         var doc = (await client.GetAsync<SubmitDoc>("/doc")).EnsureSuccess();
         var result = await doc.SubmitAsync<SubmitEcho>("note", new { text = "hello" });
+
+        Assert.True(result.IsSuccess);
+        var echo = result.Resource!.RequireValue();
+        Assert.Equal("application/json", echo.ContentType);
+        Assert.Equal("PUT", echo.Method);
+        Assert.Equal("hello", echo.Reason);
+    }
+
+    [Fact]
+    public async Task A_parameterized_json_content_type_is_submitted_as_json()
+    {
+        await using var app = await StartAsync();
+        using var httpClient = app.GetTestClient();
+        var client = new CairnClient(httpClient);
+
+        var doc = (await client.GetAsync<SubmitDoc>("/doc")).EnsureSuccess();
+
+        // "application/json; charset=utf-8" is still JSON: the parsed media type decides, not the raw string.
+        var result = await doc.SubmitAsync<SubmitEcho>("annotate", new { text = "hello" });
 
         Assert.True(result.IsSuccess);
         var echo = result.Resource!.RequireValue();

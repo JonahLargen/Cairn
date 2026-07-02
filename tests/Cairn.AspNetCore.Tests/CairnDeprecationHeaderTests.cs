@@ -2,6 +2,7 @@ using System.Globalization;
 using Cairn.AspNetCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -63,6 +64,40 @@ public class CairnDeprecationHeaderTests
     }
 
     [Fact]
+    public async Task WithDeprecation_emits_all_headers_on_an_mvc_controller_endpoint()
+    {
+        var deprecatedAt = new DateTimeOffset(2026, 1, 15, 0, 0, 0, TimeSpan.Zero);
+        var sunset = new DateTimeOffset(2026, 12, 31, 23, 59, 59, TimeSpan.Zero);
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddControllers().AddApplicationPart(typeof(DeprecatedThingsController).Assembly);
+        builder.Services.AddCairn();
+
+        await using var app = builder.Build();
+
+        // The endpoint-filter implementation compiled fine here but silently emitted nothing: endpoint
+        // filters never run for controller actions. Metadata + middleware must reach them.
+        app.MapControllers()
+            .WithDeprecation(sunset: sunset, link: "https://docs.example.com/deprecations/things", deprecatedAt: deprecatedAt);
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/deprecated-things/7");
+        response.EnsureSuccessStatusCode();
+
+        var deprecation = Assert.Single(response.Headers.GetValues("Deprecation"));
+        Assert.Equal($"@{deprecatedAt.ToUnixTimeSeconds()}", deprecation);
+
+        var sunsetHeader = Assert.Single(response.Headers.GetValues("Sunset"));
+        Assert.Equal(sunset.UtcDateTime.ToString("R", CultureInfo.InvariantCulture), sunsetHeader);
+
+        Assert.Contains(response.Headers.GetValues("Link"), v => v.Contains("rel=\"deprecation\"", StringComparison.Ordinal)
+            && v.Contains("https://docs.example.com/deprecations/things", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task WithDeprecation_composes_with_WithLinks()
     {
         var builder = WebApplication.CreateBuilder();
@@ -81,4 +116,12 @@ public class CairnDeprecationHeaderTests
         Assert.True(response.Headers.Contains("Deprecation"));
         Assert.True(response.Headers.Contains("Sunset"));
     }
+}
+
+[ApiController]
+[Route("deprecated-things")]
+public sealed class DeprecatedThingsController : ControllerBase
+{
+    [HttpGet("{id:int}")]
+    public object Get(int id) => new { id };
 }

@@ -3,17 +3,18 @@ using System.Collections.Concurrent;
 namespace Cairn.AspNetCore.Internal;
 
 /// <summary>
-/// Process-wide once-only gate for diagnostics: the first caller to mark a (category, key) pair wins, so a
-/// misconfiguration is logged once instead of on every request. Replaces the per-diagnostic static
-/// dictionaries that used to accumulate across the codebase.
+/// Once-only gate for diagnostics: the first caller to mark a (category, key) pair wins, so a
+/// misconfiguration is logged once instead of on every request. Registered as a singleton by
+/// <c>AddCairn</c>, so the gate is per host container — a second host in the same process (test
+/// suites, side-by-side hosts) gets its own diagnostics rather than losing them to another host's marks.
 /// </summary>
-internal static class WarnOnce
+internal sealed class WarnOnce
 {
-    private static readonly ConcurrentDictionary<string, bool> Marked = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _marked = new(StringComparer.Ordinal);
 
-    /// <summary>Whether this is the first time the (category, key) pair is seen in the process.</summary>
-    public static bool Mark(string category, string key) => Marked.TryAdd($"{category}|{key}", true);
+    /// <summary>Whether this is the first time the (category, key) pair is seen by this host.</summary>
+    public bool Mark(string category, string key) => _marked.TryAdd($"{category}|{key}", true);
 
-    /// <summary>Whether this is the first time the (category, type) pair is seen in the process.</summary>
-    public static bool Mark(string category, Type type) => Mark(category, type.FullName ?? type.Name);
+    /// <summary>Whether this is the first time the (category, type) pair is seen by this host.</summary>
+    public bool Mark(string category, Type type) => Mark(category, type.FullName ?? type.Name);
 }
