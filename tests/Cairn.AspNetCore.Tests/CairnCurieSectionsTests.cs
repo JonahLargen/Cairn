@@ -1,0 +1,90 @@
+using System.Text.Json;
+using Cairn;
+using Cairn.AspNetCore;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
+namespace Cairn.AspNetCore.Tests;
+
+// Curies must be surfaced for a curie-prefixed rel used in any rel-keyed section — not only _links.
+public class CairnCurieSectionsTests
+{
+    [Fact]
+    public async Task A_curied_affordance_name_surfaces_the_curie_in_links()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.AddCurie("acme", "https://docs.example.com/rels/{rel}");
+            o.AddLinks(new AffordanceCurieLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/ca/{id:int}", (int id) => TypedResults.Ok(new CurieSectionOrder(id))).WithName("CaGetOrder").WithLinks();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var root = JsonDocument.Parse(await client.GetStringAsync("/ca/7")).RootElement;
+
+        Assert.True(root.GetProperty("_actions").TryGetProperty("acme:reorder", out _));
+
+        var curies = root.GetProperty("_links").GetProperty("curies");
+        Assert.Equal(JsonValueKind.Array, curies.ValueKind);
+        Assert.Equal("acme", curies[0].GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task A_curied_embedded_rel_surfaces_the_curie_in_links()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.AddCurie("acme", "https://docs.example.com/rels/{rel}");
+            o.AddLinks(new EmbeddedCurieLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/ce/{id:int}", (int id) => TypedResults.Ok(new CurieSectionOrder(id))).WithName("CeGetOrder").WithLinks();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var root = JsonDocument.Parse(await client.GetStringAsync("/ce/7")).RootElement;
+
+        Assert.True(root.GetProperty("_embedded").TryGetProperty("acme:child", out _));
+
+        var curies = root.GetProperty("_links").GetProperty("curies");
+        Assert.Equal("acme", curies[0].GetProperty("name").GetString());
+    }
+
+    private sealed record CurieSectionOrder(int Id)
+    {
+        public CurieSectionChild Child { get; } = new(Id);
+    }
+
+    private sealed record CurieSectionChild(int Id);
+
+    private sealed class AffordanceCurieLinks : LinkConfig<CurieSectionOrder>
+    {
+        public override void Configure(ILinkBuilder<CurieSectionOrder> builder)
+        {
+            builder.Self(o => LinkTarget.Uri($"/ca/{o.Id}"));
+            builder.Affordance("acme:reorder", o => LinkTarget.Uri($"/ca/{o.Id}/reorder")).Post();
+        }
+    }
+
+    private sealed class EmbeddedCurieLinks : LinkConfig<CurieSectionOrder>
+    {
+        public override void Configure(ILinkBuilder<CurieSectionOrder> builder)
+        {
+            builder.Self(o => LinkTarget.Uri($"/ce/{o.Id}"));
+            builder.Embed("acme:child", o => o.Child);
+        }
+    }
+}

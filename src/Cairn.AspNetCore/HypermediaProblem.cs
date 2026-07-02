@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cairn.AspNetCore.Internal;
 using Microsoft.AspNetCore.Http;
 
 namespace Cairn.AspNetCore;
@@ -56,7 +57,9 @@ public sealed class HypermediaProblem : IResult
     /// <inheritdoc />
     public Task ExecuteAsync(HttpContext httpContext)
     {
-        var body = new Dictionary<string, object?>(StringComparer.Ordinal);
+        // Keys serialize verbatim: RFC 9457 members, extension names, and rels must never be renamed by the
+        // host's DictionaryKeyPolicy.
+        var body = new VerbatimKeyDictionary<object?>();
         if (Type is not null)
         {
             body["type"] = Type;
@@ -100,29 +103,42 @@ public sealed class HypermediaProblem : IResult
         return httpContext.Response.WriteAsJsonAsync(body, (JsonSerializerOptions?)null, "application/problem+json");
     }
 
-    private Dictionary<string, object?> BuildLinks()
+    // Mirrors the main formatter: one link per rel emits a HAL link object, several sharing a rel emit a HAL
+    // link array in declaration order (rels compare case-insensitively per RFC 8288).
+    private VerbatimKeyDictionary<object?> BuildLinks()
     {
-        var links = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var links = new VerbatimKeyDictionary<object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (relation, href, title) in _links)
         {
-            var link = new Dictionary<string, object?>(StringComparer.Ordinal) { ["href"] = href };
+            var link = new VerbatimKeyDictionary<object?> { ["href"] = href };
             if (title is not null)
             {
                 link["title"] = title;
             }
 
-            links[relation] = link;
+            if (!links.TryGetValue(relation, out var existing))
+            {
+                links[relation] = link;
+            }
+            else if (existing is List<object?> array)
+            {
+                array.Add(link);
+            }
+            else
+            {
+                links[relation] = new List<object?> { existing, link };
+            }
         }
 
         return links;
     }
 
-    private Dictionary<string, object?> BuildActions()
+    private VerbatimKeyDictionary<object?> BuildActions()
     {
-        var actions = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var actions = new VerbatimKeyDictionary<object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, href, method) in _actions)
         {
-            actions[name] = new Dictionary<string, object?>(StringComparer.Ordinal) { ["href"] = href, ["method"] = method };
+            actions[name] = new VerbatimKeyDictionary<object?> { ["href"] = href, ["method"] = method };
         }
 
         return actions;

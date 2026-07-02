@@ -19,7 +19,8 @@ public sealed class CairnOptions
 {
     private readonly Dictionary<Type, Func<object, IPagedResource>> _paging = [];
     private readonly Dictionary<Type, Func<object, ICursorPagedResource>> _cursorPaging = [];
-    private readonly Dictionary<string, string> _curies = new(StringComparer.Ordinal);
+    // Curie prefixes are rel prefixes, and rels compare case-insensitively (RFC 8288).
+    private readonly Dictionary<string, string> _curies = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<IHypermediaFormatter> _formatters = [];
     private Uri? _publicBaseUri;
 

@@ -26,24 +26,28 @@ public sealed class RouteNameCodeFixProvider : CodeFixProvider
     /// <inheritdoc />
     public override async Task RegisterCodeFixesAsync(CodeFixContext context)
     {
-        var diagnostic = context.Diagnostics[0];
-        if (!diagnostic.Properties.TryGetValue("suggestion", out var suggestion) || string.IsNullOrEmpty(suggestion))
-        {
-            return;
-        }
-
         var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
-        if (FindLiteral(root, diagnostic.Location.SourceSpan) is not { } literal)
-        {
-            return;
-        }
 
-        context.RegisterCodeFix(
-            CodeAction.Create(
-                title: $"Change route name to '{suggestion}'",
-                createChangedDocument: cancellationToken => ReplaceAsync(context.Document, literal, suggestion!, cancellationToken),
-                equivalenceKey: "CairnUseSuggestedRouteName"),
-            diagnostic);
+        // The context can carry several diagnostics for the same span; offer a fix for each one.
+        foreach (var diagnostic in context.Diagnostics)
+        {
+            if (!diagnostic.Properties.TryGetValue("suggestion", out var suggestion) || string.IsNullOrEmpty(suggestion))
+            {
+                continue;
+            }
+
+            if (FindLiteral(root, diagnostic.Location.SourceSpan) is not { } literal)
+            {
+                continue;
+            }
+
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    title: $"Change route name to '{suggestion}'",
+                    createChangedDocument: cancellationToken => ReplaceAsync(context.Document, literal, suggestion!, cancellationToken),
+                    equivalenceKey: "CairnUseSuggestedRouteName:" + suggestion),
+                diagnostic);
+        }
     }
 
     private static LiteralExpressionSyntax? FindLiteral(SyntaxNode? root, Microsoft.CodeAnalysis.Text.TextSpan span)

@@ -35,7 +35,7 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
             {
                 if (ResolveHref(spec.Relation, target, context) is { } href)
                 {
-                    var templated = target is ExplicitLinkTarget { Templated: true };
+                    var templated = target is ExplicitLinkTarget { Templated: true } or RouteTemplateLinkTarget;
 
                     // Per-target attributes (LinkTarget.With*) override the spec-level ones, so members of a
                     // multi-link relation can each carry their own name/title/hreflang/....
@@ -63,7 +63,7 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
             var target = await spec.Target(typed, context).ConfigureAwait(false);
             if (ResolveHref(spec.Relation, target, context) is { } href)
             {
-                affordances.Add(new Affordance(spec.Relation, href, spec.HttpMethod) { Title = target.Title ?? spec.TitleText, Input = spec.InputType, ContentType = spec.ContentTypeText });
+                affordances.Add(new Affordance(spec.Relation, href, spec.HttpMethod) { Title = target.Title ?? spec.TitleText, Input = spec.InputType, ContentType = spec.ContentTypeText, IsDefault = spec.IsDefault });
             }
         }
 
@@ -125,6 +125,7 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
     private static string Describe(LinkTarget target) => target switch
     {
         RouteLinkTarget route => $"route '{route.RouteName}'",
+        RouteTemplateLinkTarget template => $"route template '{template.RouteName}'",
         ExplicitLinkTarget uri => $"URI '{uri.Href}'",
         _ => "the target",
     };

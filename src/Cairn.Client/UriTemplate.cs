@@ -228,18 +228,22 @@ internal static class UriTemplate
         }
 
         // Reserved expansion: leave unreserved + reserved (gen-delims/sub-delims) and existing %-escapes intact.
+        // Iterate by code point, not UTF-16 unit: encoding each half of a surrogate pair separately would
+        // yield U+FFFD replacement bytes (%EF%BF%BD) and corrupt astral characters such as emoji.
         var builder = new StringBuilder(value.Length);
-        foreach (var ch in value)
+        Span<byte> utf8 = stackalloc byte[4];
+        foreach (var rune in value.EnumerateRunes())
         {
-            if (IsUnreserved(ch) || IsReserved(ch))
+            if (rune.IsAscii && (IsUnreserved((char)rune.Value) || IsReserved((char)rune.Value)))
             {
-                builder.Append(ch);
+                builder.Append((char)rune.Value);
             }
             else
             {
-                foreach (var b in Encoding.UTF8.GetBytes([ch]))
+                var length = rune.EncodeToUtf8(utf8);
+                for (var i = 0; i < length; i++)
                 {
-                    builder.Append('%').Append(b.ToString("X2", CultureInfo.InvariantCulture));
+                    builder.Append('%').Append(utf8[i].ToString("X2", CultureInfo.InvariantCulture));
                 }
             }
         }

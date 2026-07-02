@@ -135,6 +135,13 @@ public interface IAffordanceSpec<T>
     /// <summary>Sets the content type the action's input is submitted as (HAL-FORMS <c>contentType</c>, e.g. <c>multipart/form-data</c>).</summary>
     IAffordanceSpec<T> ContentType(string contentType);
 
+    /// <summary>
+    /// Marks this affordance as the resource's primary action. In HAL-FORMS it is emitted under the reserved
+    /// <c>default</c> template key (the key HAL-FORMS clients look up first); other formats keep the
+    /// affordance's declared name.
+    /// </summary>
+    IAffordanceSpec<T> AsDefault();
+
     /// <summary>Sets a human-readable title.</summary>
     IAffordanceSpec<T> Title(string title);
 
