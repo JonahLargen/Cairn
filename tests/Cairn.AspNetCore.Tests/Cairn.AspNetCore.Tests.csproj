@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <!-- Microsoft.AspNetCore.OpenApi's XML-comment source generator emits interceptors. -->
     <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
   </PropertyGroup>
@@ -27,9 +27,13 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cairn.AspNetCore\Cairn.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Cairn.Testing\Cairn.Testing.csproj" />
-    <ProjectReference Include="..\..\src\Cairn.OpenApi\Cairn.OpenApi.csproj" />
     <ProjectReference Include="..\..\src\Cairn.Swashbuckle\Cairn.Swashbuckle.csproj" />
     <ProjectReference Include="..\..\src\Cairn.Client\Cairn.Client.csproj" />
+  </ItemGroup>
+
+  <!-- Cairn.OpenApi builds on Microsoft.AspNetCore.OpenApi's document pipeline, which exists only on net10.0. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <ProjectReference Include="..\..\src\Cairn.OpenApi\Cairn.OpenApi.csproj" />
   </ItemGroup>
 
 </Project>
