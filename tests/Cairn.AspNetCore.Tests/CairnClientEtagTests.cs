@@ -49,7 +49,43 @@ public class CairnClientEtagTests
 
         Assert.True(result.IsNotModified);
         Assert.Equal(304, result.Status);
-        Assert.False(result.IsSuccess);
+
+        // 304 is a non-error outcome: the result is successful (the cached copy is fresh), carries no
+        // problem, and EnsureSuccess yields a bodiless resource instead of throwing.
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Problem);
+        var resource = result.EnsureSuccess();
+        Assert.Null(resource.Value);
+        Assert.Equal("\"v1\"", resource.ETag);
+    }
+
+    [Fact]
+    public async Task A_304_from_an_invoked_affordance_is_not_a_failure()
+    {
+        await using var app = await StartAsync();
+        using var httpClient = app.GetTestClient();
+        var client = new CairnClient(httpClient);
+
+        var result = await client.InvokeAsync(new Affordance("check", "/always-304", "POST"));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.IsNotModified);
+        Assert.Null(result.Problem);
+        result.EnsureSuccess();   // does not throw
+    }
+
+    [Fact]
+    public async Task A_304_collection_response_is_a_bodiless_success()
+    {
+        await using var app = await StartAsync();
+        using var httpClient = app.GetTestClient();
+        var client = new CairnClient(httpClient);
+
+        var result = await client.GetCollectionAsync<EtagOrder>("/always-304");
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.IsNotModified);
+        Assert.Empty(result.EnsureSuccess().Items);
     }
 
     private static async Task<WebApplication> StartAsync()
@@ -59,6 +95,8 @@ public class CairnClientEtagTests
         builder.Services.AddCairn(o => o.AddLinks(new EtagOrderLinks()));
 
         var app = builder.Build();
+        app.MapGet("/always-304", () => Results.StatusCode(304));
+        app.MapPost("/always-304", () => Results.StatusCode(304));
         app.MapGet("/orders/{id:int}", (int id, HttpContext http) =>
             {
                 http.Response.Headers.ETag = "\"v1\"";

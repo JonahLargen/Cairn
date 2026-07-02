@@ -103,14 +103,25 @@ internal sealed class CairnLinkInjectionModifier
     }
 
     private static IReadOnlyDictionary<string, HalFormsTemplate>? ToTemplates(IReadOnlyDictionary<string, HalAction>? actions)
-        => actions is null
-            ? null
-            : actions.ToDictionary(
-                a => a.Key,
-                a => new HalFormsTemplate(a.Value.Method, a.Value.Href)
-                {
-                    Title = a.Value.Title,
-                    ContentType = a.Value.ContentType ?? "application/json",
-                    Properties = HalFormsSchema.For(a.Value.Input),
-                });
+    {
+        if (actions is null)
+        {
+            return null;
+        }
+
+        // Template names serialize verbatim (never renamed by DictionaryKeyPolicy); an affordance marked
+        // AsDefault() emits under the reserved "default" key HAL-FORMS clients look up first.
+        var templates = new VerbatimKeyDictionary<HalFormsTemplate>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, action) in actions)
+        {
+            templates[action.IsDefault ? "default" : name] = new HalFormsTemplate(action.Method, action.Href)
+            {
+                Title = action.Title,
+                ContentType = action.ContentType ?? "application/json",
+                Properties = HalFormsSchema.For(action.Input),
+            };
+        }
+
+        return templates;
+    }
 }

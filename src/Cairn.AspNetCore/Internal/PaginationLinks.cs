@@ -62,10 +62,16 @@ internal static class PaginationLinks
     public static string DefaultPageUrl(HttpRequest request, int page, string pageParameter, CairnOptions options)
         => SwapQueryParam(request, pageParameter, page.ToString(CultureInfo.InvariantCulture), options);
 
-    /// <summary>The current request URL with a single query parameter set to <paramref name="value"/>.</summary>
+    /// <summary>
+    /// The current request URL with a single query parameter set to <paramref name="value"/>. The parameter is
+    /// matched case-insensitively (ASP.NET Core binds query keys case-insensitively), and an incoming key's
+    /// original casing is preserved in the rewritten URL.
+    /// </summary>
     public static string SwapQueryParam(HttpRequest request, string name, string value, CairnOptions options)
     {
-        var query = new Dictionary<string, StringValues>(QueryHelpers.ParseQuery(request.QueryString.Value))
+        // ParseQuery already folds keys case-insensitively; copying with the same comparer makes the indexer
+        // replace an existing "Page" (keeping its casing) instead of appending a second "page".
+        var query = new Dictionary<string, StringValues>(QueryHelpers.ParseQuery(request.QueryString.Value), StringComparer.OrdinalIgnoreCase)
         {
             [name] = value,
         };

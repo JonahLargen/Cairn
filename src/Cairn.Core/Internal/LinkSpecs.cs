@@ -105,6 +105,8 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
 
     public string? ContentTypeText { get; private set; }
 
+    public bool IsDefault { get; private set; }
+
     public IAffordanceSpec<T> Method(string httpMethod)
     {
         HttpMethod = httpMethod;
@@ -130,6 +132,12 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
     public IAffordanceSpec<T> ContentType(string contentType)
     {
         ContentTypeText = contentType;
+        return this;
+    }
+
+    public IAffordanceSpec<T> AsDefault()
+    {
+        IsDefault = true;
         return this;
     }
 

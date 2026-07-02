@@ -14,7 +14,11 @@ public sealed class ClientResult<T>
         Problem = problem;
     }
 
-    /// <summary>Whether the response had a success (2xx) status. When <see langword="true"/>, <see cref="Resource"/> is non-null; otherwise <see cref="Problem"/> is non-null.</summary>
+    /// <summary>
+    /// Whether the request succeeded — a 2xx status, or <c>304 Not Modified</c> for a conditional request
+    /// (see <see cref="IsNotModified"/>). When <see langword="true"/>, <see cref="Resource"/> is non-null;
+    /// otherwise <see cref="Problem"/> is non-null.
+    /// </summary>
     [MemberNotNullWhen(true, nameof(Resource))]
     [MemberNotNullWhen(false, nameof(Problem))]
     public bool IsSuccess { get; }
@@ -22,10 +26,13 @@ public sealed class ClientResult<T>
     /// <summary>The HTTP status code.</summary>
     public int Status { get; }
 
-    /// <summary>Whether the server returned <c>304 Not Modified</c> (in response to a conditional GET).</summary>
+    /// <summary>
+    /// Whether the server returned <c>304 Not Modified</c> (in response to a conditional GET). The result is
+    /// successful but carries no body — keep using the cached representation the ETag was taken from.
+    /// </summary>
     public bool IsNotModified => Status == 304;
 
-    /// <summary>The resource and its hypermedia, when <see cref="IsSuccess"/>.</summary>
+    /// <summary>The resource and its hypermedia, when <see cref="IsSuccess"/>. Empty (no value) on a <c>304</c>.</summary>
     public Resource<T>? Resource { get; }
 
     /// <summary>The resource's deserialized value on success, otherwise <see langword="default"/>. A shortcut for <c>Resource?.Value</c>.</summary>
@@ -34,7 +41,7 @@ public sealed class ClientResult<T>
     /// <summary>The parsed problem detail, when not <see cref="IsSuccess"/>.</summary>
     public Problem? Problem { get; }
 
-    /// <summary>Returns the <see cref="Resource"/> on success, otherwise throws.</summary>
+    /// <summary>Returns the <see cref="Resource"/> on success, otherwise throws. On a <c>304</c> the resource is empty — no body was sent.</summary>
     /// <exception cref="CairnClientException">The response was an HTTP error status.</exception>
     public Resource<T> EnsureSuccess()
         => IsSuccess ? Resource! : throw new CairnClientException(Status, Problem);
@@ -54,12 +61,18 @@ public sealed class ClientResult
         Problem = problem;
     }
 
-    /// <summary>Whether the response had a success (2xx) status. When <see langword="false"/>, <see cref="Problem"/> is non-null.</summary>
+    /// <summary>
+    /// Whether the request succeeded — a 2xx status, or <c>304 Not Modified</c> for a conditional request
+    /// (see <see cref="IsNotModified"/>). When <see langword="false"/>, <see cref="Problem"/> is non-null.
+    /// </summary>
     [MemberNotNullWhen(false, nameof(Problem))]
     public bool IsSuccess { get; }
 
     /// <summary>The HTTP status code.</summary>
     public int Status { get; }
+
+    /// <summary>Whether the server returned <c>304 Not Modified</c> (in response to a conditional request).</summary>
+    public bool IsNotModified => Status == 304;
 
     /// <summary>The parsed problem detail, when not <see cref="IsSuccess"/>.</summary>
     public Problem? Problem { get; }

@@ -27,20 +27,21 @@ public interface ILinkConfigProvider
 /// </summary>
 public sealed class LinkConfigRegistry : ILinkConfigProvider
 {
-    // Concurrent because registration is not confined to startup (Add is public) while requests resolve
-    // configs concurrently through GetConfig.
-    private readonly ConcurrentDictionary<Type, ICompiledLinkConfig> _configs = new();
+    private readonly object _writeLock = new();
 
-    // Caches the per-runtime-type resolution (including negative results); invalidated on Add.
-    private readonly ConcurrentDictionary<Type, ICompiledLinkConfig?> _resolved = new();
+    // Both maps are replaced wholesale (copy-on-write) rather than mutated, so lock-free readers always see
+    // a consistent snapshot. The cache holds per-runtime-type resolutions (including negative results); Add
+    // publishes a fresh cache *after* the new config map, so a GetConfig racing an Add can only ever store a
+    // stale negative into the generation being discarded — never into the current one.
+    private Dictionary<Type, ICompiledLinkConfig> _configs = [];
+    private ConcurrentDictionary<Type, ICompiledLinkConfig?> _resolved = new();
 
     /// <summary>Registers the config for <typeparamref name="T"/>, replacing any existing one.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="config"/> is null.</exception>
     public LinkConfigRegistry Add<T>(LinkConfig<T> config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        _configs[typeof(T)] = CompiledLinkConfig<T>.Compile(config);
-        _resolved.Clear();
+        Publish(typeof(T), CompiledLinkConfig<T>.Compile(config));
         return this;
     }
 
@@ -53,12 +54,25 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
         var resourceType = ResourceTypeOf(config.GetType())
             ?? throw new ArgumentException($"'{config.GetType().Name}' does not derive from LinkConfig<T>.", nameof(config));
 
-        _configs[resourceType] = (ICompiledLinkConfig)typeof(CompiledLinkConfig<>)
+        var compiled = (ICompiledLinkConfig)typeof(CompiledLinkConfig<>)
             .MakeGenericType(resourceType)
             .GetMethod(nameof(CompiledLinkConfig<object>.Compile), BindingFlags.Public | BindingFlags.Static)!
             .Invoke(null, [config])!;
-        _resolved.Clear();
+        Publish(resourceType, compiled);
         return this;
+    }
+
+    private void Publish(Type resourceType, ICompiledLinkConfig compiled)
+    {
+        lock (_writeLock)
+        {
+            var configs = new Dictionary<Type, ICompiledLinkConfig>(_configs) { [resourceType] = compiled };
+            _configs = configs;
+
+            // Release-publish an empty cache after the config map: a reader that acquires this cache is
+            // guaranteed to resolve against (at least) the config map above.
+            Volatile.Write(ref _resolved, new ConcurrentDictionary<Type, ICompiledLinkConfig?>());
+        }
     }
 
     private static Type? ResourceTypeOf(Type configType)
@@ -81,14 +95,19 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
     public ICompiledLinkConfig? GetConfig(Type resourceType)
     {
         ArgumentNullException.ThrowIfNull(resourceType);
-        return _resolved.GetOrAdd(resourceType, Resolve);
+
+        // Acquire the current cache generation once; a concurrent Add swaps in a fresh generation, so any
+        // stale (possibly negative) entry this call computes lands only in the abandoned snapshot.
+        var resolved = Volatile.Read(ref _resolved);
+        return resolved.GetOrAdd(resourceType, Resolve);
     }
 
     private ICompiledLinkConfig? Resolve(Type resourceType)
     {
+        var configs = _configs;
         for (var type = resourceType; type is not null; type = type.BaseType)
         {
-            if (_configs.TryGetValue(type, out var config))
+            if (configs.TryGetValue(type, out var config))
             {
                 return config;
             }

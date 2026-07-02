@@ -1,6 +1,4 @@
 #nullable enable
-abstract Cairn.LinkConfig<T>.Configure(Cairn.ILinkBuilder<T>! builder) -> void
-abstract Cairn.LinkTarget.<Clone>$() -> Cairn.LinkTarget!
 Cairn.Affordance
 Cairn.Affordance.<Clone>$() -> Cairn.Affordance!
 Cairn.Affordance.Affordance(Cairn.LinkRelation name, string! href, string! method) -> void
@@ -11,6 +9,8 @@ Cairn.Affordance.Href.get -> string!
 Cairn.Affordance.Href.init -> void
 Cairn.Affordance.Input.get -> System.Type?
 Cairn.Affordance.Input.init -> void
+Cairn.Affordance.IsDefault.get -> bool
+Cairn.Affordance.IsDefault.init -> void
 Cairn.Affordance.Method.get -> string!
 Cairn.Affordance.Method.init -> void
 Cairn.Affordance.Name.get -> Cairn.LinkRelation
@@ -38,6 +38,7 @@ Cairn.ExplicitLinkTarget.Templated.get -> bool
 Cairn.ExplicitLinkTarget.Templated.init -> void
 Cairn.IAffordanceSpec<T>
 Cairn.IAffordanceSpec<T>.Accepts<TInput>() -> Cairn.IAffordanceSpec<T>!
+Cairn.IAffordanceSpec<T>.AsDefault() -> Cairn.IAffordanceSpec<T>!
 Cairn.IAffordanceSpec<T>.ContentType(string! contentType) -> Cairn.IAffordanceSpec<T>!
 Cairn.IAffordanceSpec<T>.Delete() -> Cairn.IAffordanceSpec<T>!
 Cairn.IAffordanceSpec<T>.Get() -> Cairn.IAffordanceSpec<T>!
@@ -48,10 +49,9 @@ Cairn.IAffordanceSpec<T>.Put() -> Cairn.IAffordanceSpec<T>!
 Cairn.IAffordanceSpec<T>.RequireAuthorization() -> Cairn.IAffordanceSpec<T>!
 Cairn.IAffordanceSpec<T>.RequireAuthorization(string! policy) -> Cairn.IAffordanceSpec<T>!
 Cairn.IAffordanceSpec<T>.Title(string! title) -> Cairn.IAffordanceSpec<T>!
-Cairn.IAffordanceSpec<T>.When(System.Func<T, bool>! condition) -> Cairn.IAffordanceSpec<T>!
-Cairn.IAffordanceSpec<T>.When(System.Func<T, Cairn.LinkContext!, bool>! condition) -> Cairn.IAffordanceSpec<T>!
 Cairn.IAffordanceSpec<T>.When(System.Func<T, Cairn.LinkContext!, System.Threading.Tasks.ValueTask<bool>>! condition) -> Cairn.IAffordanceSpec<T>!
-Cairn.IanaLinkRelations
+Cairn.IAffordanceSpec<T>.When(System.Func<T, Cairn.LinkContext!, bool>! condition) -> Cairn.IAffordanceSpec<T>!
+Cairn.IAffordanceSpec<T>.When(System.Func<T, bool>! condition) -> Cairn.IAffordanceSpec<T>!
 Cairn.ICompiledLinkConfig
 Cairn.ICompiledLinkConfig.BuildAsync(object! resource, Cairn.LinkContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Cairn.LinkSet!>
 Cairn.ILinkAuthorizer
@@ -83,11 +83,12 @@ Cairn.ILinkSpec<T>.RequireAuthorization() -> Cairn.ILinkSpec<T>!
 Cairn.ILinkSpec<T>.RequireAuthorization(string! policy) -> Cairn.ILinkSpec<T>!
 Cairn.ILinkSpec<T>.Title(string! title) -> Cairn.ILinkSpec<T>!
 Cairn.ILinkSpec<T>.Type(string! mediaType) -> Cairn.ILinkSpec<T>!
-Cairn.ILinkSpec<T>.When(System.Func<T, bool>! condition) -> Cairn.ILinkSpec<T>!
-Cairn.ILinkSpec<T>.When(System.Func<T, Cairn.LinkContext!, bool>! condition) -> Cairn.ILinkSpec<T>!
 Cairn.ILinkSpec<T>.When(System.Func<T, Cairn.LinkContext!, System.Threading.Tasks.ValueTask<bool>>! condition) -> Cairn.ILinkSpec<T>!
+Cairn.ILinkSpec<T>.When(System.Func<T, Cairn.LinkContext!, bool>! condition) -> Cairn.ILinkSpec<T>!
+Cairn.ILinkSpec<T>.When(System.Func<T, bool>! condition) -> Cairn.ILinkSpec<T>!
 Cairn.ILinkUrlResolver
 Cairn.ILinkUrlResolver.Resolve(Cairn.LinkTarget! target) -> string?
+Cairn.IanaLinkRelations
 Cairn.Link
 Cairn.Link.<Clone>$() -> Cairn.Link!
 Cairn.Link.Deprecation.get -> string?
@@ -145,8 +146,8 @@ Cairn.LinkSet
 Cairn.LinkSet.Affordances.get -> System.Collections.Generic.IReadOnlyList<Cairn.Affordance!>!
 Cairn.LinkSet.Embedded.get -> System.Collections.Generic.IReadOnlyList<Cairn.EmbeddedResource!>!
 Cairn.LinkSet.IsEmpty.get -> bool
-Cairn.LinkSet.Links.get -> System.Collections.Generic.IReadOnlyList<Cairn.Link!>!
 Cairn.LinkSet.LinkSet(System.Collections.Generic.IReadOnlyList<Cairn.Link!>! links, System.Collections.Generic.IReadOnlyList<Cairn.Affordance!>! affordances, System.Collections.Generic.IReadOnlyList<Cairn.EmbeddedResource!>? embedded = null) -> void
+Cairn.LinkSet.Links.get -> System.Collections.Generic.IReadOnlyList<Cairn.Link!>!
 Cairn.LinkTarget
 Cairn.LinkTarget.Deprecation.get -> string?
 Cairn.LinkTarget.Deprecation.init -> void
@@ -175,6 +176,14 @@ Cairn.RouteLinkTarget.RouteName.get -> string!
 Cairn.RouteLinkTarget.RouteName.init -> void
 Cairn.RouteLinkTarget.RouteValues.get -> object?
 Cairn.RouteLinkTarget.RouteValues.init -> void
+Cairn.RouteTemplateLinkTarget
+Cairn.RouteTemplateLinkTarget.Deconstruct(out string! RouteName, out object? RouteValues) -> void
+Cairn.RouteTemplateLinkTarget.Equals(Cairn.RouteTemplateLinkTarget? other) -> bool
+Cairn.RouteTemplateLinkTarget.RouteName.get -> string!
+Cairn.RouteTemplateLinkTarget.RouteName.init -> void
+Cairn.RouteTemplateLinkTarget.RouteTemplateLinkTarget(string! RouteName, object? RouteValues) -> void
+Cairn.RouteTemplateLinkTarget.RouteValues.get -> object?
+Cairn.RouteTemplateLinkTarget.RouteValues.init -> void
 Cairn.UnresolvedLink
 Cairn.UnresolvedLink.<Clone>$() -> Cairn.UnresolvedLink!
 Cairn.UnresolvedLink.Deconstruct(out System.Type! ResourceType, out Cairn.LinkRelation Relation, out Cairn.LinkTarget! Target) -> void
@@ -186,6 +195,8 @@ Cairn.UnresolvedLink.ResourceType.init -> void
 Cairn.UnresolvedLink.Target.get -> Cairn.LinkTarget!
 Cairn.UnresolvedLink.Target.init -> void
 Cairn.UnresolvedLink.UnresolvedLink(System.Type! ResourceType, Cairn.LinkRelation Relation, Cairn.LinkTarget! Target) -> void
+abstract Cairn.LinkConfig<T>.Configure(Cairn.ILinkBuilder<T>! builder) -> void
+abstract Cairn.LinkTarget.<Clone>$() -> Cairn.LinkTarget!
 override Cairn.Affordance.Equals(object? obj) -> bool
 override Cairn.Affordance.GetHashCode() -> int
 override Cairn.Affordance.ToString() -> string!
@@ -208,11 +219,16 @@ override Cairn.RouteLinkTarget.<Clone>$() -> Cairn.RouteLinkTarget!
 override Cairn.RouteLinkTarget.Equals(object? obj) -> bool
 override Cairn.RouteLinkTarget.GetHashCode() -> int
 override Cairn.RouteLinkTarget.ToString() -> string!
+override Cairn.RouteTemplateLinkTarget.<Clone>$() -> Cairn.RouteTemplateLinkTarget!
+override Cairn.RouteTemplateLinkTarget.Equals(object? obj) -> bool
+override Cairn.RouteTemplateLinkTarget.GetHashCode() -> int
+override Cairn.RouteTemplateLinkTarget.ToString() -> string!
 override Cairn.UnresolvedLink.Equals(object? obj) -> bool
 override Cairn.UnresolvedLink.GetHashCode() -> int
 override Cairn.UnresolvedLink.ToString() -> string!
 override sealed Cairn.ExplicitLinkTarget.Equals(Cairn.LinkTarget? other) -> bool
 override sealed Cairn.RouteLinkTarget.Equals(Cairn.LinkTarget? other) -> bool
+override sealed Cairn.RouteTemplateLinkTarget.Equals(Cairn.LinkTarget? other) -> bool
 static Cairn.Affordance.operator !=(Cairn.Affordance? left, Cairn.Affordance? right) -> bool
 static Cairn.Affordance.operator ==(Cairn.Affordance? left, Cairn.Affordance? right) -> bool
 static Cairn.EmbeddedResource.operator !=(Cairn.EmbeddedResource? left, Cairn.EmbeddedResource? right) -> bool
@@ -225,12 +241,15 @@ static Cairn.LinkRelation.FromString(string! value) -> Cairn.LinkRelation
 static Cairn.LinkRelation.implicit operator Cairn.LinkRelation(string! value) -> Cairn.LinkRelation
 static Cairn.LinkRelation.operator !=(Cairn.LinkRelation left, Cairn.LinkRelation right) -> bool
 static Cairn.LinkRelation.operator ==(Cairn.LinkRelation left, Cairn.LinkRelation right) -> bool
+static Cairn.LinkTarget.Route(string! routeName, object? routeValues = null) -> Cairn.LinkTarget!
+static Cairn.LinkTarget.RouteTemplate(string! routeName, object? routeValues = null) -> Cairn.LinkTarget!
+static Cairn.LinkTarget.Uri(string! href, bool templated = false) -> Cairn.LinkTarget!
 static Cairn.LinkTarget.operator !=(Cairn.LinkTarget? left, Cairn.LinkTarget? right) -> bool
 static Cairn.LinkTarget.operator ==(Cairn.LinkTarget? left, Cairn.LinkTarget? right) -> bool
-static Cairn.LinkTarget.Route(string! routeName, object? routeValues = null) -> Cairn.LinkTarget!
-static Cairn.LinkTarget.Uri(string! href, bool templated = false) -> Cairn.LinkTarget!
 static Cairn.RouteLinkTarget.operator !=(Cairn.RouteLinkTarget? left, Cairn.RouteLinkTarget? right) -> bool
 static Cairn.RouteLinkTarget.operator ==(Cairn.RouteLinkTarget? left, Cairn.RouteLinkTarget? right) -> bool
+static Cairn.RouteTemplateLinkTarget.operator !=(Cairn.RouteTemplateLinkTarget? left, Cairn.RouteTemplateLinkTarget? right) -> bool
+static Cairn.RouteTemplateLinkTarget.operator ==(Cairn.RouteTemplateLinkTarget? left, Cairn.RouteTemplateLinkTarget? right) -> bool
 static Cairn.UnresolvedLink.operator !=(Cairn.UnresolvedLink? left, Cairn.UnresolvedLink? right) -> bool
 static Cairn.UnresolvedLink.operator ==(Cairn.UnresolvedLink? left, Cairn.UnresolvedLink? right) -> bool
 static readonly Cairn.IanaLinkRelations.About -> Cairn.LinkRelation

@@ -28,6 +28,13 @@ public abstract record LinkTarget
     /// <summary>Targets a named route, optionally with route values.</summary>
     public static LinkTarget Route(string routeName, object? routeValues = null) => new RouteLinkTarget(routeName, routeValues);
 
+    /// <summary>
+    /// Targets a named route as an RFC 6570 URI template (<c>templated: true</c>): route parameters supplied in
+    /// <paramref name="routeValues"/> are bound into the URL, and the remaining parameters are intentionally
+    /// left as <c>{placeholder}</c> variables for the client to expand (e.g. a <c>search</c> link).
+    /// </summary>
+    public static LinkTarget RouteTemplate(string routeName, object? routeValues = null) => new RouteTemplateLinkTarget(routeName, routeValues);
+
     /// <summary>Targets an explicit URI (or URI template).</summary>
     public static LinkTarget Uri(string href, bool templated = false) => new ExplicitLinkTarget(href, templated);
 
@@ -52,6 +59,12 @@ public abstract record LinkTarget
 
 /// <summary>A target identified by a named route and optional route values.</summary>
 public sealed record RouteLinkTarget(string RouteName, object? RouteValues) : LinkTarget;
+
+/// <summary>
+/// A target rendering a named route as an RFC 6570 URI template: supplied route values are bound, remaining
+/// route parameters stay as <c>{placeholder}</c> variables, and the link is emitted with <c>templated: true</c>.
+/// </summary>
+public sealed record RouteTemplateLinkTarget(string RouteName, object? RouteValues) : LinkTarget;
 
 /// <summary>A target identified by an explicit URI.</summary>
 public sealed record ExplicitLinkTarget(string Href, bool Templated) : LinkTarget;

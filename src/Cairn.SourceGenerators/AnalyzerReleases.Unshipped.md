@@ -5,4 +5,4 @@
 
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
-CAIRN002 | Cairn | Warning | Route name collides in the generated catalog
+CAIRN003 | Cairn | Warning | Route name collides in the generated catalog

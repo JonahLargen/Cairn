@@ -112,6 +112,72 @@ public class CairnUriTemplateTests
         await Assert.ThrowsAsync<NotSupportedException>(() => client.FollowAsync<JsonElement>(new Link("search", "/s{?q}", templated: true)));
     }
 
+    [Fact]
+    public async Task Supplying_variables_for_a_non_templated_link_throws_instead_of_ignoring_them()
+    {
+        using var http = new HttpClient { BaseAddress = new Uri("http://localhost") };
+        var client = new CairnClient(http);
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => client.FollowAsync<JsonElement>(new Link("self", "/plain"), new { page = 2 }));
+
+        Assert.Contains("not templated", exception.Message);
+    }
+
+    [Fact]
+    public async Task Simple_expansion_percent_encodes_astral_characters_as_utf8()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        await client.FollowAsync<JsonElement>(new Link("item", "/items/{name}", templated: true), new { name = "😀" });
+
+        Assert.Contains("%F0%9F%98%80", handler.RequestUri!.AbsoluteUri);
+        Assert.DoesNotContain("%EF%BF%BD", handler.RequestUri.AbsoluteUri);   // no U+FFFD corruption
+    }
+
+    [Fact]
+    public async Task Reserved_expansion_percent_encodes_astral_characters_as_utf8()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        await client.FollowAsync<JsonElement>(new Link("file", "/files{+path}", templated: true), new { path = "/docs/😀.txt" });
+
+        Assert.Contains("/files/docs/%F0%9F%98%80.txt", handler.RequestUri!.AbsoluteUri);
+        Assert.DoesNotContain("%EF%BF%BD", handler.RequestUri.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task Fragment_expansion_percent_encodes_astral_characters_as_utf8()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        await client.FollowAsync<JsonElement>(new Link("doc", "/doc{#section}", templated: true), new { section = "intro😀" });
+
+        Assert.Contains("#intro%F0%9F%98%80", handler.RequestUri!.AbsoluteUri);
+        Assert.DoesNotContain("%EF%BF%BD", handler.RequestUri.AbsoluteUri);
+    }
+
+    private static (CairnClient Client, RecordingHandler Handler) NewRecordingClient()
+    {
+        var handler = new RecordingHandler();
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        return (new CairnClient(http), handler);
+    }
+
+    private sealed class RecordingHandler : HttpMessageHandler
+    {
+        public Uri? RequestUri { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
     private static async Task<WebApplication> StartAsync(Action<WebApplication> endpoints)
     {
         var builder = WebApplication.CreateBuilder();

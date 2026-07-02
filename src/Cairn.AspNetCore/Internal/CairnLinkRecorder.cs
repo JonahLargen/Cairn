@@ -1,5 +1,5 @@
 using System.Collections;
-using System.Collections.Concurrent;
+using System.Reflection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -15,13 +15,6 @@ namespace Cairn.AspNetCore.Internal;
 internal static class CairnLinkRecorder
 {
     private const string EmitDiagnosticKey = "Cairn.EmitDiagnostic";
-
-    private static readonly ConcurrentDictionary<(Type Type, string Relation), byte> WarnedUnresolvedLinks = new();
-    private static readonly ConcurrentDictionary<Type, byte> WarnedHalActionTypes = new();
-    private static readonly ConcurrentDictionary<Type, byte> WarnedValueTypes = new();
-    private static readonly ConcurrentDictionary<Type, byte> WarnedAsyncEnumerableTypes = new();
-    private static readonly ConcurrentDictionary<Type, byte> WarnedUnconfiguredTypes = new();
-    private static readonly ConcurrentDictionary<Type, byte> WarnedUnemittedTypes = new();
 
     // Minimal-API entry point: a handler may return an IResult carrying the value, or the bare value itself.
     // Returns the (possibly substituted) result the endpoint filter should pass down the pipeline.
@@ -192,7 +185,8 @@ internal static class CairnLinkRecorder
             return null;
         }
 
-        var map = new Dictionary<string, object>(StringComparer.Ordinal);
+        // Rels compare case-insensitively (RFC 8288); keys serialize verbatim regardless of DictionaryKeyPolicy.
+        var map = new VerbatimKeyDictionary<object>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in linkSet.Embedded)
         {
             foreach (var child in group.Resources)
@@ -212,6 +206,10 @@ internal static class CairnLinkRecorder
     // relation collision the pagination link wins — it carries the paging state for this request.
     private static async ValueTask RecordEnvelopeAsync(HttpContext http, object envelope, IEnumerable items, Func<IReadOnlyDictionary<string, HalLink>> buildLinks, RecordScope scope)
     {
+        // The serializer enumerates the envelope's items again after this compute pass, so a deferred
+        // sequence must be materialized (and written back onto the envelope) before either pass runs.
+        items = MaterializeEnvelopeItems(envelope, items);
+
         if (scope.Visited.Add(envelope))
         {
             var linkSet = await scope.Engine.BuildAsync(envelope, scope.Context, http.RequestAborted);
@@ -219,7 +217,7 @@ internal static class CairnLinkRecorder
             var embedded = await RecordEmbeddedAsync(http, linkSet, scope);
             var configured = ToPayload(linkSet, embedded, scope.Options.Curies);
 
-            var links = new Dictionary<string, HalLinkValue>(StringComparer.Ordinal);
+            var links = new VerbatimKeyDictionary<HalLinkValue>(StringComparer.OrdinalIgnoreCase);
             if (configured.Links is not null)
             {
                 foreach (var (relation, link) in configured.Links)
@@ -474,13 +472,18 @@ internal static class CairnLinkRecorder
             new KeyValuePair<string, object?>("cairn.resource_type", unresolved.ResourceType.Name),
             new KeyValuePair<string, object?>("cairn.relation", unresolved.Relation.Value));
 
-        if (logger is not null && WarnedUnresolvedLinks.TryAdd((unresolved.ResourceType, unresolved.Relation.Value), 0))
+        if (logger is not null && WarnOnce.Mark("unresolved-link", $"{unresolved.ResourceType.FullName}|{unresolved.Relation.Value}"))
         {
             logger.LogWarning(
                 "Cairn: link '{Relation}' on {ResourceType} targeting {Target} could not be resolved and was dropped (Lax mode). Ensure the endpoint is named (WithName / [Http*(Name=...)]) and all route values are supplied, or use Strict mode to fail instead.",
                 unresolved.Relation.Value,
                 unresolved.ResourceType.Name,
-                unresolved.Target is RouteLinkTarget route ? $"route '{route.RouteName}'" : "an explicit URI");
+                unresolved.Target switch
+                {
+                    RouteLinkTarget route => $"route '{route.RouteName}'",
+                    RouteTemplateLinkTarget template => $"route template '{template.RouteName}'",
+                    _ => "an explicit URI",
+                });
         }
     }
 
@@ -491,7 +494,7 @@ internal static class CairnLinkRecorder
             return;
         }
 
-        if (WarnedHalActionTypes.TryAdd(value.GetType(), 0))
+        if (WarnOnce.Mark("hal-actions", value.GetType()))
         {
             logger.LogWarning(
                 "Cairn: affordances on {ResourceType} are not emitted in HAL format (HAL has no actions). Use HAL-FORMS to include them.",
@@ -508,7 +511,7 @@ internal static class CairnLinkRecorder
             return;
         }
 
-        if (WarnedValueTypes.TryAdd(value.GetType(), 0))
+        if (WarnOnce.Mark("value-type", value.GetType()))
         {
             logger.LogWarning(
                 "Cairn: hypermedia cannot be attached to value type {ResourceType} (links are correlated by reference); use a class or record. No links will be emitted for it.",
@@ -518,7 +521,7 @@ internal static class CairnLinkRecorder
 
     private static void WarnAsyncEnumerable(ILogger? logger, Type elementType)
     {
-        if (logger is not null && WarnedAsyncEnumerableTypes.TryAdd(elementType, 0))
+        if (logger is not null && WarnOnce.Mark("async-enumerable", elementType))
         {
             logger.LogWarning(
                 "Cairn: hypermedia cannot be attached to an IAsyncEnumerable<{ResourceType}> response (links are computed before serialization, and an async stream cannot be enumerated twice). Materialize it first (e.g. ToListAsync()). No links will be emitted for it.",
@@ -541,7 +544,7 @@ internal static class CairnLinkRecorder
             return;
         }
 
-        if (WarnedUnconfiguredTypes.TryAdd(type, 0))
+        if (WarnOnce.Mark("unconfigured", type))
         {
             logger.LogWarning(
                 "Cairn: no link configuration is registered for {ResourceType} or any of its base types; it will serialize without hypermedia. Register a LinkConfig<{ResourceType}> (AddLinks / AddLinksFromAssembly), or remove WithLinks()/[CairnLinks] if this is intended.",
@@ -562,13 +565,16 @@ internal static class CairnLinkRecorder
 
         http.Response.OnCompleted(() =>
         {
-            // An error response may legitimately skip serializing the recorded value.
-            if (http.Response.StatusCode < 400)
+            // Only a success response that carries a body should have emitted the hypermedia: an error skips
+            // serializing the recorded value, and so do bodiless responses — 204/205 and 3xx (e.g. a healthy
+            // conditional GET answered 304 after links were computed).
+            var status = http.Response.StatusCode;
+            if (status is >= 200 and < 300 and not StatusCodes.Status204NoContent and not StatusCodes.Status205ResetContent)
             {
                 foreach (var type in CairnLinkStore.UnemittedTypes(http))
                 {
                     CairnTelemetry.HypermediaUnemitted.Add(1, new KeyValuePair<string, object?>("cairn.resource_type", type.Name));
-                    if (WarnedUnemittedTypes.TryAdd(type, 0))
+                    if (WarnOnce.Mark("unemitted", type))
                     {
                         logger.LogWarning(
                             "Cairn: hypermedia was computed for {ResourceType} but never emitted. Links are correlated by reference between compute and serialization; this usually means a deferred sequence (LINQ projection, IQueryable) produced different instances when serialized. Materialize the sequence (e.g. ToList()) before returning it.",
@@ -620,23 +626,71 @@ internal static class CairnLinkRecorder
     // serialization contract is unchanged) that both the recorder and the serializer share.
     private static IEnumerable BufferSequence(IEnumerable source)
     {
-        Type? elementType = null;
-        foreach (var iface in source.GetType().GetInterfaces())
-        {
-            if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IEnumerable<>))
-            {
-                elementType = iface.GetGenericArguments()[0];
-                break;
-            }
-        }
-
-        var buffer = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(elementType ?? typeof(object)))!;
+        var buffer = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(ElementTypeOf(source)))!;
         foreach (var item in source)
         {
             buffer.Add(item);
         }
 
         return buffer;
+    }
+
+    private static Type ElementTypeOf(IEnumerable source)
+    {
+        foreach (var iface in source.GetType().GetInterfaces())
+        {
+            if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+            {
+                return iface.GetGenericArguments()[0];
+            }
+        }
+
+        return typeof(object);
+    }
+
+    // An envelope's deferred items (a LINQ query, IQueryable, iterator) would be enumerated here and again by
+    // the serializer — running any underlying query twice and, if the second pass yields new instances, losing
+    // every item link. Buffer the sequence once and write the buffer back onto the envelope property that
+    // produced it, so the compute and emit stages share the same instances. When no writable property exposes
+    // the sequence, it is left as-is and the emit-miss diagnostic reports the correlation break.
+    private static IEnumerable MaterializeEnvelopeItems(object envelope, IEnumerable items)
+    {
+        if (items is string || IsMaterialized(items))
+        {
+            return items;
+        }
+
+        var bufferType = typeof(List<>).MakeGenericType(ElementTypeOf(items));
+        foreach (var property in envelope.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (property.SetMethod is null
+                || property.GetIndexParameters().Length != 0
+                || !property.PropertyType.IsAssignableFrom(bufferType))
+            {
+                continue;
+            }
+
+            object? current;
+            try
+            {
+                current = property.GetValue(envelope);
+            }
+            catch
+            {
+                continue;   // a throwing getter can't be the items source
+            }
+
+            if (!ReferenceEquals(current, items))
+            {
+                continue;
+            }
+
+            var buffer = BufferSequence(items);
+            property.SetValue(envelope, buffer);
+            return buffer;
+        }
+
+        return items;
     }
 
     // Per-route .WithPageLinks() wins over the global PageLink, which wins over the default query-swap.
@@ -683,13 +737,14 @@ internal static class CairnLinkRecorder
     }
 
     // Links are grouped by relation: a single link for a rel emits as a HAL link object, several as a HAL link
-    // array. Insertion order (the declaration order) is preserved within a relation.
+    // array. Rels compare case-insensitively (RFC 8288), keeping the first-declared casing for emission, and
+    // insertion order (the declaration order) is preserved within a relation.
     private static ResourceHypermedia ToPayload(LinkSet linkSet, IReadOnlyDictionary<string, object>? embedded, IReadOnlyDictionary<string, string> curies)
     {
-        Dictionary<string, HalLinkValue>? links = null;
+        VerbatimKeyDictionary<HalLinkValue>? links = null;
         if (linkSet.Links.Count > 0)
         {
-            var grouped = new Dictionary<string, List<HalLink>>(StringComparer.Ordinal);
+            var grouped = new Dictionary<string, List<HalLink>>(StringComparer.OrdinalIgnoreCase);
             foreach (var link in linkSet.Links)
             {
                 if (!grouped.TryGetValue(link.Relation.Value, out var list))
@@ -710,50 +765,71 @@ internal static class CairnLinkRecorder
                 });
             }
 
-            links = new Dictionary<string, HalLinkValue>(StringComparer.Ordinal);
+            links = new VerbatimKeyDictionary<HalLinkValue>(StringComparer.OrdinalIgnoreCase);
             foreach (var (relation, list) in grouped)
             {
                 links[relation] = new HalLinkValue(list);
             }
-
-            AddCuries(links, curies);
         }
 
-        Dictionary<string, HalAction>? actions = null;
+        VerbatimKeyDictionary<HalAction>? actions = null;
         if (linkSet.Affordances.Count > 0)
         {
-            actions = new Dictionary<string, HalAction>(StringComparer.Ordinal);
+            actions = new VerbatimKeyDictionary<HalAction>(StringComparer.OrdinalIgnoreCase);
             foreach (var affordance in linkSet.Affordances)
             {
-                actions[affordance.Name.Value] = new HalAction(affordance.Href, affordance.Method) { Title = affordance.Title, Input = affordance.Input, ContentType = affordance.ContentType };
+                actions[affordance.Name.Value] = new HalAction(affordance.Href, affordance.Method) { Title = affordance.Title, Input = affordance.Input, ContentType = affordance.ContentType, IsDefault = affordance.IsDefault };
             }
         }
 
+        links = AddCuries(links, actions, embedded, curies);
         return new ResourceHypermedia(links, actions, embedded);
     }
 
-    // Surface a curies array for every registered prefix actually used by a relation (e.g. "acme:widget").
-    private static void AddCuries(Dictionary<string, HalLinkValue> links, IReadOnlyDictionary<string, string> curies)
+    // Surface a curies array for every registered prefix actually used by a rel-keyed section — _links,
+    // affordances (_actions/_templates), or _embedded — so a curie'd relation anywhere in the document has
+    // its documentation link resolvable. The array always lives in _links per HAL.
+    private static VerbatimKeyDictionary<HalLinkValue>? AddCuries(
+        VerbatimKeyDictionary<HalLinkValue>? links,
+        IReadOnlyDictionary<string, HalAction>? actions,
+        IReadOnlyDictionary<string, object>? embedded,
+        IReadOnlyDictionary<string, string> curies)
     {
         if (curies.Count == 0)
+        {
+            return links;
+        }
+
+        var used = new List<HalLink>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        CollectCuries(links?.Keys, curies, used, seen);
+        CollectCuries(actions?.Keys, curies, used, seen);
+        CollectCuries(embedded?.Keys, curies, used, seen);
+
+        if (used.Count == 0)
+        {
+            return links;
+        }
+
+        links ??= new VerbatimKeyDictionary<HalLinkValue>(StringComparer.OrdinalIgnoreCase);
+        links["curies"] = new HalLinkValue(used, alwaysArray: true);
+        return links;
+    }
+
+    private static void CollectCuries(IEnumerable<string>? relations, IReadOnlyDictionary<string, string> curies, List<HalLink> used, HashSet<string> seen)
+    {
+        if (relations is null)
         {
             return;
         }
 
-        var used = new List<HalLink>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var relation in links.Keys)
+        foreach (var relation in relations)
         {
             var colon = relation.IndexOf(':');
-            if (colon > 0 && curies.TryGetValue(relation.Substring(0, colon), out var href) && seen.Add(relation.Substring(0, colon)))
+            if (colon > 0 && curies.TryGetValue(relation[..colon], out var href) && seen.Add(relation[..colon]))
             {
-                used.Add(new HalLink(href) { Name = relation.Substring(0, colon), Templated = true });
+                used.Add(new HalLink(href) { Name = relation[..colon], Templated = true });
             }
-        }
-
-        if (used.Count > 0)
-        {
-            links["curies"] = new HalLinkValue(used, alwaysArray: true);
         }
     }
 

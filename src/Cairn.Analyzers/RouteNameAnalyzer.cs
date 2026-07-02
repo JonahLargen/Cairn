@@ -26,7 +26,7 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
         category: "Cairn",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "A LinkTarget.Route name should match an endpoint named with WithName or a controller route attribute such as [HttpGet(Name = \"...\")].",
+        description: "A LinkTarget.Route name should match an endpoint named with WithName or a controller route attribute such as [HttpGet(Name = \"...\")]. When the compilation declares no named endpoints at all, the rule stays silent (the routes are assumed to live in another project); names declared elsewhere can also be listed via cairn_additional_route_names in .editorconfig or the CairnAdditionalRouteNames MSBuild property.",
         customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     /// <inheritdoc />

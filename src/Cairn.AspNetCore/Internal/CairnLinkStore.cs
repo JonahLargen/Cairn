@@ -87,6 +87,10 @@ internal sealed record HalAction(
 
     [JsonIgnore]
     public string? ContentType { get; init; }
+
+    // Emitted under the reserved "default" HAL-FORMS template key rather than its name.
+    [JsonIgnore]
+    public bool IsDefault { get; init; }
 }
 
 /// <summary>An affordance projected into a HAL-FORMS <c>_templates</c> entry.</summary>
@@ -205,6 +209,7 @@ internal sealed record ResourceHypermedia(
                     Title = action.Title,
                     Input = action.Input,
                     ContentType = action.ContentType,
+                    IsDefault = action.IsDefault,
                 });
             }
         }
