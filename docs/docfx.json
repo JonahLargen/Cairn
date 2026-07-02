@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/docfx/main/schemas/docfx.schema.json",
+  "metadata": [
+    {
+      "src": [
+        {
+          "src": "../src",
+          "files": [
+            "Cairn.Core/Cairn.Core.csproj",
+            "Cairn.AspNetCore/Cairn.AspNetCore.csproj",
+            "Cairn.Client/Cairn.Client.csproj",
+            "Cairn.Testing/Cairn.Testing.csproj",
+            "Cairn.OpenApi/Cairn.OpenApi.csproj",
+            "Cairn.Swashbuckle/Cairn.Swashbuckle.csproj"
+          ]
+        }
+      ],
+      "dest": "api",
+      "namespaceLayout": "nested",
+      "memberLayout": "samePage",
+      "enumSortOrder": "declaringOrder"
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": [ "**/*.{md,yml}" ],
+        "exclude": [ "_site/**", "obj/**" ]
+      }
+    ],
+    "resource": [
+      { "files": [ "images/**" ] }
+    ],
+    "output": "_site",
+    "template": [ "default", "modern" ],
+    "globalMetadata": {
+      "_appName": "Cairn",
+      "_appTitle": "Cairn",
+      "_appFooter": "Cairn &mdash; opt-in HATEOAS for .NET. MIT licensed.",
+      "_enableSearch": true,
+      "_disableContribution": false,
+      "_gitContribute": {
+        "repo": "https://github.com/JonahLargen/Cairn",
+        "branch": "main"
+      }
+    },
+    "sitemap": {
+      "baseUrl": "https://jonahlargen.github.io/Cairn"
+    }
+  }
+}

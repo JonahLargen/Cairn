@@ -35,3 +35,23 @@ jobs:
 
       - name: Test
         run: dotnet test Cairn.slnx --configuration Release --no-build --verbosity normal
+
+  docs:
+    name: Docs build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install DocFX
+        run: dotnet tool update -g docfx --version 2.78.*
+
+      - name: Build docs
+        run: docfx docs/docfx.json
+        env:
+          DOTNET_NOLOGO: 'true'
