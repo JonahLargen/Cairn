@@ -23,6 +23,8 @@
          PublicAPI.Shipped.txt / PublicAPI.Unshipped.txt and fails the build on undeclared changes. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="4.14.0" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <!-- Tag-driven versioning: computes Version/PackageVersion from git tags at build time. -->
+    <PackageVersion Include="MinVer" Version="7.0.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.2" />
     <PackageVersion Include="Swashbuckle.AspNetCore.SwaggerGen" Version="10.2.2" />
