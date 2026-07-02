@@ -17,6 +17,7 @@ Cairn.Testing.HypermediaAffordance.Title.init -> void
 Cairn.Testing.HypermediaAffordanceAssertions
 Cairn.Testing.HypermediaAffordanceAssertions.And.get -> Cairn.Testing.HypermediaResponseAssertions!
 Cairn.Testing.HypermediaAffordanceAssertions.WithHref(string! href) -> Cairn.Testing.HypermediaAffordanceAssertions!
+Cairn.Testing.HypermediaAffordanceAssertions.WithHrefMatching(string! pattern) -> Cairn.Testing.HypermediaAffordanceAssertions!
 Cairn.Testing.HypermediaAffordanceAssertions.WithMethod(System.Net.Http.HttpMethod! method) -> Cairn.Testing.HypermediaAffordanceAssertions!
 Cairn.Testing.HypermediaLink
 Cairn.Testing.HypermediaLink.<Clone>$() -> Cairn.Testing.HypermediaLink!
@@ -44,6 +45,7 @@ Cairn.Testing.HypermediaResponseAssertions.HaveAffordance(string! name) -> Cairn
 Cairn.Testing.HypermediaResponseAssertions.HaveEmbedded(string! relation) -> Cairn.Testing.HypermediaResponseAssertions!
 Cairn.Testing.HypermediaResponseAssertions.HaveLink(string! relation) -> Cairn.Testing.HypermediaResponseAssertions!
 Cairn.Testing.HypermediaResponseAssertions.HaveLink(string! relation, string! href) -> Cairn.Testing.HypermediaResponseAssertions!
+Cairn.Testing.HypermediaResponseAssertions.HaveLinkMatching(string! relation, string! pattern) -> Cairn.Testing.HypermediaResponseAssertions!
 Cairn.Testing.HypermediaResponseAssertions.HaveSelfLink() -> Cairn.Testing.HypermediaResponseAssertions!
 Cairn.Testing.HypermediaResponseAssertions.HaveTemplate(string! name) -> Cairn.Testing.HypermediaTemplateAssertions!
 Cairn.Testing.HypermediaResponseAssertions.HaveTemplatedLink(string! relation) -> Cairn.Testing.HypermediaResponseAssertions!
@@ -79,6 +81,7 @@ Cairn.Testing.HypermediaTemplateAssertions.HaveField(string! name) -> Cairn.Test
 Cairn.Testing.HypermediaTemplateAssertions.WithContentType(string! contentType) -> Cairn.Testing.HypermediaTemplateAssertions!
 Cairn.Testing.HypermediaTemplateAssertions.WithMethod(System.Net.Http.HttpMethod! method) -> Cairn.Testing.HypermediaTemplateAssertions!
 Cairn.Testing.HypermediaTemplateAssertions.WithTarget(string! target) -> Cairn.Testing.HypermediaTemplateAssertions!
+Cairn.Testing.HypermediaTemplateAssertions.WithTargetMatching(string! pattern) -> Cairn.Testing.HypermediaTemplateAssertions!
 Cairn.Testing.HypermediaTemplateField
 Cairn.Testing.HypermediaTemplateField.<Clone>$() -> Cairn.Testing.HypermediaTemplateField!
 Cairn.Testing.HypermediaTemplateField.Deconstruct(out string! Name) -> void
@@ -135,7 +138,6 @@ static Cairn.Testing.HypermediaLink.operator ==(Cairn.Testing.HypermediaLink? le
 static Cairn.Testing.HypermediaResponse.Parse(string! json) -> Cairn.Testing.HypermediaResponse!
 static Cairn.Testing.HypermediaResponseAssertionsExtensions.Should(this Cairn.Testing.HypermediaResponse! response) -> Cairn.Testing.HypermediaResponseAssertions!
 static Cairn.Testing.HypermediaResponseExtensions.GetHypermediaAsync(this System.Net.Http.HttpClient! client, string! url, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Testing.HypermediaResponse!>!
-static Cairn.Testing.HypermediaResponseExtensions.Hypermedia(this string! json) -> Cairn.Testing.HypermediaResponse!
 static Cairn.Testing.HypermediaResponseExtensions.ReadHypermediaAsync(this System.Net.Http.HttpResponseMessage! response, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Testing.HypermediaResponse!>!
 static Cairn.Testing.HypermediaSnapshot.Render(string! json, Cairn.Testing.HypermediaSnapshotOptions? options = null) -> string!
 static Cairn.Testing.HypermediaSnapshot.RenderAsync(System.Net.Http.HttpResponseMessage! response, Cairn.Testing.HypermediaSnapshotOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!

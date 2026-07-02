@@ -157,6 +157,63 @@ public class CairnUriTemplateTests
         Assert.DoesNotContain("%EF%BF%BD", handler.RequestUri.AbsoluteUri);
     }
 
+    [Fact]
+    public async Task Reserved_expansion_encodes_a_bare_percent_as_a_triplet()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        // RFC 6570 §3.2.3: only a valid pct-triplet passes through; a bare '%' is data. Without this,
+        // "50% off" expands to the invalid URI "50%%20off".
+        await client.FollowAsync<JsonElement>(new Link("file", "/files/{+name}", templated: true), new { name = "50% off" });
+
+        Assert.Contains("/files/50%25%20off", handler.RequestUri!.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task Reserved_expansion_passes_a_valid_pct_triplet_through()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        await client.FollowAsync<JsonElement>(new Link("file", "/files/{+name}", templated: true), new { name = "a%20b" });
+
+        // The existing escape survives untouched — not double-encoded to a%2520b.
+        Assert.Contains("/files/a%20b", handler.RequestUri!.AbsoluteUri);
+        Assert.DoesNotContain("%2520", handler.RequestUri.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task Fragment_expansion_encodes_a_bare_percent_as_a_triplet()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        await client.FollowAsync<JsonElement>(new Link("doc", "/doc{#section}", templated: true), new { section = "50% off" });
+
+        Assert.Contains("#50%25%20off", handler.RequestUri!.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task Prefix_modifier_counts_code_points_not_utf16_units()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        // {key:1} must take the whole first character: slicing UTF-16 units would split the surrogate pair
+        // and produce U+FFFD replacement bytes (%EF%BF%BD).
+        await client.FollowAsync<JsonElement>(new Link("item", "/items/{key:1}", templated: true), new { key = "😀abc" });
+
+        Assert.EndsWith("/items/%F0%9F%98%80", handler.RequestUri!.AbsoluteUri);
+        Assert.DoesNotContain("%EF%BF%BD", handler.RequestUri.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task Prefix_modifier_counts_an_astral_character_as_one()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        await client.FollowAsync<JsonElement>(new Link("item", "/items/{key:2}", templated: true), new { key = "😀abc" });
+
+        Assert.EndsWith("/items/%F0%9F%98%80a", handler.RequestUri!.AbsoluteUri);
+    }
+
     private static (CairnClient Client, RecordingHandler Handler) NewRecordingClient()
     {
         var handler = new RecordingHandler();

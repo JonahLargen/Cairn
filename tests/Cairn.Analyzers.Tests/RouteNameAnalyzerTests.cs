@@ -80,6 +80,65 @@ class OrdersController
     }
 
     [Fact]
+    public async Task Does_not_flag_a_name_declared_by_a_controller_route_attribute_via_nameof()
+    {
+        const string source = @"
+namespace Cairn { public static class LinkTarget { public static object Route(string name, object values = null) => name; } }
+class HttpGetAttribute : System.Attribute { public HttpGetAttribute(string template) {} public string Name { get; set; } }
+class OrdersController
+{
+    [HttpGet(""orders/{id}"", Name = nameof(GetOrder))]
+    public object GetOrder() => null;
+    object Link() => Cairn.LinkTarget.Route(""GetOrder"");
+}";
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        // The generator resolves nameof/const attribute names into the catalog; the analyzer must match,
+        // or the reference above false-positives as undeclared.
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task Ignores_a_look_alike_LinkTarget_from_another_namespace()
+    {
+        const string source = @"
+namespace Cairn { public static class LinkTarget { public static object Route(string name, object values = null) => name; } }
+namespace Other { public static class LinkTarget { public static object Route(string name) => name; } }
+public static class EndpointExtensions { public static T WithName<T>(this T builder, string name) => builder; }
+class Config
+{
+    void Endpoints() { new object().WithName(""GetOrder""); }
+    object Link() => Other.LinkTarget.Route(""NotARouteName"");
+}";
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        // Only Cairn.LinkTarget.Route references are link references; a same-named type elsewhere is not.
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task Flags_a_reference_made_through_using_static()
+    {
+        const string source = @"
+using static Cairn.LinkTarget;
+namespace Cairn { public static class LinkTarget { public static object Route(string name, object values = null) => name; } }
+public static class EndpointExtensions { public static T WithName<T>(this T builder, string name) => builder; }
+class Config
+{
+    void Endpoints() { new object().WithName(""GetOrder""); }
+    object Link() => Route(""NotARouteName"");
+}";
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        // A using-static call site binds to Cairn.LinkTarget.Route even without the receiver syntax.
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Contains("NotARouteName", diagnostic.GetMessage());
+    }
+
+    [Fact]
     public async Task Does_not_flag_dynamic_route_names()
     {
         const string source = @"

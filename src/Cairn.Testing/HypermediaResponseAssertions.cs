@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.RegularExpressions;
+
 namespace Cairn.Testing;
 
 /// <summary>Entry point for fluent assertions over a <see cref="HypermediaResponse"/>.</summary>
@@ -28,6 +31,42 @@ internal static class CairnAssert
     {
         var list = string.Join(", ", keys.Select(key => $"'{key}'"));
         return list.Length == 0 ? "none" : list;
+    }
+}
+
+// Compiles an href pattern to a regex: "{param}" matches one path segment, a trailing "*" turns the pattern
+// into a prefix match, and everything else matches literally (regex-escaped), anchored ^...$.
+internal static class HrefPattern
+{
+    public static Regex ToRegex(string pattern)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+
+        var prefix = pattern.EndsWith('*');
+        if (prefix)
+        {
+            pattern = pattern[..^1];
+        }
+
+        var builder = new StringBuilder("^");
+        var index = 0;
+        while (index < pattern.Length)
+        {
+            var open = pattern.IndexOf('{', index);
+            var close = open < 0 ? -1 : pattern.IndexOf('}', open);
+            if (close < 0)
+            {
+                builder.Append(Regex.Escape(pattern[index..]));
+                break;
+            }
+
+            builder.Append(Regex.Escape(pattern[index..open]));
+            builder.Append("[^/?#]+");   // a {param} placeholder matches exactly one path segment
+            index = close + 1;
+        }
+
+        builder.Append(prefix ? string.Empty : "$");
+        return new Regex(builder.ToString(), RegexOptions.None, TimeSpan.FromSeconds(1));
     }
 }
 
@@ -71,6 +110,25 @@ public sealed class HypermediaResponseAssertions
                 $"Expected one of the '{relation}' links to have href '{href}', but they are: {CairnAssert.Describe(links.Select(link => link.Href))}.");
         }
 
+        return this;
+    }
+
+    /// <summary>
+    /// Asserts the response exposes a link with the given relation whose href matches <paramref name="pattern"/>
+    /// (any member of a link array may match). In the pattern, <c>{param}</c> matches exactly one path segment
+    /// and a trailing <c>*</c> makes it a prefix match, so tests stay robust against the test host's
+    /// scheme/host/port (e.g. <c>"http://{host}/orders/{id}"</c> or <c>"http://localhost/orders/*"</c>).
+    /// </summary>
+    public HypermediaResponseAssertions HaveLinkMatching(string relation, string pattern)
+    {
+        HaveLink(relation);
+        var regex = HrefPattern.ToRegex(pattern);
+        var links = _subject.AllLinks[relation];
+        CairnAssert.That(
+            links.Any(link => regex.IsMatch(link.Href)),
+            links.Count == 1
+                ? $"Expected the '{relation}' link's href to match '{pattern}', but it is '{links[0].Href}'."
+                : $"Expected one of the '{relation}' links to match '{pattern}', but they are: {CairnAssert.Describe(links.Select(link => link.Href))}.");
         return this;
     }
 
@@ -169,6 +227,18 @@ public sealed class HypermediaAffordanceAssertions
             $"Expected the '{_name}' affordance to target '{href}', but it targets '{_affordance.Href}'.");
         return this;
     }
+
+    /// <summary>
+    /// Asserts the affordance's target href matches <paramref name="pattern"/>, where <c>{param}</c> matches
+    /// exactly one path segment and a trailing <c>*</c> makes it a prefix match.
+    /// </summary>
+    public HypermediaAffordanceAssertions WithHrefMatching(string pattern)
+    {
+        CairnAssert.That(
+            HrefPattern.ToRegex(pattern).IsMatch(_affordance.Href),
+            $"Expected the '{_name}' affordance's target to match '{pattern}', but it targets '{_affordance.Href}'.");
+        return this;
+    }
 }
 
 /// <summary>Fluent assertions over a single HAL-FORMS template.</summary>
@@ -205,6 +275,18 @@ public sealed class HypermediaTemplateAssertions
         CairnAssert.That(
             _template.Target == target,
             $"Expected the '{_name}' template to target '{target}', but it targets '{_template.Target}'.");
+        return this;
+    }
+
+    /// <summary>
+    /// Asserts the template's submission target matches <paramref name="pattern"/>, where <c>{param}</c>
+    /// matches exactly one path segment and a trailing <c>*</c> makes it a prefix match.
+    /// </summary>
+    public HypermediaTemplateAssertions WithTargetMatching(string pattern)
+    {
+        CairnAssert.That(
+            HrefPattern.ToRegex(pattern).IsMatch(_template.Target),
+            $"Expected the '{_name}' template's target to match '{pattern}', but it targets '{_template.Target}'.");
         return this;
     }
 
