@@ -115,6 +115,7 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
                     "Ensure the endpoint is named (WithName / [Http*(Name=...)]) and all route values are supplied.");
             }
 
+            context.OnUnresolvedLink?.Invoke(new UnresolvedLink(typeof(T), relation, target));
             return null;
         }
 

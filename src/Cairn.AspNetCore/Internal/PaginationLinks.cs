@@ -38,11 +38,11 @@ internal static class PaginationLinks
     }
 
     /// <summary>Cursor links: self is the current URL; next/prev come from the app-supplied cursors.</summary>
-    public static IReadOnlyDictionary<string, HalLink> BuildCursor(HttpRequest request, ICursorPagedResource cursor, Func<string, string> cursorUrl)
+    public static IReadOnlyDictionary<string, HalLink> BuildCursor(HttpRequest request, ICursorPagedResource cursor, Func<string, string> cursorUrl, CairnOptions options)
     {
         var links = new Dictionary<string, HalLink>
         {
-            ["self"] = new(CurrentUrl(request)),
+            ["self"] = new(CurrentUrl(request, options)),
         };
 
         if (cursor.Next is { Length: > 0 } next)
@@ -59,21 +59,30 @@ internal static class PaginationLinks
     }
 
     /// <summary>The default page URL: the current request URL with <paramref name="pageParameter"/> set to the page number.</summary>
-    public static string DefaultPageUrl(HttpRequest request, int page, string pageParameter)
-        => SwapQueryParam(request, pageParameter, page.ToString(CultureInfo.InvariantCulture));
+    public static string DefaultPageUrl(HttpRequest request, int page, string pageParameter, CairnOptions options)
+        => SwapQueryParam(request, pageParameter, page.ToString(CultureInfo.InvariantCulture), options);
 
     /// <summary>The current request URL with a single query parameter set to <paramref name="value"/>.</summary>
-    public static string SwapQueryParam(HttpRequest request, string name, string value)
+    public static string SwapQueryParam(HttpRequest request, string name, string value, CairnOptions options)
     {
         var query = new Dictionary<string, StringValues>(QueryHelpers.ParseQuery(request.QueryString.Value))
         {
             [name] = value,
         };
 
-        var baseUri = $"{request.Scheme}://{request.Host}{request.PathBase}{request.Path}";
-        return QueryHelpers.AddQueryString(baseUri, query);
+        return QueryHelpers.AddQueryString(BaseUrl(request, options), query);
     }
 
-    private static string CurrentUrl(HttpRequest request)
-        => $"{request.Scheme}://{request.Host}{request.PathBase}{request.Path}{request.QueryString}";
+    private static string CurrentUrl(HttpRequest request, CairnOptions options)
+        => $"{BaseUrl(request, options)}{request.QueryString}";
+
+    // The request URL up to the path, honoring the configured URL style: path-relative, rebased onto the
+    // public origin (its path replaces the request's PathBase, mirroring LinkGenerator's pathBase), or the
+    // incoming request's own scheme://host.
+    private static string BaseUrl(HttpRequest request, CairnOptions options)
+        => options.UrlStyle == LinkUrlStyle.PathRelative
+            ? $"{request.PathBase}{request.Path}"
+            : options.PublicBaseUri is { } publicBase
+                ? $"{publicBase.Scheme}://{publicBase.Authority}{LinkGeneratorUrlResolver.BasePath(publicBase)}{request.Path}"
+                : $"{request.Scheme}://{request.Host}{request.PathBase}{request.Path}";
 }

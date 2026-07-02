@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Cairn.Benchmarks/Cairn.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Cairn.Sample.Api/Cairn.Sample.Api.csproj" />
   </Folder>

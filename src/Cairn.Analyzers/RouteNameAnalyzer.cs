@@ -46,7 +46,7 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
         var references = new ConcurrentBag<(string Name, Location Location)>();
 
         context.RegisterSyntaxNodeAction(
-            nodeContext => Collect((InvocationExpressionSyntax)nodeContext.Node, routeNames, references),
+            nodeContext => Collect(nodeContext, routeNames, references),
             SyntaxKind.InvocationExpression);
 
         context.RegisterSyntaxNodeAction(
@@ -57,10 +57,11 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
     }
 
     private static void Collect(
-        InvocationExpressionSyntax invocation,
+        SyntaxNodeAnalysisContext context,
         ConcurrentDictionary<string, byte> routeNames,
         ConcurrentBag<(string, Location)> references)
     {
+        var invocation = (InvocationExpressionSyntax)context.Node;
         if (invocation.Expression is not MemberAccessExpressionSyntax member)
         {
             return;
@@ -70,14 +71,14 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
 
         if (method == "WithName")
         {
-            if (FirstStringLiteral(invocation) is { } endpoint)
+            if (FirstStringArgument(context, invocation) is { } endpoint)
             {
                 routeNames.TryAdd(endpoint.Value, 0);
             }
         }
         else if (method == "Route" && IsLinkTargetReceiver(member.Expression))
         {
-            if (FirstStringLiteral(invocation) is { } route)
+            if (FirstStringArgument(context, invocation) is { } route)
             {
                 references.Add((route.Value, route.Location));
             }
@@ -131,6 +132,14 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
             return;
         }
 
+        // Names declared in other projects can be listed in .editorconfig / a global analyzer config
+        // (cairn_additional_route_names = a, b) or via an MSBuild CompilerVisibleProperty
+        // (CairnAdditionalRouteNames), so multi-project solutions can silence cross-project references.
+        foreach (var configured in AdditionalRouteNames(context))
+        {
+            routeNames.TryAdd(configured, 0);
+        }
+
         foreach (var (name, location) in references)
         {
             if (routeNames.ContainsKey(name))
@@ -148,6 +157,42 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
         }
     }
 
+    private static IEnumerable<string> AdditionalRouteNames(CompilationAnalysisContext context)
+    {
+        var provider = context.Options.AnalyzerConfigOptionsProvider;
+        var raw = new List<string>();
+
+        if (provider.GlobalOptions.TryGetValue("cairn_additional_route_names", out var global))
+        {
+            raw.Add(global);
+        }
+
+        if (provider.GlobalOptions.TryGetValue("build_property.CairnAdditionalRouteNames", out var property))
+        {
+            raw.Add(property);
+        }
+
+        foreach (var tree in context.Compilation.SyntaxTrees)
+        {
+            if (provider.GetOptions(tree).TryGetValue("cairn_additional_route_names", out var perTree))
+            {
+                raw.Add(perTree);
+            }
+        }
+
+        foreach (var list in raw)
+        {
+            foreach (var name in list.Split(','))
+            {
+                var trimmed = name.Trim();
+                if (trimmed.Length > 0)
+                {
+                    yield return trimmed;
+                }
+            }
+        }
+    }
+
     private static bool IsLinkTargetReceiver(ExpressionSyntax receiver) => receiver switch
     {
         IdentifierNameSyntax identifier => identifier.Identifier.ValueText == "LinkTarget",
@@ -155,11 +200,24 @@ public sealed class RouteNameAnalyzer : DiagnosticAnalyzer
         _ => false,
     };
 
-    private static (string Value, Location Location)? FirstStringLiteral(InvocationExpressionSyntax invocation)
+    // A string literal, or any expression the compiler can evaluate to a constant string (a const field,
+    // nameof(...), concatenated constants) — so names factored into constants neither false-positive as
+    // undeclared nor escape validation as references.
+    private static (string Value, Location Location)? FirstStringArgument(SyntaxNodeAnalysisContext context, InvocationExpressionSyntax invocation)
     {
-        var argument = invocation.ArgumentList.Arguments.FirstOrDefault();
-        return argument?.Expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression)
-            ? (literal.Token.ValueText, literal.GetLocation())
+        if (invocation.ArgumentList.Arguments.FirstOrDefault() is not { } argument)
+        {
+            return null;
+        }
+
+        if (argument.Expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
+        {
+            return (literal.Token.ValueText, literal.GetLocation());
+        }
+
+        var constant = context.SemanticModel.GetConstantValue(argument.Expression, context.CancellationToken);
+        return constant is { HasValue: true, Value: string name }
+            ? (name, argument.Expression.GetLocation())
             : null;
     }
 
