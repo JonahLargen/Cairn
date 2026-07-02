@@ -15,7 +15,7 @@ A cairn is a small stack of stones a traveler leaves along a trail so the next t
 - **Minimal-API-first.** Register with `AddCairn()` and opt endpoints in with `.WithLinks()`.
 - **Affordances that authorize.** A `cancel` link can be advertised only when the resource is in a cancellable state **and** the caller satisfies an ASP.NET Core authorization policy — the same policy that guards the action.
 - **System.Text.Json-native.** Links are injected through contract customization, and Cairn's own wire types (`_links`/`_actions`/`_templates` payloads) ship with a source-generated `JsonSerializerContext`, so hypermedia serializes even when the app uses a source-gen-only `TypeInfoResolver`. Registration and HAL-FORMS schema derivation use reflection (once per type, cached), so full Native AOT publishing is not yet a supported claim.
-- **Pragmatic formats.** A flat `{ href, rel, method }` shape and HAL by content negotiation, with HAL-FORMS planned — so links fit whatever your clients already expect.
+- **Pragmatic formats.** A flat `{ href, rel, method }` shape, with HAL and HAL-FORMS built in via content negotiation — so links fit whatever your clients already expect.
 
 ## Usage
 

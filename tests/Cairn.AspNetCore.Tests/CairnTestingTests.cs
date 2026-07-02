@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Cairn;
 using Cairn.AspNetCore;
 using Cairn.Testing;
@@ -88,6 +90,298 @@ public class CairnTestingTests
             .And.NotHaveLink("parent");
     }
 
+    [Fact]
+    public void A_link_with_a_missing_or_empty_href_fails_parsing_with_a_clear_message()
+    {
+        var missing = Assert.Throws<FormatException>(() => """{"_links":{"self":{"title":"no href"}}}""".Hypermedia());
+        Assert.Contains("'self'", missing.Message);
+        Assert.Contains("href", missing.Message);
+
+        var empty = Assert.Throws<FormatException>(() => """{"_links":{"self":{"href":""}}}""".Hypermedia());
+        Assert.Contains("'self'", empty.Message);
+
+        // A member of a HAL link array is validated too.
+        var array = Assert.Throws<FormatException>(() => """{"_links":{"item":[{"href":"/i/1"},{"name":"second"}]}}""".Hypermedia());
+        Assert.Contains("'item'", array.Message);
+
+        var action = Assert.Throws<FormatException>(() => """{"_actions":{"cancel":{"method":"POST"}}}""".Hypermedia());
+        Assert.Contains("'cancel'", action.Message);
+        Assert.Contains("href", action.Message);
+    }
+
+    [Fact]
+    public void Failed_assertions_throw_CairnAssertionException_describing_the_actual_hypermedia()
+    {
+        var hypermedia = """{"_links":{"self":{"href":"/o/1"}},"_actions":{"cancel":{"href":"/o/1/cancel","method":"POST"}}}""".Hypermedia();
+
+        var missingLink = Assert.Throws<CairnAssertionException>(() => hypermedia.Should().HaveLink("parent"));
+        Assert.Contains("'parent'", missingLink.Message);
+        Assert.Contains("'self'", missingLink.Message);
+
+        var wrongHref = Assert.Throws<CairnAssertionException>(() => hypermedia.Should().HaveLink("self", "/o/2"));
+        Assert.Contains("'/o/2'", wrongHref.Message);
+        Assert.Contains("'/o/1'", wrongHref.Message);
+
+        var unexpectedLink = Assert.Throws<CairnAssertionException>(() => hypermedia.Should().NotHaveLink("self"));
+        Assert.Contains("'self'", unexpectedLink.Message);
+
+        var wrongMethod = Assert.Throws<CairnAssertionException>(() => hypermedia.Should().HaveAffordance("cancel").WithMethod(HttpMethod.Delete));
+        Assert.Contains("'DELETE'", wrongMethod.Message);
+        Assert.Contains("'POST'", wrongMethod.Message);
+    }
+
+    [Fact]
+    public void Asserts_templated_links()
+    {
+        var hypermedia = """{"_links":{"self":{"href":"/o/1"},"search":{"href":"/orders{?status,page}","templated":true}}}""".Hypermedia();
+
+        hypermedia.Should().HaveTemplatedLink("search");
+        Assert.True(hypermedia.Links["search"].Templated);
+        Assert.False(hypermedia.Links["self"].Templated);
+
+        var notTemplated = Assert.Throws<CairnAssertionException>(() => hypermedia.Should().HaveTemplatedLink("self"));
+        Assert.Contains("templated", notTemplated.Message);
+    }
+
+    [Fact]
+    public void Parses_and_asserts_embedded_resources()
+    {
+        // Cairn's wire shape: a single embed is an object, a collection embed is an array,
+        // each resource decorated with its own _links (see CairnEmbeddedTests).
+        const string json = """
+            {
+                "id": 5,
+                "_links": {"self": {"href": "/orders/5"}},
+                "_embedded": {
+                    "customer": {"id": 99, "_links": {"self": {"href": "/customers/99"}}},
+                    "item": [
+                        {"id": 1, "_links": {"self": {"href": "/items/1"}}},
+                        {"id": 2, "_links": {"self": {"href": "/items/2"}}}
+                    ]
+                }
+            }
+            """;
+
+        var hypermedia = json.Hypermedia();
+
+        hypermedia.Should()
+            .HaveSelfLink()
+            .HaveEmbedded("customer").HaveLink("self", "/customers/99");
+
+        Assert.Equal(2, hypermedia.Embedded["item"].Count);
+        Assert.Equal("/items/2", hypermedia.Embedded["item"][1].Links["self"].Href);
+
+        var missing = Assert.Throws<CairnAssertionException>(() => hypermedia.Should().HaveEmbedded("supplier"));
+        Assert.Contains("'supplier'", missing.Message);
+        Assert.Contains("'customer'", missing.Message);
+    }
+
+    [Fact]
+    public void Parses_and_asserts_hal_forms_templates_with_field_details()
+    {
+        // Cairn's HAL-FORMS wire shape (see CairnFormatTests / CairnHalFormsFieldTests).
+        const string json = """
+            {
+                "_links": {"self": {"href": "/o/42"}},
+                "_templates": {
+                    "cancel": {
+                        "method": "POST",
+                        "target": "/o/42/cancel",
+                        "contentType": "application/json",
+                        "properties": [
+                            {"name": "reason", "required": true, "type": "text", "maxLength": 200, "regex": "^[a-z]+$"},
+                            {"name": "severity", "type": "number", "min": 1, "max": 5},
+                            {"name": "status", "prompt": "Order status", "options": {"inline": [{"prompt": "Pending", "value": "Pending"}, {"prompt": "Shipped", "value": "Shipped"}]}},
+                            {"name": "id", "readOnly": true}
+                        ]
+                    }
+                }
+            }
+            """;
+
+        var hypermedia = json.Hypermedia();
+
+        hypermedia.Should()
+            .HaveTemplate("cancel")
+            .WithMethod(HttpMethod.Post)
+            .WithTarget("/o/42/cancel")
+            .WithContentType("application/json")
+            .HaveField("reason").ThatIsRequired().WithType("text").WithRegex("^[a-z]+$")
+            .And.HaveField("severity").ThatIsOptional().WithType("number")
+            .And.HaveField("status").WithPrompt("Order status")
+            .And.HaveField("id").ThatIsReadOnly();
+
+        var template = hypermedia.Templates["cancel"];
+        Assert.Equal(200, template.Fields.Single(field => field.Name == "reason").MaxLength);
+        Assert.Equal(1d, template.Fields.Single(field => field.Name == "severity").Min);
+        Assert.Equal(5d, template.Fields.Single(field => field.Name == "severity").Max);
+        Assert.Equal(["Pending", "Shipped"], template.Fields.Single(field => field.Name == "status").Options);
+
+        // Templates keep powering the affordance view.
+        hypermedia.Should().HaveAffordance("cancel").WithMethod(HttpMethod.Post).WithHref("/o/42/cancel");
+
+        var missingField = Assert.Throws<CairnAssertionException>(() => hypermedia.Should().HaveTemplate("cancel").HaveField("nope"));
+        Assert.Contains("'nope'", missingField.Message);
+        Assert.Contains("'reason'", missingField.Message);
+
+        var notRequired = Assert.Throws<CairnAssertionException>(() => hypermedia.Should().HaveTemplate("cancel").HaveField("severity").ThatIsRequired());
+        Assert.Contains("'severity'", notRequired.Message);
+    }
+
+    [Fact]
+    public void A_template_without_a_target_falls_back_to_the_self_link()
+    {
+        const string json = """{"_links":{"self":{"href":"/o/42"}},"_templates":{"default":{"method":"PUT"}}}""";
+
+        json.Hypermedia().Should().HaveTemplate("default").WithMethod(HttpMethod.Put).WithTarget("/o/42");
+    }
+
+    [Fact]
+    public async Task GetHypermediaAsync_asserts_hal_forms_on_a_live_response()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.DefaultFormat = HypermediaFormat.HalForms;
+            o.AddLinks(new TestingFormOrderLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapPost("/orders/{id:int}/cancel", (int id) => TypedResults.NoContent()).WithName("TestingFormCancel");
+        app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new TestingFormOrder(id)))
+            .WithName("TestingFormOrderById")
+            .WithLinks();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var hypermedia = await client.GetHypermediaAsync("/orders/7");
+
+        hypermedia.Should()
+            .HaveSelfLink()
+            .And.HaveTemplate("cancel")
+            .WithMethod(HttpMethod.Post)
+            .WithContentType("application/json")
+            .HaveField("reason").ThatIsRequired().WithType("text").WithRegex("^[a-z ]+$")
+            .And.HaveField("notify").ThatIsOptional();
+
+        // A bool input has no HAL-FORMS type of its own; it is described via a two-value options list.
+        Assert.Equal(["true", "false"], hypermedia.Templates["cancel"].Fields.Single(field => field.Name == "notify").Options);
+    }
+
+    [Fact]
+    public async Task GetHypermediaAsync_fails_with_a_clear_message_on_a_non_success_status()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o => o.AddLinks(new AssertOrderLinks()));
+
+        await using var app = builder.Build();
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var failure = await Assert.ThrowsAsync<CairnAssertionException>(() => client.GetHypermediaAsync("/missing"));
+        Assert.Contains("404", failure.Message);
+        Assert.Contains("/missing", failure.Message);
+    }
+
+    [Fact]
+    public async Task Asserts_embedded_resources_on_a_live_response()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.AddLinks(new TestingEmbOrderLinks());
+            o.AddLinks(new TestingEmbItemLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new TestingEmbOrder(id) { Items = [new TestingEmbItem(1), new TestingEmbItem(2)] }))
+            .WithName("TestingEmbGetOrder").WithLinks();
+        app.MapGet("/items/{id:int}", (int id) => TypedResults.Ok(new TestingEmbItem(id))).WithName("TestingEmbGetItem");
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var hypermedia = await client.GetHypermediaAsync("/orders/5");
+
+        hypermedia.Should().HaveEmbedded("item").HaveSelfLink();
+        Assert.Equal(2, hypermedia.Embedded["item"].Count);
+        Assert.EndsWith("/items/2", hypermedia.Embedded["item"][1].Links["self"].Href);
+    }
+
+    [Fact]
+    public void Snapshot_renders_stable_sorted_indented_json()
+    {
+        const string json = """{"b":2,"a":1,"_links":{"self":{"href":"/o/1"}}}""";
+
+        var snapshot = HypermediaSnapshot.Render(json);
+
+        Assert.Equal("""
+            {
+              "_links": {
+                "self": {
+                  "href": "/o/1"
+                }
+              },
+              "a": 1,
+              "b": 2
+            }
+            """.Replace("\r\n", "\n"), snapshot);
+
+        // Key order in the source payload does not change the snapshot.
+        Assert.Equal(snapshot, HypermediaSnapshot.Render("""{"_links":{"self":{"href":"/o/1"}},"a":1,"b":2}"""));
+    }
+
+    [Fact]
+    public void Snapshot_can_reduce_to_hypermedia_parts_and_normalize_hrefs()
+    {
+        const string json = """
+            {
+                "id": 5,
+                "name": "volatile data",
+                "_links": {"self": {"href": "http://localhost:5123/orders/5"}},
+                "_templates": {"cancel": {"method": "POST", "target": "http://localhost:5123/orders/5/cancel"}},
+                "_embedded": {"item": [{"id": 1, "_links": {"self": {"href": "http://localhost:5123/items/1"}}}]}
+            }
+            """;
+
+        var snapshot = HypermediaSnapshot.Render(json, new HypermediaSnapshotOptions
+        {
+            HypermediaOnly = true,
+            NormalizeHref = href => href.Replace("http://localhost:5123", "<host>"),
+        });
+
+        Assert.Equal("""
+            {
+              "_embedded": {
+                "item": [
+                  {
+                    "_links": {
+                      "self": {
+                        "href": "<host>/items/1"
+                      }
+                    }
+                  }
+                ]
+              },
+              "_links": {
+                "self": {
+                  "href": "<host>/orders/5"
+                }
+              },
+              "_templates": {
+                "cancel": {
+                  "method": "POST",
+                  "target": "<host>/orders/5/cancel"
+                }
+              }
+            }
+            """.Replace("\r\n", "\n"), snapshot);
+    }
+
     private sealed record AssertOrder(int Id);
 
     private sealed class AssertOrderLinks : LinkConfig<AssertOrder>
@@ -97,5 +391,50 @@ public class CairnTestingTests
             builder.Self(order => LinkTarget.Route("AssertOrderById", new { id = order.Id }));
             builder.Affordance("cancel", order => LinkTarget.Route("AssertCancel", new { id = order.Id })).Method("POST");
         }
+    }
+
+    private sealed record TestingFormOrder(int Id);
+
+    private sealed class TestingCancelInput
+    {
+        [Required]
+        [RegularExpression("^[a-z ]+$")]
+        public string Reason { get; init; } = "";
+
+        public bool Notify { get; init; }
+    }
+
+    private sealed class TestingFormOrderLinks : LinkConfig<TestingFormOrder>
+    {
+        public override void Configure(ILinkBuilder<TestingFormOrder> builder)
+        {
+            builder.Self(order => LinkTarget.Route("TestingFormOrderById", new { id = order.Id }));
+            builder.Affordance("cancel", order => LinkTarget.Route("TestingFormCancel", new { id = order.Id }))
+                .Method("POST")
+                .Accepts<TestingCancelInput>();
+        }
+    }
+
+    private sealed record TestingEmbOrder(int Id)
+    {
+        [JsonIgnore]
+        public TestingEmbItem[] Items { get; init; } = [];
+    }
+
+    private sealed record TestingEmbItem(int Id);
+
+    private sealed class TestingEmbOrderLinks : LinkConfig<TestingEmbOrder>
+    {
+        public override void Configure(ILinkBuilder<TestingEmbOrder> builder)
+        {
+            builder.Self(order => LinkTarget.Route("TestingEmbGetOrder", new { id = order.Id }));
+            builder.EmbedMany("item", order => order.Items);
+        }
+    }
+
+    private sealed class TestingEmbItemLinks : LinkConfig<TestingEmbItem>
+    {
+        public override void Configure(ILinkBuilder<TestingEmbItem> builder)
+            => builder.Self(item => LinkTarget.Route("TestingEmbGetItem", new { id = item.Id }));
     }
 }
