@@ -99,7 +99,9 @@ public class CairnClientEtagTests
         Assert.NotEmpty(orders.Items);
         Assert.Equal("\"orders-v1\"", orders.ETag);
 
-        var again = await client.GetCollectionAsync<EtagOrder>("/orders", ifNoneMatch: orders.ETag);
+        // The conditional-GET overload takes ifNoneMatch alongside the items property (it sits beside the
+        // token-only overload rather than replacing it, so v0.6.6 callers keep binding).
+        var again = await client.GetCollectionAsync<EtagOrder>("/orders", itemsProperty: "items", ifNoneMatch: orders.ETag);
 
         Assert.True(again.IsNotModified);
         Assert.Equal(304, again.Status);
@@ -111,6 +113,22 @@ public class CairnClientEtagTests
         var page = again.EnsureSuccess();
         Assert.Empty(page.Items);
         Assert.Equal("\"orders-v1\"", page.ETag);
+    }
+
+    [Fact]
+    public async Task GetCollectionAsync_keeps_a_token_only_overload_for_positional_token_callers()
+    {
+        await using var app = await StartAsync();
+        using var httpClient = app.GetTestClient();
+        var client = new CairnClient(httpClient);
+
+        // Adding ifNoneMatch as a side-by-side overload (rather than inserting it before the token) keeps the
+        // v0.6.6 shape: a CancellationToken still binds positionally in the third slot.
+        using var cts = new CancellationTokenSource();
+        var result = await client.GetCollectionAsync<EtagOrder>("/orders", "items", cts.Token);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotEmpty(result.EnsureSuccess().Items);
     }
 
     private static async Task<WebApplication> StartAsync()

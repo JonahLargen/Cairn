@@ -1,3 +1,1 @@
 #nullable enable
-Cairn.OpenApi.CairnOpenApiExtensions
-static Cairn.OpenApi.CairnOpenApiExtensions.AddCairnHypermedia(this Microsoft.AspNetCore.OpenApi.OpenApiOptions! options) -> Microsoft.AspNetCore.OpenApi.OpenApiOptions!

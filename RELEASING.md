@@ -9,20 +9,44 @@ Versioning and publishing are fully tag-driven. There is no version number in th
 1. Merge PRs into `main` as usual. Every CI build produces preview packages versioned
    `X.Y.(Z+1)-preview.0.<height>` (where `vX.Y.Z` is the latest tag and `<height>` is the number of
    commits since it). They are attached to the CI run as an artifact if you want to try one locally.
-2. When you want to ship, tag the commit and push the tag (release notes are auto-generated from PR titles):
+2. **Promote the public API surface.** New public members accumulate in each project's
+   `PublicAPI.Unshipped.txt` as they are added. Before tagging, move every entry from each
+   `src/*/PublicAPI.Unshipped.txt` into that project's `PublicAPI.Shipped.txt`, leaving the
+   `#nullable enable` header line at the top of both files (the "unshipped" file ends up with only that
+   line). This records the surface you are about to ship as shipped, and is what
+   [package validation](#binary-compatibility) checks the next release against. Commit it — it is the
+   one repo edit a release needs.
+
+   > The `dotnet` "Add all items in PublicAPI.Unshipped.txt to the shipped API" code fix does this per
+   > project; moving the lines by hand is equivalent, since the analyzer compares sets, not order.
+
+3. When you want to ship, tag the commit and push the tag (release notes are auto-generated from PR titles):
 
    ```sh
    git tag v0.6.0
    git push origin v0.6.0
    ```
 
-3. The Release workflow then, automatically:
+4. The Release workflow then, automatically:
    - builds and runs the full test suite as a gate;
-   - packs every shippable project at exactly `0.6.0` (MinVer reads the tag);
+   - packs every shippable project at exactly `0.6.0` (MinVer reads the tag), validating each against the
+     previous release's package (see below);
    - pushes the `.nupkg` + `.snupkg` packages to NuGet.org;
    - creates the GitHub release with auto-generated notes and the packages attached.
+5. **Move the compatibility baseline forward.** After the packages are live, set
+   `PackageValidationBaselineVersion` in `src/Directory.Build.props` to the version you just shipped, so
+   the next cycle's builds validate against it. Commit it as the first change of the new cycle.
 
-That's it — no csproj edits, no manual GitHub release, no separate "bump version" commit.
+Aside from those two tracked edits (the API promotion and the baseline bump), a release is just a tag —
+no version numbers in csproj, no manual GitHub release, no separate "bump version" commit.
+
+### Binary compatibility
+
+`EnablePackageValidation` (in `src/Directory.Build.props`) makes every `dotnet pack` compare the packed
+assemblies against `PackageValidationBaselineVersion` (the last released version) downloaded from NuGet.org.
+A removed or re-signatured public member fails the pack instead of shipping a `MissingMethodException` to
+consumers. When you intend a breaking change, that is a major-version decision — bump the version deliberately
+rather than working around the check.
 
 ### Pre-releases
 

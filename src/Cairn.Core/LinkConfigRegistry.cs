@@ -92,6 +92,26 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
     internal IReadOnlyDictionary<Type, ICompiledLinkConfig> Snapshot => _configs;
 
     /// <summary>
+    /// Whether a config is registered for a proper subtype of <paramref name="baseType"/> — i.e. the type is a
+    /// polymorphic base whose configured subtypes may be serialized through its declared-type contract, even
+    /// though the base itself has no config. Reads the same copy-on-write config map as
+    /// <see cref="GetConfig"/>.
+    /// </summary>
+    internal bool HasConfiguredSubtype(Type baseType)
+    {
+        var configs = _configs;
+        foreach (var configured in configs.Keys)
+        {
+            if (configured != baseType && baseType.IsAssignableFrom(configured))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Returns the config registered for <paramref name="resourceType"/>, falling back to its nearest
     /// registered base class, or <see langword="null"/> if neither exists.
     /// </summary>

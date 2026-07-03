@@ -1,3 +1,1 @@
 #nullable enable
-Cairn.Swashbuckle.CairnSwaggerExtensions
-static Cairn.Swashbuckle.CairnSwaggerExtensions.AddCairnHypermedia(this Swashbuckle.AspNetCore.SwaggerGen.SwaggerGenOptions! options) -> Swashbuckle.AspNetCore.SwaggerGen.SwaggerGenOptions!

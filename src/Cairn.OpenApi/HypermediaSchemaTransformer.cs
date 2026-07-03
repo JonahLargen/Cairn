@@ -12,6 +12,8 @@ namespace Cairn.OpenApi;
 /// </summary>
 internal sealed class HypermediaSchemaTransformer : IOpenApiSchemaTransformer
 {
+    private static readonly string[] HypermediaNames = ["_links", "_embedded", "_actions", "_templates"];
+
     public Task TransformAsync(OpenApiSchema schema, OpenApiSchemaTransformerContext context, CancellationToken cancellationToken)
     {
         var provider = context.ApplicationServices.GetService<ILinkConfigProvider>();
@@ -48,6 +50,14 @@ internal sealed class HypermediaSchemaTransformer : IOpenApiSchemaTransformer
                 StripPlaceholders(schema, context);
                 HypermediaJsonSchemas.ApplyPaginationLinks(schema, cursor, DeclaredByType);
             }
+            else
+            {
+                // A polymorphic base of a configured type: the contract modifier injects the emit-stage
+                // placeholders so a configured subtype serialized through this base still emits its hypermedia,
+                // but the base documents no hypermedia of its own. Strip the injected placeholders. Types Cairn
+                // never decorates have no placeholders to strip, so this is a no-op for them.
+                StripHypermediaPlaceholders(schema, context);
+            }
         }
 
         return Task.CompletedTask;
@@ -67,6 +77,25 @@ internal sealed class HypermediaSchemaTransformer : IOpenApiSchemaTransformer
         foreach (var property in context.JsonTypeInfo.Properties)
         {
             if (property.AttributeProvider is null)
+            {
+                properties.Remove(property.Name);
+            }
+        }
+    }
+
+    // Removes only Cairn's built-in hypermedia placeholders (a JsonTypeInfo property with one of the reserved
+    // names and no backing member). Unlike StripPlaceholders this never touches other member-less properties,
+    // so it is safe to run over every unconfigured type without disturbing a DTO's own schema.
+    private static void StripHypermediaPlaceholders(OpenApiSchema schema, OpenApiSchemaTransformerContext context)
+    {
+        if (schema.Properties is not { Count: > 0 } properties)
+        {
+            return;
+        }
+
+        foreach (var property in context.JsonTypeInfo.Properties)
+        {
+            if (property.AttributeProvider is null && Array.IndexOf(HypermediaNames, property.Name) >= 0)
             {
                 properties.Remove(property.Name);
             }

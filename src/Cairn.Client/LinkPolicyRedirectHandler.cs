@@ -64,16 +64,37 @@ internal sealed class LinkPolicyRedirectHandler(Func<Uri, bool> allowLink) : Del
             || name.Equals("Cookie", StringComparison.OrdinalIgnoreCase)
             || name.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase);
 
-    // If the response came back from a different URI than was sent, an inner handler followed a redirect
+    // If the response came back from a different resource than was sent, an inner handler followed a redirect
     // itself — hops this policy never saw. That is a misconfiguration (a primary handler with
-    // AllowAutoRedirect left on); fail loudly instead of silently skipping enforcement.
+    // AllowAutoRedirect left on); fail loudly instead of silently skipping enforcement. Compare only the
+    // scheme/host/path, not the query: an inner handler that merely rewrites the request (e.g. appends an
+    // API-key query parameter) is not a redirect to another resource and must not trip this guard.
     private static void EnsureRedirectsAreVisible(Uri? sent, HttpResponseMessage response)
     {
-        if (sent is not null && response.RequestMessage?.RequestUri is { } final && final != sent)
+        if (sent is null || response.RequestMessage?.RequestUri is not { } final)
         {
+            return;
+        }
+
+        if (!string.Equals(WithoutQuery(sent), WithoutQuery(final), StringComparison.Ordinal))
+        {
+            response.Dispose();
             throw new InvalidOperationException(
                 $"The response for '{sent}' arrived from '{final}': an inner handler followed a redirect the link policy could not inspect. Disable AllowAutoRedirect on the primary HTTP handler.");
         }
+    }
+
+    // The URI up to but not including the query (and fragment): scheme, authority, and path.
+    private static string WithoutQuery(Uri uri)
+    {
+        if (uri.IsAbsoluteUri)
+        {
+            return uri.GetLeftPart(UriPartial.Path);
+        }
+
+        var text = uri.OriginalString;
+        var query = text.IndexOf('?', StringComparison.Ordinal);
+        return query < 0 ? text : text[..query];
     }
 
     private static bool IsRedirect(HttpStatusCode status)

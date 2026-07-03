@@ -46,7 +46,7 @@ public override void Configure(ILinkBuilder<Order> builder)
 }
 ```
 
-The relation argument is a `LinkRelation`. A `string` converts implicitly (`"invoice"` above), or use one of the `IanaLinkRelations` constants. Relations compare case-insensitively, per RFC 8288 — `"Related"` and `"related"` are the same relation, and links declared under case variants merge under one wire key (the first-declared casing is emitted).
+The relation argument is a `LinkRelation`. A `string` converts implicitly (`"invoice"` above), or use one of the `IanaLinkRelations` constants. Relations compare case-insensitively, per RFC 8288 — `"Related"` and `"related"` are the same relation, and links declared under case variants merge under one wire key (the first-declared casing is emitted). A relation must carry a value: a `default(LinkRelation)` (the parameterless struct default, which no constructor produces) or an empty/whitespace string fails fast with an `ArgumentException` when the link or affordance is constructed, rather than surfacing later as a null `_links` key mid-serialization.
 
 ## Links (HAL link arrays)
 

@@ -48,6 +48,26 @@ public class CairnClientHardeningTests
         Assert.Contains("redirect", thrown.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task An_inner_handler_that_only_rewrites_the_query_is_not_treated_as_a_redirect()
+    {
+        // An inner handler that appends an API-key query parameter rewrites the request URI without redirecting
+        // to another resource; the visibility guard compares only scheme/host/path, so it must not trip.
+        var services = new ServiceCollection();
+        services.AddCairnClient(o =>
+        {
+            o.BaseAddress = new Uri("http://localhost");
+            o.AllowLink = _ => true;
+        }).ConfigurePrimaryHttpMessageHandler(() => new QueryRewritingStub());
+
+        await using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<CairnClient>();
+
+        var result = await client.GetAsync<JsonElement>("/start");
+
+        Assert.True(result.IsSuccess);
+    }
+
     [Theory]
     [InlineData("http://evil.example/final", false)]
     [InlineData("http://localhost/final", true)]
@@ -145,6 +165,21 @@ public class CairnClientHardeningTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             request.RequestUri = new Uri("http://internal.example/secret");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new StringContent("{}", Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
+    // Mimics an inner handler that rewrites the request URI without redirecting — e.g. appending an API-key
+    // query parameter — so the final URI differs from the sent one only in its query.
+    private sealed class QueryRewritingStub : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            request.RequestUri = new UriBuilder(request.RequestUri!) { Query = "api_key=secret" }.Uri;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 RequestMessage = request,

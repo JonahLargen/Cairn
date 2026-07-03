@@ -105,11 +105,23 @@ public sealed class CairnClient
 
     /// <summary>
     /// Gets a collection from <paramref name="url"/>, with each item as a navigable resource. <paramref name="itemsProperty"/>
+    /// names the array property on an envelope (default <c>items</c>); a bare JSON array is read directly. Does not throw on an HTTP error status.
+    /// </summary>
+    public Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty = "items", CancellationToken cancellationToken = default)
+        => GetCollectionAsync<TItem>(url, itemsProperty, ifNoneMatch: null, cancellationToken);
+
+    /// <summary>
+    /// Gets a collection from <paramref name="url"/>, with each item as a navigable resource. <paramref name="itemsProperty"/>
     /// names the array property on an envelope (default <c>items</c>); a bare JSON array is read directly. Pass
     /// <paramref name="ifNoneMatch"/> (an ETag) for a conditional GET — a <c>304</c> response surfaces as
     /// <see cref="CollectionResult{TItem}.IsNotModified"/>. Does not throw on an HTTP error status.
     /// </summary>
-    public async Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty = "items", string? ifNoneMatch = null, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// This overload is separate from the token-only <see cref="GetCollectionAsync{TItem}(string, string, CancellationToken)"/>
+    /// so that adding conditional-GET support stayed binary-compatible: callers compiled against the earlier
+    /// signature keep binding to it, and a positional <see cref="CancellationToken"/> still resolves there.
+    /// </remarks>
+    public async Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty, string? ifNoneMatch, CancellationToken cancellationToken = default)
     {
         using var timebox = Timebox(cancellationToken);
         using var request = CreateRequest(HttpMethod.Get, url);
