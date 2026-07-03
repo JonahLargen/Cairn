@@ -1,0 +1,12 @@
+<Project>
+  <!-- Inherit every central package version from the repository root. -->
+  <Import Project="../Directory.Packages.props" />
+
+  <!-- The root pin floors Microsoft.CodeAnalysis.CSharp at 4.8.0 so the shipped analyzers load on the
+       .NET 8 SDK. BenchmarkDotNet needs 4.14+ transitively, and its default out-of-process toolchain
+       emits an auto-generated child project under this tree that inherits Directory.Packages.props but
+       NOT any csproj-inline override. Lifting the pin here lets that generated project restore too. -->
+  <ItemGroup>
+    <PackageVersion Update="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+</Project>

@@ -17,11 +17,8 @@
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
   </ItemGroup>
 
-  <!-- The central Roslyn pin is floored at 4.8.0 so the shipped analyzers load on the .NET 8 SDK,
-       but BenchmarkDotNet needs 4.14+ transitively. Benchmarks are never shipped, so lift the pin here. -->
-  <ItemGroup>
-    <PackageVersion Update="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
-  </ItemGroup>
+  <!-- The Roslyn pin lift for BenchmarkDotNet lives in benchmarks/Directory.Packages.props so the
+       auto-generated out-of-process child project inherits it too (a csproj override would not reach it). -->
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cairn.AspNetCore\Cairn.AspNetCore.csproj" />
