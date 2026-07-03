@@ -9,8 +9,7 @@ Versioning and publishing are fully tag-driven. There is no version number in th
 1. Merge PRs into `main` as usual. Every CI build produces preview packages versioned
    `X.Y.(Z+1)-preview.0.<height>` (where `vX.Y.Z` is the latest tag and `<height>` is the number of
    commits since it). They are attached to the CI run as an artifact if you want to try one locally.
-2. When you want to ship, update the `Unreleased` section of `CHANGELOG.md` into a version heading
-   (optional but recommended), then tag the commit and push the tag:
+2. When you want to ship, tag the commit and push the tag (release notes are auto-generated from PR titles):
 
    ```sh
    git tag v0.6.0
