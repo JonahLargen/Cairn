@@ -72,13 +72,15 @@ Legend: 🔴 major · 🟡 minor · 🔵 suggestion. File references are to the 
   blames the wrong thing** (`Internal/CairnLinkInjectionModifier.cs:44-47` +
   `CairnLinkRecorder.cs:583-585` — the emit-miss message points at deferred LINQ).
   Detect the contract-kind mismatch and say so.
-- 🔴 **OpenAPI schema pollution**: `_links`/`_embedded`/`_actions`/`_templates` are
-  injected into *every* object contract, so `AddOpenApi` documents four phantom
-  properties on every schema — including request bodies and unconfigured DTOs
-  (`CairnLinkInjectionModifier.cs:49-52`; acknowledged in
-  `src/Cairn.OpenApi/HypermediaSchemaTransformer.cs:20-23`). Strip placeholders
-  (identifiable via `AttributeProvider is null`) from non-linked types and all request
-  schemas.
+- 🔴 **OpenAPI schema pollution** *(empirically reproduced against a live host)*:
+  `_links`/`_embedded`/`_actions`/`_templates` are injected into *every* object
+  contract, so `AddOpenApi` documents four phantom properties on every schema —
+  including request bodies and unconfigured DTOs (`CairnLinkInjectionModifier.cs:49-52`;
+  acknowledged in `src/Cairn.OpenApi/HypermediaSchemaTransformer.cs:20-23`; custom
+  formatter property names leak the same way). Strip placeholders (identifiable via
+  `AttributeProvider is null`) from non-linked types and all request schemas, and add
+  the regression test that would have caught this (existing tests only check media
+  types and the no-`AddCairn` case).
 - 🔴 **`UseCairnOptionsHandler` can hijack CORS preflights and answers before authz**
   (`Internal/CairnOptionsMiddleware.cs:25-41`) — skip requests carrying
   `Access-Control-Request-Method`; document ordering relative to `UseCors`.
@@ -119,6 +121,41 @@ Legend: 🔴 major · 🟡 minor · 🔵 suggestion. File references are to the 
 
 ### Tooling (analyzers / generator / Swashbuckle / Testing)
 
+- 🔴 **CAIRN001 never validates `LinkTarget.RouteTemplate(...)`**
+  (`RouteNameAnalyzer.cs:82` checks `method == "Route"` only). `RouteTemplate` resolves
+  by route name identically at runtime and fails identically on a typo — a silent false
+  negative on a first-class API, with no test covering it.
+- 🔴 **The CAIRN001 code fix is invisible in IDEs.** CAIRN001 is reported from
+  `RegisterCompilationEndAction` and tagged `CompilationEnd`; Roslyn does not offer
+  lightbulb fixes for compilation-end diagnostics (dotnet/roslyn#24827), so the
+  "Change route name to '…'" fix only fires in tests and batch tooling. Either
+  restructure (compilation-start-cached name index consulted from the node action) or
+  document the limitation.
+- 🔴 **A route named `Routes` generates uncompilable code.** `Sanitize("Routes")` (any
+  casing) collides with the enclosing `Routes` class → CS0542; routes named
+  `Equals`/`GetHashCode`/`ToString` hide `object` members → CS0108, fatal under the
+  consumer's `TreatWarningsAsErrors` (`RoutesGenerator.cs:381-425`). The generator
+  guards route-vs-route collisions but not these; rename or drop with a diagnostic.
+- 🔴 **Cairn.Swashbuckle requires Swashbuckle.AspNetCore ≥ 10.x** — the filter signature
+  (`Apply(IOpenApiSchema, …)`, `CairnSwaggerSchemaFilter.cs:17-19`) is
+  source/binary-incompatible with Swashbuckle 6.x–9.x (Microsoft.OpenApi 1.x), where
+  most of the installed base lives. Deliberate or not, nothing in the package
+  description or docs says so — document the floor prominently (or multi-target
+  behind `#if`).
+- 🟡 **CAIRN002 never analyzes the MVC opt-in path** — `[CairnLinks]` controller actions
+  are not covered at all, and `var ep = app.MapGet(...); ep.WithLinks();` (chain broken
+  through a variable) is silently skipped (`MissingLinkConfigAnalyzer.cs:76-95`). Also
+  no cross-project escape hatch: one local `LinkConfig` plus the rest in a referenced
+  assembly false-positives with no `cairn_additional_configured_types` equivalent.
+- 🟡 **Named-argument reordering defeats CAIRN001** —
+  `LinkTarget.Route(routeValues: v, routeName: "x")` is skipped
+  (`RouteNameAnalyzer.cs:226-231` takes the positionally-first argument); and
+  `LinkTarget.WithName(...)` (a HAL link *name*, not a route) is collected as a declared
+  route name because `WithName` collection is receiver-blind (`:75-81`).
+- 🟡 **Analyzer hygiene nits**: `MissingLinkConfigAnalyzer.cs:225` builds a
+  `HashSet<(ITypeSymbol, Location)>` without `SymbolEqualityComparer` (RS1024
+  territory); no `helpLinkUri` on any descriptor; `AnalyzerReleases.Shipped.md` is still
+  empty although the rules are published (fold the promotion into RELEASING.md).
 - 🟡 **Generator: regex route constraints with `{}` corrupt parameter parsing**
   (`RoutesGenerator.cs:296-341` — first-`}` scan; `{slug:regex(^\d{{4}}$)}` drops the
   parameter). Use brace-depth scanning.
@@ -132,6 +169,13 @@ Legend: 🔴 major · 🟡 minor · 🔵 suggestion. File references are to the 
 - 🟡 **Testing package disagrees with the spec and the client**: absent `method` defaults
   to `""` instead of `GET` (`HypermediaResponse.cs:103,197`), and bare-string inline
   options aren't parsed (`:239-257`) though the client accepts them.
+- 🟡 **Testing can't parse Cairn's own collection wire shape** —
+  `HypermediaResponse.Parse` on a bare JSON-array root (how Cairn serializes bare
+  collections, `CairnLinkRecorder.cs:104-109`) silently returns an all-empty response
+  instead of erroring (`HypermediaResponse.cs:59-75`). Add
+  `ParseAll`/`ReadHypermediaListAsync` for array roots; throw on array in `Parse`.
+- 🟡 **Testing parser captures only `name`/`title`/`templated` per link** — the wire's
+  `type`/`deprecation`/`hreflang`/`profile` members can't be asserted at all.
 
 ### Docs / packaging drift (all confirmed)
 
@@ -205,10 +249,15 @@ Ordered by leverage:
 8. **Localization hook** for prompts/titles (ties into the culture-cache bug above).
 9. **HTTP `Link` header emission (RFC 8288)** — cheap, spec-pure, gives HEAD requests and
    generic clients (Ketting) something to chew on.
-10. **OpenAPI completeness** — document `ETag`/304/412 on `WithETag` endpoints,
-    `Deprecation`/`Sunset` headers, and typed `_embedded` schemas; per-format schema
-    variants so `application/hal+json` responses don't advertise `_actions` (see
-    `Shared/HypermediaJsonSchemas.cs:36-43` — one schema serves three shapes).
+10. **OpenAPI completeness** — `WithDeprecation` endpoints should set
+    `operation.Deprecated = true` and document the `Deprecation`/`Sunset`/`Link`
+    response headers (the metadata is already discoverable); `WithETag` endpoints
+    should document `ETag`/304/412 (add an `ETagMetadata` marker — today it's
+    filter-only); `HypermediaProblem` should implement `IEndpointMetadataProvider` so
+    endpoints returning it document anything at all; typed `_embedded` schemas; and
+    per-format schema variants so `application/hal+json` responses don't advertise
+    `_actions` (see `Shared/HypermediaJsonSchemas.cs:36-43` — one schema serves three
+    shapes).
 11. **Client observability** — an `ActivitySource` with `link.relation`/`affordance.name`
     tags; the server side is genuinely well instrumented, the client has nothing.
 12. **Testing package gaps** — `NotHaveTemplate`, embedded-count assertions, `And`-chain
@@ -261,6 +310,11 @@ Ordered by leverage:
 9. **Strong naming: decide now.** Defensible to skip on net8+, but impossible to add
    post-1.0 without an identity break; some enterprise NuGet gatekeeping still requires
    it. Document the decision either way.
+10. **Analyzers ship only inside Cairn.AspNetCore** — a project referencing just
+    Cairn.Core (where `LinkTarget.Route` lives, e.g. a shared contracts assembly holding
+    the `LinkConfig<T>`s) gets no CAIRN001/002 at all. Probably intentional; document
+    it, and note the packing uses hardcoded `bin\$(Configuration)\netstandard2.0\` paths
+    that would silently pack stale DLLs on a TFM change.
 
 ---
 
