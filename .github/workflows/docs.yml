@@ -24,6 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # DocFX's metadata step builds the projects, which runs MinVer; MinVer warns on a shallow
+          # clone and warnings are errors repo-wide, so the docs build needs full tag history too.
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4

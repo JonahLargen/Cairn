@@ -88,6 +88,31 @@ public class CairnClientEtagTests
         Assert.Empty(result.EnsureSuccess().Items);
     }
 
+    [Fact]
+    public async Task A_conditional_collection_get_surfaces_the_etag_and_returns_not_modified()
+    {
+        await using var app = await StartAsync();
+        using var httpClient = app.GetTestClient();
+        var client = new CairnClient(httpClient);
+
+        var orders = (await client.GetCollectionAsync<EtagOrder>("/orders")).EnsureSuccess();
+        Assert.NotEmpty(orders.Items);
+        Assert.Equal("\"orders-v1\"", orders.ETag);
+
+        var again = await client.GetCollectionAsync<EtagOrder>("/orders", ifNoneMatch: orders.ETag);
+
+        Assert.True(again.IsNotModified);
+        Assert.Equal(304, again.Status);
+
+        // A 304 to a conditional collection GET mirrors the single-resource path: a bodiless success (no
+        // items, no problem) whose ETag is preserved for the next round trip.
+        Assert.True(again.IsSuccess);
+        Assert.Null(again.Problem);
+        var page = again.EnsureSuccess();
+        Assert.Empty(page.Items);
+        Assert.Equal("\"orders-v1\"", page.ETag);
+    }
+
     private static async Task<WebApplication> StartAsync()
     {
         var builder = WebApplication.CreateBuilder();
@@ -97,6 +122,14 @@ public class CairnClientEtagTests
         var app = builder.Build();
         app.MapGet("/always-304", () => Results.StatusCode(304));
         app.MapPost("/always-304", () => Results.StatusCode(304));
+        app.MapGet("/orders", (HttpContext http) =>
+            {
+                http.Response.Headers.ETag = "\"orders-v1\"";
+                return http.Request.Headers.IfNoneMatch.ToString() == "\"orders-v1\""
+                    ? Results.StatusCode(304)
+                    : Results.Ok(new[] { new EtagOrder(1), new EtagOrder(2) });
+            })
+            .WithLinks();
         app.MapGet("/orders/{id:int}", (int id, HttpContext http) =>
             {
                 http.Response.Headers.ETag = "\"v1\"";

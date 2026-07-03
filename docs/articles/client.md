@@ -124,7 +124,7 @@ foreach (Resource<Order> item in orders.Items)
 }
 ```
 
-`CollectionResource<TItem>` carries the collection's own hypermedia — `Items`, `Links`, `LinksFor(relation)`, `HasLink`, `Affordances`, `HasAffordance`, `InvokeAsync` — plus `FollowAsync(relation, itemsProperty = "items")` to page to another `CollectionResult<TItem>` of the same item type:
+`CollectionResource<TItem>` carries the collection's own hypermedia — `Items`, `Links`, `LinksFor(relation)`, `HasLink`, `Affordances`, `HasAffordance`, `ETag`, `InvokeAsync` — plus `FollowAsync(relation, itemsProperty = "items")` to page to another `CollectionResult<TItem>` of the same item type:
 
 ```csharp
 if (orders.HasLink("next"))
@@ -206,7 +206,19 @@ if (again.IsNotModified)
 }
 ```
 
-A 304 is a success, not a failure: `IsSuccess` is `true`, `Problem` is `null`, and `EnsureSuccess()` yields a bodiless resource (`Value` is `null`) whose `ETag` is preserved. The same holds for a 304 answered to an invoked affordance or a collection request. The server side of this round trip is [`WithETag`](conditional-requests.md).
+A 304 is a success, not a failure: `IsSuccess` is `true`, `Problem` is `null`, and `EnsureSuccess()` yields a bodiless resource (`Value` is `null`) whose `ETag` is preserved. The same holds for a 304 answered to an invoked affordance or a collection request. `GetCollectionAsync` takes the same `ifNoneMatch`, and a `CollectionResource<TItem>` exposes its `ETag` to feed back:
+
+```csharp
+CollectionResource<Order> orders = (await client.GetCollectionAsync<Order>("/orders")).EnsureSuccess();
+
+CollectionResult<Order> again = await client.GetCollectionAsync<Order>("/orders", ifNoneMatch: orders.ETag);
+if (again.IsNotModified)
+{
+    // Unchanged — keep the previously cached page.
+}
+```
+
+The server side of this round trip is [`WithETag`](conditional-requests.md).
 
 For writes, pass the same `ETag` as `ifMatch` to an affordance so the server can reject a stale update (`412 Precondition Failed`):
 
