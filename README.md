@@ -8,7 +8,7 @@
 [![Downloads](https://img.shields.io/nuget/dt/Cairn.AspNetCore.svg?label=Downloads)](https://www.nuget.org/packages/Cairn.AspNetCore)
 [![CI](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml/badge.svg)](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-jonahlargen.github.io%2FCairn-blue)](https://jonahlargen.github.io/Cairn)
-[![License: MIT](https://img.shields.io/github/license/JonahLargen/Cairn?color=green)](LICENSE)
+[![License: MIT](https://img.shields.io/github/license/JonahLargen/Cairn?label=license&color=green)](LICENSE)
 ![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0%20%7C%2010.0-512BD4)
 
 [Documentation](https://jonahlargen.github.io/Cairn) ·
