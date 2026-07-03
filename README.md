@@ -7,7 +7,6 @@
 [![NuGet](https://img.shields.io/nuget/v/Cairn.AspNetCore.svg?logo=nuget&label=NuGet)](https://www.nuget.org/packages/Cairn.AspNetCore)
 [![Coverage](https://img.shields.io/codecov/c/github/JonahLargen/Cairn?logo=codecov&label=Coverage)](https://app.codecov.io/gh/JonahLargen/Cairn)
 [![CI](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml/badge.svg)](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-jonahlargen.github.io%2FCairn-blue)](https://jonahlargen.github.io/Cairn)
 [![License: MIT](https://img.shields.io/github/license/JonahLargen/Cairn?label=license&color=green)](LICENSE)
 ![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0%20%7C%2010.0-512BD4)
 
