@@ -36,7 +36,7 @@ Cairn projects the navigation links onto the response:
 
 ### Without implementing the interface
 
-If your response is an existing envelope type you would rather not change, register a reader with `AddPaging<T>` instead. It maps your type to a `PagedView` (`Items`, `Page`, `PageSize`, `TotalCount`); the type gets pagination links without implementing `IPagedResource`.
+If your response is an existing envelope type you would rather not change, register a reader with `AddPaging<T>` instead. It maps your type to a `PagedView` (`Items`, `Page`, `PageSize`, `TotalCount`); the type gets pagination links without implementing `IPagedResource`. Like [link configurations](link-configs.md), the registration honors inheritance: a subclass of a registered envelope type is decorated the same way.
 
 ```csharp
 builder.Services.AddCairn(cairn =>

@@ -227,6 +227,56 @@ public class CairnUriTemplateTests
         Assert.Equal("?active=true&since=2026-07-03T08:30:00.0000000Z", Uri.UnescapeDataString(handler.RequestUri!.Query));
     }
 
+    [Fact]
+    public async Task Path_style_map_explode_emits_a_bare_key_for_an_empty_value()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        var variables = new { keys = new Dictionary<string, string> { ["a"] = "", ["b"] = "x" } };
+        await client.FollowAsync<JsonElement>(new Link("m", "/m{;keys*}", templated: true), variables);
+
+        // RFC 6570: ';' has an empty ifemp string, so an empty value contributes ";a", not ";a=".
+        Assert.Contains("/m;a;b=x", handler.RequestUri!.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task Query_map_explode_keeps_key_equals_for_an_empty_value()
+    {
+        var (client, handler) = NewRecordingClient();
+
+        var variables = new { keys = new Dictionary<string, string> { ["a"] = "" } };
+        await client.FollowAsync<JsonElement>(new Link("m", "/m{?keys*}", templated: true), variables);
+
+        Assert.Contains("/m?a=", handler.RequestUri!.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task A_prefix_modifier_on_a_composite_value_is_a_processing_error()
+    {
+        var (client, _) = NewRecordingClient();
+
+        // RFC 6570 §2.4.1: prefix modifiers are not applicable to composite values.
+        await Assert.ThrowsAsync<FormatException>(() => client.FollowAsync<JsonElement>(
+            new Link("l", "/l/{items:2}", templated: true),
+            new { items = new[] { "a", "b", "c" } }));
+    }
+
+    [Theory]
+    [InlineData("/x{=y}")]
+    [InlineData("/x{!y}")]
+    [InlineData("/x{@y}")]
+    [InlineData("/x{|y}")]
+    public async Task Reserved_operators_are_a_processing_error(string template)
+    {
+        var (client, _) = NewRecordingClient();
+
+        // RFC 6570 §2.2 op-reserve: these operators are reserved for future extensions; processing them as
+        // literal variable names would silently expand the wrong thing.
+        await Assert.ThrowsAsync<FormatException>(() => client.FollowAsync<JsonElement>(
+            new Link("x", template, templated: true),
+            new { y = "1" }));
+    }
+
     private static (CairnClient Client, RecordingHandler Handler) NewRecordingClient()
     {
         var handler = new RecordingHandler();

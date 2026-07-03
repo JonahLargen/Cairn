@@ -154,11 +154,16 @@ internal static class HypermediaJsonSchemas
         }
     }
 
+    // Every hypermedia section is response-only decoration, so each schema below carries readOnly: true —
+    // the schema component for a type is shared between its response and request-body usages, and readOnly
+    // is OpenAPI's way of saying "sent in responses, never in requests".
+
     // _links: a relation's value is a single link object, or a JSON array when several links share the rel
     // (curies is always an array, even with one entry).
     private static OpenApiSchema LinksSchema() => new()
     {
         Type = JsonSchemaType.Object,
+        ReadOnly = true,
         Description = "Hypermedia links keyed by relation: a single link object, or a JSON array of link objects when several links share the relation (curies is always an array).",
         AdditionalProperties = new OpenApiSchema
         {
@@ -183,6 +188,7 @@ internal static class HypermediaJsonSchemas
         return new OpenApiSchema
         {
             Type = JsonSchemaType.Object,
+            ReadOnly = true,
             Description = $"Pagination links keyed by relation ({string.Join("/", relations)}); relations without a target page are omitted.",
             Properties = properties,
             AdditionalProperties = new OpenApiSchema
@@ -216,6 +222,7 @@ internal static class HypermediaJsonSchemas
     private static OpenApiSchema EmbeddedSchema() => new()
     {
         Type = JsonSchemaType.Object,
+        ReadOnly = true,
         Description = "Embedded resources keyed by relation (HAL _embedded); each value is a resource or an array of resources.",
         AdditionalProperties = new OpenApiSchema(),
     };
@@ -223,6 +230,7 @@ internal static class HypermediaJsonSchemas
     private static OpenApiSchema ActionsSchema() => new()
     {
         Type = JsonSchemaType.Object,
+        ReadOnly = true,
         Description = "Available actions (affordances) keyed by name. Emitted for the default JSON format; HAL omits affordances and HAL-FORMS projects them into _templates instead.",
         AdditionalProperties = new OpenApiSchema
         {
@@ -241,6 +249,7 @@ internal static class HypermediaJsonSchemas
     private static OpenApiSchema TemplatesSchema() => new()
     {
         Type = JsonSchemaType.Object,
+        ReadOnly = true,
         Description = "HAL-FORMS templates keyed by name. Emitted in place of _actions for application/prs.hal-forms+json responses.",
         AdditionalProperties = new OpenApiSchema
         {
@@ -275,6 +284,7 @@ internal static class HypermediaJsonSchemas
             ["type"] = new OpenApiSchema { Type = JsonSchemaType.String },
             ["placeholder"] = new OpenApiSchema { Type = JsonSchemaType.String },
             ["regex"] = new OpenApiSchema { Type = JsonSchemaType.String },
+            ["minLength"] = new OpenApiSchema { Type = JsonSchemaType.Integer },
             ["maxLength"] = new OpenApiSchema { Type = JsonSchemaType.Integer },
             ["min"] = new OpenApiSchema { Type = JsonSchemaType.Number },
             ["max"] = new OpenApiSchema { Type = JsonSchemaType.Number },

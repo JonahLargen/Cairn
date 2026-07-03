@@ -24,7 +24,12 @@ internal sealed class CairnOptionsMiddleware
 
     public Task Invoke(HttpContext context)
     {
-        if (!HttpMethods.IsOptions(context.Request.Method) || AppHandlesOptions(context))
+        // A CORS preflight (OPTIONS carrying Access-Control-Request-Method) belongs to the CORS middleware:
+        // answering it here would return 204 without any Access-Control-* headers and the browser would
+        // block the actual request.
+        if (!HttpMethods.IsOptions(context.Request.Method)
+            || context.Request.Headers.ContainsKey(Microsoft.Net.Http.Headers.HeaderNames.AccessControlRequestMethod)
+            || AppHandlesOptions(context))
         {
             return _next(context);
         }

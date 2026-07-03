@@ -4,9 +4,10 @@ namespace Cairn;
 public sealed record Link
 {
     /// <summary>Creates a link.</summary>
-    /// <exception cref="ArgumentException"><paramref name="href"/> is null or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="relation"/> is <c>default(LinkRelation)</c>, or <paramref name="href"/> is null or whitespace.</exception>
     public Link(LinkRelation relation, string href, bool templated = false)
     {
+        relation.ThrowIfDefault(nameof(relation));
         if (string.IsNullOrWhiteSpace(href))
         {
             throw new ArgumentException("Link href must not be null or whitespace.", nameof(href));

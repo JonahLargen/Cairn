@@ -12,7 +12,7 @@ namespace Cairn.AspNetCore.Internal;
 /// at configure time. Also appends <see cref="CairnJsonContext"/> so Cairn's own wire types resolve under a
 /// source-gen-only resolver.
 /// </summary>
-internal sealed class CairnJsonOptionsSetup(IHttpContextAccessor accessor, CairnOptions options) :
+internal sealed class CairnJsonOptionsSetup(IHttpContextAccessor accessor, CairnOptions options, ILinkConfigProvider configs) :
     IPostConfigureOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>,
     IPostConfigureOptions<Microsoft.AspNetCore.Mvc.JsonOptions>
 {
@@ -27,7 +27,7 @@ internal sealed class CairnJsonOptionsSetup(IHttpContextAccessor accessor, Cairn
 
     private void Apply(JsonSerializerOptions serializer)
     {
-        var modifier = new CairnLinkInjectionModifier(accessor, options);
+        var modifier = new CairnLinkInjectionModifier(accessor, options, configs);
         serializer.TypeInfoResolver = JsonTypeInfoResolver.Combine(
                 serializer.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver(),
                 CairnJsonContext.Default)

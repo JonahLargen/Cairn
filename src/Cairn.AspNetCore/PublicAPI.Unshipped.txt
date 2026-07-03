@@ -157,7 +157,7 @@ static Cairn.AspNetCore.CairnEndpointExtensions.WithHypermediaFormat<TBuilder>(t
 static Cairn.AspNetCore.CairnEndpointExtensions.WithLinks<TBuilder>(this TBuilder builder) -> TBuilder
 static Cairn.AspNetCore.CairnEndpointExtensions.WithPageLinks<TBuilder>(this TBuilder builder, System.Func<Microsoft.AspNetCore.Http.HttpRequest!, int, string!>! pageLink) -> TBuilder
 static Cairn.AspNetCore.CairnHttpOptionsExtensions.UseCairnOptionsHandler(this Microsoft.AspNetCore.Builder.IApplicationBuilder! app) -> Microsoft.AspNetCore.Builder.IApplicationBuilder!
-static Cairn.AspNetCore.CairnPreconditions.Evaluate(Microsoft.AspNetCore.Http.HttpRequest! request, string! currentETag, bool requireIfMatch = false) -> Microsoft.AspNetCore.Http.IResult?
+static Cairn.AspNetCore.CairnPreconditions.Evaluate(Microsoft.AspNetCore.Http.HttpRequest! request, string? currentETag, bool requireIfMatch = false) -> Microsoft.AspNetCore.Http.IResult?
 static Cairn.AspNetCore.CairnResults.Problem(int status, string? title = null, string? detail = null, string? type = null, string? instance = null) -> Cairn.AspNetCore.HypermediaProblem!
 static Cairn.AspNetCore.CairnServiceCollectionExtensions.AddCairn(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Cairn.AspNetCore.CairnOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Cairn.AspNetCore.CursorPage<T>.operator !=(Cairn.AspNetCore.CursorPage<T>? left, Cairn.AspNetCore.CursorPage<T>? right) -> bool

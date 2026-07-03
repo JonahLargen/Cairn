@@ -88,6 +88,9 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
         return null;
     }
 
+    // A point-in-time view of the registered configs, for startup validation.
+    internal IReadOnlyDictionary<Type, ICompiledLinkConfig> Snapshot => _configs;
+
     /// <summary>
     /// Returns the config registered for <paramref name="resourceType"/>, falling back to its nearest
     /// registered base class, or <see langword="null"/> if neither exists.

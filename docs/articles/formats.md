@@ -58,17 +58,16 @@ v2.WithHypermediaFormat(HypermediaFormat.Hal);
 
 ### Accept negotiation
 
-When no per-endpoint format is set, Cairn inspects the request's `Accept` header. Quality values are honored per RFC 9110: a media type with `q=0` is excluded, and among the acceptable types the highest quality wins. The recognized media types are:
+When no per-endpoint format is set, Cairn inspects the request's `Accept` header and negotiates per RFC 9110 §12.5.1. For each format the server can emit, the *most specific* matching range determines its quality — exact media type, then `application/*+json`, then `application/*`, then `*/*` — a `q=0` match excludes the format, and the highest-quality survivor wins. Quality ties break on specificity (so `Accept: */*, application/hal+json` asks for HAL, regardless of order), then on server preference: the configured `DefaultFormat` first, then registered custom formatters, then the remaining built-ins. The emittable media types are:
 
-| `Accept` media type | Selected format |
+| Media type | Format |
 | --- | --- |
 | `application/prs.hal-forms+json` | `HypermediaFormat.HalForms` |
 | `application/hal+json` | `HypermediaFormat.Hal` |
 | a registered custom formatter's media type | that formatter |
 | `application/json` | `HypermediaFormat.Default` |
-| `application/*+json`, `application/*`, `*/*` | no preference — falls back to `CairnOptions.DefaultFormat` |
 
-Explicit `application/json` selects the Default format even when `DefaultFormat` is set to something else; the wildcards express no preference, so they defer to `DefaultFormat` (with `DefaultFormat = Hal`, an `Accept: */*` request gets HAL).
+Explicit `application/json` selects the Default format even when `DefaultFormat` is set to something else. A bare wildcard (`*/*` or `application/*`) matches every format equally, so it expresses no preference and the tie goes to `DefaultFormat` (with `DefaultFormat = Hal`, an `Accept: */*` request gets HAL). `application/*+json` is narrower: it covers the `+json` hypermedia types but **not** plain `application/json`, so it negotiates a hypermedia format even when `DefaultFormat` is Default.
 
 A higher-quality plain `application/json` (or wildcard) outranks a lower-quality `hal`/`hal-forms`. For example:
 
@@ -76,7 +75,7 @@ A higher-quality plain `application/json` (or wildcard) outranks a lower-quality
 Accept: application/hal+json;q=0.5, application/json;q=0.9
 ```
 
-selects `HypermediaFormat.Default`, because the plain JSON type has the higher quality. Unrecognized media types are ignored. If the `Accept` header is absent or names nothing recognizable, negotiation defers to `CairnOptions.DefaultFormat`.
+selects `HypermediaFormat.Default`, because the plain JSON type has the higher quality — specificity only breaks quality ties. Unrecognized media types are ignored. If the `Accept` header is absent, names nothing emittable, or excludes everything with `q=0`, negotiation defers to `CairnOptions.DefaultFormat` — except that a `q=0` aimed at the default format itself is honored when the header accepts something else (e.g. `Accept: application/hal+json;q=0, */*` with `DefaultFormat = Hal` serves plain JSON, not HAL).
 
 Set `NegotiateFormat = false` to disable `Accept`-based selection entirely, so the format comes only from a per-endpoint override or `DefaultFormat`:
 

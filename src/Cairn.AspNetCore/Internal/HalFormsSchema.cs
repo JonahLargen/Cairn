@@ -3,45 +3,112 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Cairn.AspNetCore.Internal;
 
-/// <summary>Derives HAL-FORMS template properties from an input type's data annotations (cached per type).</summary>
+/// <summary>
+/// Derives HAL-FORMS template properties from an input type's data annotations. Field names come from the
+/// serializer contract that will bind the submitted payload — <c>[JsonPropertyName]</c> and the host's
+/// <c>PropertyNamingPolicy</c> (camelCase, snake_case, ...) — so a generic client builds payloads whose
+/// fields the endpoint actually reads. Results are cached per serializer contract and input type, and per UI
+/// culture when any prompt is localizable (<c>[Display(ResourceType = ...)]</c>).
+/// </summary>
 internal static class HalFormsSchema
 {
-    private static readonly ConcurrentDictionary<Type, IReadOnlyList<HalFormsProperty>> Cache = new();
+    private static readonly ConditionalWeakTable<JsonSerializerOptions, ConcurrentDictionary<(Type Input, string Culture), IReadOnlyList<HalFormsProperty>>> Caches = new();
+
+    // Whether a type's prompts resolve through localized resources; only those types cache per culture.
+    private static readonly ConcurrentDictionary<Type, bool> Localizable = new();
+
     private static readonly IReadOnlyList<HalFormsProperty> Empty = [];
 
-    public static IReadOnlyList<HalFormsProperty> For(Type? input)
-        => input is null ? Empty : Cache.GetOrAdd(input, Build);
+    public static IReadOnlyList<HalFormsProperty> For(Type? input, JsonSerializerOptions serializer)
+    {
+        if (input is null)
+        {
+            return Empty;
+        }
 
-    private static IReadOnlyList<HalFormsProperty> Build(Type input)
+        var cache = Caches.GetOrCreateValue(serializer);
+        if (Localizable.TryGetValue(input, out var localized)
+            && cache.TryGetValue((input, localized ? CultureInfo.CurrentUICulture.Name : string.Empty), out var cached))
+        {
+            return cached;
+        }
+
+        var properties = Build(input, serializer, out var localizable);
+        Localizable[input] = localizable;
+        return cache.GetOrAdd((input, localizable ? CultureInfo.CurrentUICulture.Name : string.Empty), properties);
+    }
+
+    private static IReadOnlyList<HalFormsProperty> Build(Type input, JsonSerializerOptions serializer, out bool localizable)
     {
         var properties = new List<HalFormsProperty>();
 
         // Not thread-safe; one per build (the result is cached anyway).
         var nullability = new NullabilityInfoContext();
+        localizable = false;
 
-        foreach (var property in input.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        foreach (var (property, name) in ContractProperties(input, serializer))
         {
-            if (property.CanRead && property.GetIndexParameters().Length == 0)
-            {
-                properties.Add(BuildProperty(property, nullability));
-            }
+            localizable |= property.GetCustomAttribute<DisplayAttribute>()?.ResourceType is not null;
+            properties.Add(BuildProperty(property, name, nullability, serializer));
         }
 
         return properties;
     }
 
-    private static HalFormsProperty BuildProperty(PropertyInfo property, NullabilityInfoContext nullability)
+    // The members the endpoint will bind are the serializer contract's properties, under the contract's wire
+    // names. Cairn's own injected contract properties have no member behind them and are skipped; fields stay
+    // out, as before. Falls back to reflection plus the options' naming policy when the resolver cannot
+    // produce an object contract for the type (e.g. a source-gen-only resolver that doesn't know it).
+    private static IEnumerable<(PropertyInfo Property, string Name)> ContractProperties(Type input, JsonSerializerOptions serializer)
+    {
+        JsonTypeInfo? contract = null;
+        try
+        {
+            contract = serializer.GetTypeInfo(input);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
+        {
+        }
+
+        if (contract is { Kind: JsonTypeInfoKind.Object })
+        {
+            foreach (var member in contract.Properties)
+            {
+                if (member.AttributeProvider is PropertyInfo property && property.GetIndexParameters().Length == 0)
+                {
+                    yield return (property, member.Name);
+                }
+            }
+
+            yield break;
+        }
+
+        foreach (var property in input.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (property.CanRead && property.GetIndexParameters().Length == 0)
+            {
+                var name = property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name
+                    ?? serializer.PropertyNamingPolicy?.ConvertName(property.Name)
+                    ?? property.Name;
+                yield return (property, name);
+            }
+        }
+    }
+
+    private static HalFormsProperty BuildProperty(PropertyInfo property, string name, NullabilityInfoContext nullability, JsonSerializerOptions serializer)
     {
         var underlying = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
         var range = property.GetCustomAttribute<RangeAttribute>();
         var display = property.GetCustomAttribute<DisplayAttribute>();
 
-        return new HalFormsProperty(JsonNamingPolicy.CamelCase.ConvertName(property.Name))
+        return new HalFormsProperty(name)
         {
             Prompt = display?.GetName(),
             Required = IsRequired(property, nullability) ? true : null,
@@ -49,11 +116,12 @@ internal static class HalFormsSchema
             Type = property.GetCustomAttribute<EmailAddressAttribute>() is not null ? "email" : MapType(underlying),
             Placeholder = display?.GetPrompt(),
             Regex = property.GetCustomAttribute<RegularExpressionAttribute>()?.Pattern,
+            MinLength = MinLengthOf(property),
             MaxLength = property.GetCustomAttribute<StringLengthAttribute>()?.MaximumLength ?? MaxLengthOf(property),
             Min = ToDouble(range?.Minimum),
             Max = ToDouble(range?.Maximum),
             Value = DefaultValueOf(property),
-            Options = BuildOptions(underlying),
+            Options = BuildOptions(underlying, serializer),
         };
     }
 
@@ -62,7 +130,7 @@ internal static class HalFormsSchema
     private static bool IsRequired(PropertyInfo property, NullabilityInfoContext nullability)
     {
         if (property.GetCustomAttribute<RequiredAttribute>() is not null
-            || property.GetCustomAttribute<System.Runtime.CompilerServices.RequiredMemberAttribute>() is not null)
+            || property.GetCustomAttribute<RequiredMemberAttribute>() is not null)
         {
             return true;
         }
@@ -87,10 +155,11 @@ internal static class HalFormsSchema
             var value => Convert.ToString(value, CultureInfo.InvariantCulture),
         };
 
-    // An enum-typed (or bool) property becomes a fixed list of selectable values. Option values must round-trip
-    // through the host's model binder: the default System.Text.Json binder reads enums as numbers, so emit the
-    // underlying numeric value (with the name as the prompt) unless the enum opts into string serialization.
-    private static HalFormsOptions? BuildOptions(Type underlying)
+    // An enum-typed (or bool) property becomes a fixed list of selectable values. Option values must
+    // round-trip through the host's binder, so each member is serialized through the host's options: numeric
+    // under the default converter, or the exact wire string when the enum serializes as strings — whether the
+    // converter is declared on the enum type or added to the serializer options, naming policy and all.
+    private static HalFormsOptions? BuildOptions(Type underlying, JsonSerializerOptions serializer)
     {
         if (underlying == typeof(bool))
         {
@@ -102,21 +171,41 @@ internal static class HalFormsSchema
             return null;
         }
 
-        var asStrings = SerializesAsString(underlying);
-        var options = new List<HalFormsOption>();
-        foreach (var name in Enum.GetNames(underlying))
+        var names = Enum.GetNames(underlying);
+        var values = Enum.GetValues(underlying);
+        var options = new List<HalFormsOption>(names.Length);
+        for (var i = 0; i < names.Length; i++)
         {
-            var value = asStrings ? name : Enum.Format(underlying, Enum.Parse(underlying, name), "D");
-            options.Add(new HalFormsOption(name, value));
+            options.Add(new HalFormsOption(names[i], WireValueOf(values.GetValue(i)!, underlying, serializer)));
         }
 
         return options.Count > 0 ? new HalFormsOptions(options) : null;
     }
 
-    private static bool SerializesAsString(Type enumType)
-        => enumType.GetCustomAttribute<JsonConverterAttribute>()?.ConverterType is { } converter
-            && (converter == typeof(JsonStringEnumConverter)
-                || (converter.IsGenericType && converter.GetGenericTypeDefinition() == typeof(JsonStringEnumConverter<>)));
+    private static string WireValueOf(object value, Type enumType, JsonSerializerOptions serializer)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(value, enumType, serializer));
+            var root = document.RootElement;
+            if (root.ValueKind == JsonValueKind.String && root.GetString() is { } text)
+            {
+                return text;
+            }
+
+            if (root.ValueKind == JsonValueKind.Number)
+            {
+                return root.GetRawText();
+            }
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException or JsonException)
+        {
+        }
+
+        // A converter that emits something other than a string or number (or none at all): fall back to the
+        // default binder's numeric form.
+        return Enum.Format(enumType, value, "D");
+    }
 
     private static string? MapType(Type type)
     {
@@ -159,6 +248,19 @@ internal static class HalFormsSchema
     {
         var length = property.GetCustomAttribute<MaxLengthAttribute>()?.Length;
         return length is int value and >= 0 ? value : null;
+    }
+
+    // [StringLength(MinimumLength = ...)] or [MinLength], mirroring how maxLength is derived.
+    private static int? MinLengthOf(PropertyInfo property)
+    {
+        var length = property.GetCustomAttribute<StringLengthAttribute>()?.MinimumLength;
+        if (length is > 0)
+        {
+            return length;
+        }
+
+        length = property.GetCustomAttribute<MinLengthAttribute>()?.Length;
+        return length is > 0 ? length : null;
     }
 
     private static double? ToDouble(object? value)

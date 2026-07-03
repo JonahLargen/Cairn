@@ -4,9 +4,10 @@ namespace Cairn;
 public sealed record Affordance
 {
     /// <summary>Creates an affordance.</summary>
-    /// <exception cref="ArgumentException"><paramref name="href"/> or <paramref name="method"/> is null or whitespace.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is <c>default(LinkRelation)</c>, or <paramref name="href"/> or <paramref name="method"/> is null or whitespace.</exception>
     public Affordance(LinkRelation name, string href, string method)
     {
+        name.ThrowIfDefault(nameof(name));
         if (string.IsNullOrWhiteSpace(href))
         {
             throw new ArgumentException("Affordance href must not be null or whitespace.", nameof(href));

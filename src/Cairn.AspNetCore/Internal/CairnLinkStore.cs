@@ -136,6 +136,10 @@ internal sealed record HalFormsProperty([property: JsonPropertyName("name")] str
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Regex { get; init; }
 
+    [JsonPropertyName("minLength")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MinLength { get; init; }
+
     [JsonPropertyName("maxLength")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxLength { get; init; }

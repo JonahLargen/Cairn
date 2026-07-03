@@ -54,6 +54,14 @@ internal static class UriTemplate
             return;
         }
 
+        // The op-reserve operators (=, comma, !, @, |) are reserved for future extensions; using one is a
+        // processing error per RFC 6570 §2.2 — treating them as literal variable names would silently expand
+        // the wrong thing.
+        if (expression[0] is '=' or ',' or '!' or '@' or '|')
+        {
+            throw new FormatException($"The URI template expression '{{{expression}}}' uses the reserved operator '{expression[0]}' (RFC 6570 op-reserve); it cannot be processed.");
+        }
+
         var op = expression[0] is '+' or '#' or '.' or '/' or ';' or '?' or '&' ? expression[0] : '\0';
         var names = (op == '\0' ? expression : expression[1..]).Split(',');
         var (prefix, separator, named, ifEmpty, allowReserved) = OperatorFor(op);
@@ -102,10 +110,12 @@ internal static class UriTemplate
                     break;
 
                 case VariableKind.List:
+                    ThrowIfPrefixedComposite(prefixLength, name);
                     any |= AppendList(result, name, (IEnumerable)value, any ? separator : prefix, separator, named, ifEmpty, allowReserved, explode);
                     break;
 
                 case VariableKind.Map:
+                    ThrowIfPrefixedComposite(prefixLength, name);
                     any |= AppendMap(result, name, value, any ? separator : prefix, separator, named, ifEmpty, allowReserved, explode);
                     break;
             }
@@ -197,7 +207,18 @@ internal static class UriTemplate
             any = true;
             if (explode)
             {
-                result.Append(Encode(key, allowReserved)).Append('=').Append(Encode(text, allowReserved));
+                // Exploded pairs use the key as the name. Under a named operator an empty value follows the
+                // operator's ifemp rule (RFC 6570 §3.2.1): ';' appends the bare key (";key", not ";key="),
+                // '?'/'&' append "key=".
+                result.Append(Encode(key, allowReserved));
+                if (named && text.Length == 0)
+                {
+                    result.Append(ifEmpty);
+                }
+                else
+                {
+                    result.Append('=').Append(Encode(text, allowReserved));
+                }
             }
             else
             {
@@ -206,6 +227,16 @@ internal static class UriTemplate
         }
 
         return any;
+    }
+
+    // "Prefix modifiers are not applicable to variables that have composite values" — a processing error per
+    // RFC 6570 §2.4.1, not something to silently ignore.
+    private static void ThrowIfPrefixedComposite(int prefixLength, string name)
+    {
+        if (prefixLength >= 0)
+        {
+            throw new FormatException($"The URI template applies a prefix modifier to '{name}', whose value is composite (a list or map); RFC 6570 §2.4.1 defines this as a processing error.");
+        }
     }
 
     private static (string Prefix, string Separator, bool Named, string IfEmpty, bool AllowReserved) OperatorFor(char op) => op switch

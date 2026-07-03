@@ -53,6 +53,67 @@ public class CairnNegotiationTests
     }
 
     [Fact]
+    public async Task An_exact_type_beats_an_earlier_wildcard_on_a_quality_tie()
+    {
+        await using var app = await StartAsync();
+        using var client = app.GetTestClient();
+
+        // RFC 9110 §12.5.1: both ranges carry q=1, but the exact type is more specific — the client is
+        // asking for hal, not "whatever". Order in the header must not decide.
+        client.DefaultRequestHeaders.Accept.ParseAdd("*/*, application/hal+json");
+
+        var response = await client.GetAsync("/orders/42");
+
+        Assert.Equal("application/hal+json", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task A_json_suffix_range_selects_a_hypermedia_json_format_not_plain_json()
+    {
+        await using var app = await StartAsync();
+        using var client = app.GetTestClient();
+
+        // application/*+json covers hal/hal-forms but NOT plain application/json — serving the default
+        // format would answer with a media type outside the requested range.
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/*+json");
+
+        var response = await client.GetAsync("/orders/42");
+
+        Assert.Equal("application/hal+json", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task Excluding_the_default_format_with_q0_negotiates_another_acceptable_one()
+    {
+        await using var app = await StartAsync(o => o.DefaultFormat = HypermediaFormat.Hal);
+        using var client = app.GetTestClient();
+
+        // q=0 means "not acceptable" — the wildcard invites everything else, so hal (the configured
+        // default) must not be served.
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/hal+json;q=0, */*");
+
+        var response = await client.GetAsync("/orders/42");
+        var root = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        Assert.True(root.TryGetProperty("_actions", out _));   // plain/default format, not hal
+    }
+
+    [Fact]
+    public async Task Quality_still_outranks_specificity()
+    {
+        await using var app = await StartAsync();
+        using var client = app.GetTestClient();
+
+        // Specificity only breaks quality ties: a q=1 suffix range beats a q=0.8 exact type.
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/*+json, application/json;q=0.8");
+
+        var response = await client.GetAsync("/orders/42");
+
+        Assert.Equal("application/hal+json", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
     public async Task A_single_resource_is_still_relabeled_in_hal_mode()
     {
         await using var app = await StartAsync(o => o.DefaultFormat = HypermediaFormat.Hal);

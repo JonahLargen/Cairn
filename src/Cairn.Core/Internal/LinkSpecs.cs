@@ -218,6 +218,9 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
 
     public ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkContext, ValueTask<LinkTarget>> target)
     {
+        // Fail at configuration time: a default(LinkRelation) that slipped past the compiler's nullability
+        // analysis would otherwise surface mid-serialization.
+        relation.ThrowIfDefault(nameof(relation));
         ArgumentNullException.ThrowIfNull(target);
         var spec = new LinkSpec<T> { Relation = relation, SingleTarget = target };
         LinkSpecs.Add(spec);
@@ -232,6 +235,7 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
 
     public ILinkSpec<T> Links(LinkRelation relation, Func<T, LinkContext, ValueTask<IEnumerable<LinkTarget>>> targets)
     {
+        relation.ThrowIfDefault(nameof(relation));
         ArgumentNullException.ThrowIfNull(targets);
         var spec = new LinkSpec<T> { Relation = relation, Targets = targets };
         LinkSpecs.Add(spec);
@@ -252,6 +256,7 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
 
     public IAffordanceSpec<T> Affordance(LinkRelation name, Func<T, LinkContext, ValueTask<LinkTarget>> target)
     {
+        name.ThrowIfDefault(nameof(name));
         ArgumentNullException.ThrowIfNull(target);
         var spec = new AffordanceSpec<T> { Relation = name, Target = target };
         AffordanceSpecs.Add(spec);
@@ -260,12 +265,14 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
 
     public void Embed<TChild>(LinkRelation relation, Func<T, TChild?> resource) where TChild : class
     {
+        relation.ThrowIfDefault(nameof(relation));
         ArgumentNullException.ThrowIfNull(resource);
         EmbedSpecs.Add(new EmbedSpec<T> { Relation = relation, Single = true, Resolve = t => resource(t) is { } child ? new object[] { child } : [] });
     }
 
     public void EmbedMany<TChild>(LinkRelation relation, Func<T, IEnumerable<TChild>?> resources)
     {
+        relation.ThrowIfDefault(nameof(relation));
         ArgumentNullException.ThrowIfNull(resources);
         EmbedSpecs.Add(new EmbedSpec<T>
         {
