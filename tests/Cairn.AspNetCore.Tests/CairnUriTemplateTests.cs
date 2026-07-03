@@ -214,6 +214,19 @@ public class CairnUriTemplateTests
         Assert.EndsWith("/items/%F0%9F%98%80a", handler.RequestUri!.AbsoluteUri);
     }
 
+    [Fact]
+    public async Task Bools_and_dates_expand_in_wire_format_not_dotnet_display_format()
+    {
+        var (client, handler) = NewRecordingClient();
+        var link = new Link("search", "/search{?active,since}", templated: true);
+
+        await client.FollowAsync<JsonElement>(link, new { active = true, since = new DateTime(2026, 7, 3, 8, 30, 0, DateTimeKind.Utc) });
+
+        // Lowercase bools and round-trip ("O") dates survive a server-side parse; "True" and
+        // "07/03/2026 08:30:00" do not.
+        Assert.Equal("?active=true&since=2026-07-03T08:30:00.0000000Z", Uri.UnescapeDataString(handler.RequestUri!.Query));
+    }
+
     private static (CairnClient Client, RecordingHandler Handler) NewRecordingClient()
     {
         var handler = new RecordingHandler();

@@ -10,10 +10,16 @@ Cairn.Client.AffordanceField.MaxLength.get -> int?
 Cairn.Client.AffordanceField.MaxLength.init -> void
 Cairn.Client.AffordanceField.Min.get -> double?
 Cairn.Client.AffordanceField.Min.init -> void
+Cairn.Client.AffordanceField.Cols.get -> int?
+Cairn.Client.AffordanceField.Cols.init -> void
+Cairn.Client.AffordanceField.MinLength.get -> int?
+Cairn.Client.AffordanceField.MinLength.init -> void
 Cairn.Client.AffordanceField.Name.get -> string!
 Cairn.Client.AffordanceField.Name.init -> void
-Cairn.Client.AffordanceField.Options.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Cairn.Client.AffordanceField.Options.get -> System.Collections.Generic.IReadOnlyList<Cairn.Client.AffordanceFieldOption!>!
 Cairn.Client.AffordanceField.Options.init -> void
+Cairn.Client.AffordanceField.OptionsLink.get -> string?
+Cairn.Client.AffordanceField.OptionsLink.init -> void
 Cairn.Client.AffordanceField.Placeholder.get -> string?
 Cairn.Client.AffordanceField.Placeholder.init -> void
 Cairn.Client.AffordanceField.Prompt.get -> string?
@@ -24,8 +30,27 @@ Cairn.Client.AffordanceField.Regex.get -> string?
 Cairn.Client.AffordanceField.Regex.init -> void
 Cairn.Client.AffordanceField.Required.get -> bool
 Cairn.Client.AffordanceField.Required.init -> void
+Cairn.Client.AffordanceField.Rows.get -> int?
+Cairn.Client.AffordanceField.Rows.init -> void
+Cairn.Client.AffordanceField.SelectedValues.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Cairn.Client.AffordanceField.SelectedValues.init -> void
+Cairn.Client.AffordanceField.Step.get -> double?
+Cairn.Client.AffordanceField.Step.init -> void
+Cairn.Client.AffordanceField.Templated.get -> bool
+Cairn.Client.AffordanceField.Templated.init -> void
 Cairn.Client.AffordanceField.Type.get -> string?
 Cairn.Client.AffordanceField.Type.init -> void
+Cairn.Client.AffordanceField.Value.get -> string?
+Cairn.Client.AffordanceField.Value.init -> void
+Cairn.Client.AffordanceFieldOption
+Cairn.Client.AffordanceFieldOption.<Clone>$() -> Cairn.Client.AffordanceFieldOption!
+Cairn.Client.AffordanceFieldOption.AffordanceFieldOption(string! Value) -> void
+Cairn.Client.AffordanceFieldOption.Deconstruct(out string! Value) -> void
+Cairn.Client.AffordanceFieldOption.Equals(Cairn.Client.AffordanceFieldOption? other) -> bool
+Cairn.Client.AffordanceFieldOption.Prompt.get -> string?
+Cairn.Client.AffordanceFieldOption.Prompt.init -> void
+Cairn.Client.AffordanceFieldOption.Value.get -> string!
+Cairn.Client.AffordanceFieldOption.Value.init -> void
 Cairn.Client.CairnClient
 Cairn.Client.CairnClient.CairnClient(System.Net.Http.HttpClient! http, System.Text.Json.JsonSerializerOptions? jsonOptions = null, System.Func<System.Uri!, bool>? allowLink = null) -> void
 Cairn.Client.CairnClient.FollowAsync<T>(Cairn.Link! link, object? variables, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.ClientResult<T>!>!
@@ -129,6 +154,9 @@ Cairn.Client.Resource<T>.Value.get -> T?
 override Cairn.Client.AffordanceField.Equals(object? obj) -> bool
 override Cairn.Client.AffordanceField.GetHashCode() -> int
 override Cairn.Client.AffordanceField.ToString() -> string!
+override Cairn.Client.AffordanceFieldOption.Equals(object? obj) -> bool
+override Cairn.Client.AffordanceFieldOption.GetHashCode() -> int
+override Cairn.Client.AffordanceFieldOption.ToString() -> string!
 override Cairn.Client.Curie.Equals(object? obj) -> bool
 override Cairn.Client.Curie.GetHashCode() -> int
 override Cairn.Client.Curie.ToString() -> string!
@@ -137,6 +165,8 @@ override Cairn.Client.Problem.GetHashCode() -> int
 override Cairn.Client.Problem.ToString() -> string!
 static Cairn.Client.AffordanceField.operator !=(Cairn.Client.AffordanceField? left, Cairn.Client.AffordanceField? right) -> bool
 static Cairn.Client.AffordanceField.operator ==(Cairn.Client.AffordanceField? left, Cairn.Client.AffordanceField? right) -> bool
+static Cairn.Client.AffordanceFieldOption.operator !=(Cairn.Client.AffordanceFieldOption? left, Cairn.Client.AffordanceFieldOption? right) -> bool
+static Cairn.Client.AffordanceFieldOption.operator ==(Cairn.Client.AffordanceFieldOption? left, Cairn.Client.AffordanceFieldOption? right) -> bool
 static Cairn.Client.CairnClientServiceCollectionExtensions.AddCairnClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Cairn.Client.CairnClientOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IHttpClientBuilder!
 static Cairn.Client.Curie.operator !=(Cairn.Client.Curie? left, Cairn.Client.Curie? right) -> bool
 static Cairn.Client.Curie.operator ==(Cairn.Client.Curie? left, Cairn.Client.Curie? right) -> bool

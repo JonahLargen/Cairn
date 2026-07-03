@@ -31,10 +31,18 @@ public sealed class CairnClient
     /// <c>HttpClientHandler.AllowAutoRedirect</c>.
     /// </param>
     /// <remarks>
+    /// <para>
     /// Unless <paramref name="http"/> already declares default <c>Accept</c> headers, each request asks for
     /// the hypermedia the client can parse: <c>application/prs.hal-forms+json</c>, then
     /// <c>application/hal+json</c>, then <c>application/json</c>. The injected client's
     /// <see cref="HttpClient.DefaultRequestHeaders"/> are never modified.
+    /// </para>
+    /// <para>
+    /// Response bodies are read headers-first and streamed into the JSON parser rather than buffered twice,
+    /// and their size is limited by <see cref="HttpClient.MaxResponseContentBufferSize"/> (an oversized body
+    /// throws <see cref="HttpRequestException"/>). The default limit is 2 GB — lower it on
+    /// <paramref name="http"/> when talking to servers that are not fully trusted.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="http"/> is null.</exception>
     public CairnClient(HttpClient http, JsonSerializerOptions? jsonOptions = null, Func<Uri, bool>? allowLink = null)
@@ -51,14 +59,15 @@ public sealed class CairnClient
     /// </summary>
     public async Task<ClientResult<T>> GetAsync<T>(string url, string? ifNoneMatch = null, CancellationToken cancellationToken = default)
     {
+        using var timebox = Timebox(cancellationToken);
         using var request = CreateRequest(HttpMethod.Get, url);
         if (ifNoneMatch is not null)
         {
             request.Headers.TryAddWithoutValidation("If-None-Match", ifNoneMatch);
         }
 
-        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        return await ReadResultAsync<T>(response, cancellationToken).ConfigureAwait(false);
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timebox.Token).ConfigureAwait(false);
+        return await ReadResultAsync<T>(response, timebox.Token).ConfigureAwait(false);
     }
 
     /// <summary>Follows a link to another resource. Does not throw on an HTTP error status.</summary>
@@ -88,9 +97,10 @@ public sealed class CairnClient
 
     private async Task<ClientResult<T>> FollowResolvedAsync<T>(string href, CancellationToken cancellationToken)
     {
+        using var timebox = Timebox(cancellationToken);
         using var request = CreateRequest(HttpMethod.Get, Authorize(href));
-        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        return await ReadResultAsync<T>(response, cancellationToken).ConfigureAwait(false);
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timebox.Token).ConfigureAwait(false);
+        return await ReadResultAsync<T>(response, timebox.Token).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -99,18 +109,20 @@ public sealed class CairnClient
     /// </summary>
     public async Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty = "items", CancellationToken cancellationToken = default)
     {
+        using var timebox = Timebox(cancellationToken);
         using var request = CreateRequest(HttpMethod.Get, url);
-        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        return await ReadCollectionResultAsync<TItem>(response, itemsProperty, cancellationToken).ConfigureAwait(false);
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timebox.Token).ConfigureAwait(false);
+        return await ReadCollectionResultAsync<TItem>(response, itemsProperty, timebox.Token).ConfigureAwait(false);
     }
 
     // A templated pagination link (e.g. a "next" carrying "{?page}") expands with the variables; with none,
     // every unresolved expression collapses per RFC 6570, so a templated next/prev stays followable.
     internal async Task<CollectionResult<TItem>> FollowCollectionAsync<TItem>(Link link, object? variables, string itemsProperty, CancellationToken cancellationToken)
     {
+        using var timebox = Timebox(cancellationToken);
         using var request = CreateRequest(HttpMethod.Get, Authorize(ResolveHref(link, variables)));
-        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        return await ReadCollectionResultAsync<TItem>(response, itemsProperty, cancellationToken).ConfigureAwait(false);
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timebox.Token).ConfigureAwait(false);
+        return await ReadCollectionResultAsync<TItem>(response, itemsProperty, timebox.Token).ConfigureAwait(false);
     }
 
     /// <summary>Invokes an affordance, optionally with a request body and an <paramref name="ifMatch"/> ETag (optimistic concurrency). Does not throw on an HTTP error status.</summary>
@@ -118,13 +130,14 @@ public sealed class CairnClient
     /// <exception cref="InvalidOperationException">The affordance target is rejected by the configured link policy.</exception>
     public async Task<ClientResult> InvokeAsync(Affordance affordance, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
     {
-        using var response = await SendAsync(affordance, body, ifMatch, cancellationToken).ConfigureAwait(false);
+        using var timebox = Timebox(cancellationToken);
+        using var response = await SendAsync(affordance, body, ifMatch, timebox.Token).ConfigureAwait(false);
         if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotModified)
         {
             return ClientResult.Success((int)response.StatusCode);
         }
 
-        return ClientResult.Failure((int)response.StatusCode, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
+        return ClientResult.Failure((int)response.StatusCode, await ReadProblemAsync(response, timebox.Token).ConfigureAwait(false));
     }
 
     /// <summary>Invokes an affordance and reads its returned resource, optionally with an <paramref name="ifMatch"/> ETag. Does not throw on an HTTP error status.</summary>
@@ -132,8 +145,9 @@ public sealed class CairnClient
     /// <exception cref="InvalidOperationException">The affordance target is rejected by the configured link policy.</exception>
     public async Task<ClientResult<TResult>> InvokeAsync<TResult>(Affordance affordance, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
     {
-        using var response = await SendAsync(affordance, body, ifMatch, cancellationToken).ConfigureAwait(false);
-        return await ReadResultAsync<TResult>(response, cancellationToken).ConfigureAwait(false);
+        using var timebox = Timebox(cancellationToken);
+        using var response = await SendAsync(affordance, body, ifMatch, timebox.Token).ConfigureAwait(false);
+        return await ReadResultAsync<TResult>(response, timebox.Token).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -249,10 +263,12 @@ public sealed class CairnClient
 
         if (field.Options.Count > 0)
         {
-            var text = value.ValueKind == JsonValueKind.String ? value.GetString()! : value.ToString();
-            if (!field.Options.Contains(text, StringComparer.Ordinal))
+            // Compare the JSON scalar the server would receive: GetRawText keeps a bool as "true"/"false"
+            // (the values the server emits in its options), where JsonElement.ToString() yields "True".
+            var text = value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText();
+            if (!field.Options.Any(option => string.Equals(option.Value, text, StringComparison.Ordinal)))
             {
-                (errors ??= []).Add($"'{field.Name}' must be one of: {string.Join(", ", field.Options)}.");
+                (errors ??= []).Add($"'{field.Name}' must be one of: {string.Join(", ", field.Options.Select(option => option.Value))}.");
             }
         }
     }
@@ -289,7 +305,7 @@ public sealed class CairnClient
             request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
         }
 
-        return await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 
     // Honor the affordance's declared contentType (HAL-FORMS): JSON media types serialize the body as JSON
@@ -432,22 +448,29 @@ public sealed class CairnClient
             return ClientResult<T>.Failure(status, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
         }
 
-        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
         var etag = response.Headers.ETag?.ToString();
-        if (IsBlank(bytes))
+        var (document, problem) = await ParseBodyAsync(response, cancellationToken).ConfigureAwait(false);
+        if (problem is not null)
+        {
+            return ClientResult<T>.Failure(status, problem);
+        }
+
+        if (document is null)
         {
             return ClientResult<T>.Success(status, EmptyResource<T>(etag));
         }
 
-        try
+        using (document)
         {
-            // Parse the body once: a single JsonDocument binds the typed value and the hypermedia.
-            using var document = JsonDocument.Parse(bytes);
-            return ClientResult<T>.Success(status, BuildResource<T>(document.RootElement, etag));
-        }
-        catch (JsonException exception)
-        {
-            return ClientResult<T>.Failure(status, ParseFailure(response, bytes, exception));
+            try
+            {
+                // A single JsonDocument binds the typed value and the hypermedia.
+                return ClientResult<T>.Success(status, BuildResource<T>(document.RootElement, etag));
+            }
+            catch (Exception exception) when (exception is JsonException or NotSupportedException)
+            {
+                return ClientResult<T>.Failure(status, BindFailure(typeof(T), response, exception));
+            }
         }
     }
 
@@ -467,27 +490,32 @@ public sealed class CairnClient
             return CollectionResult<TItem>.Failure(status, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
         }
 
-        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        if (IsBlank(bytes))
+        var (document, problem) = await ParseBodyAsync(response, cancellationToken).ConfigureAwait(false);
+        if (problem is not null)
+        {
+            return CollectionResult<TItem>.Failure(status, problem);
+        }
+
+        if (document is null)
         {
             return CollectionResult<TItem>.Success(status, new CollectionResource<TItem>(this, [], Empty<IReadOnlyList<Link>>(), Empty<Affordance>()));
         }
 
-        try
+        using (document)
         {
-            return CollectionResult<TItem>.Success(status, ReadCollection<TItem>(bytes, itemsProperty));
-        }
-        catch (JsonException exception)
-        {
-            return CollectionResult<TItem>.Failure(status, ParseFailure(response, bytes, exception));
+            try
+            {
+                return CollectionResult<TItem>.Success(status, ReadCollection<TItem>(document.RootElement, itemsProperty));
+            }
+            catch (Exception exception) when (exception is JsonException or NotSupportedException)
+            {
+                return CollectionResult<TItem>.Failure(status, BindFailure(typeof(TItem), response, exception));
+            }
         }
     }
 
-    private CollectionResource<TItem> ReadCollection<TItem>(byte[] bytes, string itemsProperty)
+    private CollectionResource<TItem> ReadCollection<TItem>(JsonElement root, string itemsProperty)
     {
-        using var document = JsonDocument.Parse(bytes);
-        var root = document.RootElement;
-
         // A bare array carries no collection-level links; an envelope's links live on its root object.
         var parsed = root.ValueKind == JsonValueKind.Object ? HypermediaParser.Parse(root) : ParsedHypermedia.Empty;
         var (links, affordances) = (parsed.Links, parsed.Affordances);
@@ -508,6 +536,24 @@ public sealed class CairnClient
         return new CollectionResource<TItem>(this, items, links, affordances);
     }
 
+    // Streams the body straight into the parser — the only whole-body buffer is the JsonDocument's own —
+    // while enforcing HttpClient.MaxResponseContentBufferSize, which HttpClient itself no longer applies
+    // once responses are read headers-first. A blank body (e.g. 204 No Content, or a 200 with no payload)
+    // returns neither a document nor a problem.
+    private async Task<(JsonDocument? Document, Problem? Problem)> ParseBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var body = new CappedBodyStream(stream, _http.MaxResponseContentBufferSize);
+        try
+        {
+            return (await JsonDocument.ParseAsync(body, cancellationToken: cancellationToken).ConfigureAwait(false), null);
+        }
+        catch (JsonException exception)
+        {
+            return body.SawContent ? (null, ParseFailure(response, body.Prefix, exception)) : (null, null);
+        }
+    }
+
     // A success body that isn't valid JSON must surface through the result contract (a Problem the caller
     // can inspect, or a CairnClientException from EnsureSuccess) — never as a raw JsonException.
     private static Problem ParseFailure(HttpResponseMessage response, byte[] bytes, JsonException exception)
@@ -516,6 +562,17 @@ public sealed class CairnClient
             Title = "The response body is not valid JSON.",
             Status = (int)response.StatusCode,
             Detail = $"The '{response.Content.Headers.ContentType?.ToString() ?? "unknown"}' body could not be parsed: {exception.Message} The body starts with: {Snippet(bytes)}",
+        };
+
+    // The body is valid JSON that doesn't deserialize to the requested type — report the binding failure
+    // as itself (not as "not valid JSON"), and keep NotSupportedException (an unbindable target type)
+    // inside the no-throw result contract.
+    private static Problem BindFailure(Type type, HttpResponseMessage response, Exception exception)
+        => new()
+        {
+            Title = $"The response body could not be bound to '{type.Name}'.",
+            Status = (int)response.StatusCode,
+            Detail = $"The '{response.Content.Headers.ContentType?.ToString() ?? "unknown"}' body is valid JSON, but it could not be deserialized: {exception.Message}",
         };
 
     private static string Snippet(byte[] bytes)
@@ -527,18 +584,18 @@ public sealed class CairnClient
 
     private static IReadOnlyDictionary<string, TValue> Empty<TValue>() => new Dictionary<string, TValue>();
 
-    // An empty or whitespace-only body (e.g. 204 No Content, or a 200 with no payload) is not JSON.
-    private static bool IsBlank(byte[] bytes)
+    // With headers-first responses HttpClient.Timeout covers only the wait for the headers; apply the same
+    // budget across the whole exchange (send + body read) so a slowly dripping body cannot hold the caller
+    // past the timeout the buffered default used to enforce.
+    private CancellationTokenSource Timebox(CancellationToken cancellationToken)
     {
-        foreach (var b in bytes)
+        var timebox = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (_http.Timeout != Timeout.InfiniteTimeSpan)
         {
-            if (b is not ((byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r'))
-            {
-                return false;
-            }
+            timebox.CancelAfter(_http.Timeout);
         }
 
-        return true;
+        return timebox;
     }
 
     // Builds a resource from a parsed element: binds the typed value and its links/affordances/fields/embedded.
@@ -549,9 +606,40 @@ public sealed class CairnClient
         return new Resource<T>(this, value, parsed.Links, parsed.Affordances, parsed.Fields, etag, parsed.Embedded, parsed.Curies);
     }
 
-    private static async Task<Problem> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    // Error bodies honor the same buffer cap as success bodies, but by truncation: a hostile server's
+    // oversized error document degrades to the status-derived problem instead of an unbounded allocation.
+    private async Task<Problem> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var maxBytes = (int)Math.Min(_http.MaxResponseContentBufferSize, int.MaxValue);
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[8192];
+        int read;
+        while (buffer.Length < maxBytes
+            && (read = await stream.ReadAsync(chunk.AsMemory(0, (int)Math.Min(chunk.Length, maxBytes - buffer.Length)), cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            buffer.Write(chunk, 0, read);
+        }
+
+        var body = DecodeBody(response.Content, buffer);
         return ProblemReader.ReadFrom(body, (int)response.StatusCode, response.ReasonPhrase);
+    }
+
+    private static string DecodeBody(HttpContent content, MemoryStream buffer)
+    {
+        var encoding = Encoding.UTF8;
+        if (content.Headers.ContentType?.CharSet is { Length: > 0 } charSet)
+        {
+            try
+            {
+                encoding = Encoding.GetEncoding(charSet.Trim('"'));
+            }
+            catch (ArgumentException)
+            {
+                // An unknown charset falls back to UTF-8 rather than failing the problem read.
+            }
+        }
+
+        return encoding.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 }

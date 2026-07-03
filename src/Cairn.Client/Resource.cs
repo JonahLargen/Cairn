@@ -67,7 +67,7 @@ public sealed class Resource<T>
         var prefix = relation[..colon];
         foreach (var curie in Curies)
         {
-            if (string.Equals(curie.Name, prefix, StringComparison.Ordinal))
+            if (string.Equals(curie.Name, prefix, StringComparison.OrdinalIgnoreCase))
             {
                 return curie.Templated ? UriTemplate.Expand(curie.Href, new { rel = relation[(colon + 1)..] }) : curie.Href;
             }
@@ -93,7 +93,7 @@ public sealed class Resource<T>
     /// <typeparam name="TChild">The embedded resource body type.</typeparam>
     public IReadOnlyList<Resource<TChild>> Embedded<TChild>(string relation)
     {
-        if (_embedded.ValueKind != JsonValueKind.Object || !_embedded.TryGetProperty(relation, out var value))
+        if (_embedded.ValueKind != JsonValueKind.Object || !TryGetEmbedded(relation, out var value))
         {
             return [];
         }
@@ -113,6 +113,27 @@ public sealed class Resource<T>
         }
 
         return value.ValueKind == JsonValueKind.Object ? [_client.BuildResource<TChild>(value)] : [];
+    }
+
+    // Relation types are case-insensitive (RFC 8288 §2.1): prefer an exact property match, then fall
+    // back to a case-insensitive scan of the _embedded object.
+    private bool TryGetEmbedded(string relation, out JsonElement value)
+    {
+        if (_embedded.TryGetProperty(relation, out value))
+        {
+            return true;
+        }
+
+        foreach (var property in _embedded.EnumerateObject())
+        {
+            if (string.Equals(property.Name, relation, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Follows the link with the given relation to another resource.</summary>
