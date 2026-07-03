@@ -57,18 +57,18 @@ public sealed class CairnClient
     /// Gets a resource and its hypermedia from <paramref name="url"/>. Pass <paramref name="ifNoneMatch"/> (an ETag) for a
     /// conditional GET — a <c>304</c> response surfaces as <see cref="ClientResult{T}.IsNotModified"/>. Does not throw on an HTTP error status.
     /// </summary>
-    public async Task<ClientResult<T>> GetAsync<T>(string url, string? ifNoneMatch = null, CancellationToken cancellationToken = default)
-    {
-        using var timebox = Timebox(cancellationToken);
-        using var request = CreateRequest(HttpMethod.Get, url);
-        if (ifNoneMatch is not null)
+    public Task<ClientResult<T>> GetAsync<T>(string url, string? ifNoneMatch = null, CancellationToken cancellationToken = default)
+        => TimeboxedAsync(async token =>
         {
-            request.Headers.TryAddWithoutValidation("If-None-Match", ifNoneMatch);
-        }
+            using var request = CreateRequest(HttpMethod.Get, url);
+            if (ifNoneMatch is not null)
+            {
+                request.Headers.TryAddWithoutValidation("If-None-Match", ifNoneMatch);
+            }
 
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timebox.Token).ConfigureAwait(false);
-        return await ReadResultAsync<T>(response, timebox.Token).ConfigureAwait(false);
-    }
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            return await ReadResultAsync<T>(response, token).ConfigureAwait(false);
+        }, cancellationToken);
 
     /// <summary>Follows a link to another resource. Does not throw on an HTTP error status.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="link"/> is null.</exception>
@@ -95,13 +95,13 @@ public sealed class CairnClient
         return FollowResolvedAsync<T>(ResolveHref(link, variables), cancellationToken);
     }
 
-    private async Task<ClientResult<T>> FollowResolvedAsync<T>(string href, CancellationToken cancellationToken)
-    {
-        using var timebox = Timebox(cancellationToken);
-        using var request = CreateRequest(HttpMethod.Get, Authorize(href));
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timebox.Token).ConfigureAwait(false);
-        return await ReadResultAsync<T>(response, timebox.Token).ConfigureAwait(false);
-    }
+    private Task<ClientResult<T>> FollowResolvedAsync<T>(string href, CancellationToken cancellationToken)
+        => TimeboxedAsync(async token =>
+        {
+            using var request = CreateRequest(HttpMethod.Get, Authorize(href));
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            return await ReadResultAsync<T>(response, token).ConfigureAwait(false);
+        }, cancellationToken);
 
     /// <summary>
     /// Gets a collection from <paramref name="url"/>, with each item as a navigable resource. <paramref name="itemsProperty"/>
@@ -121,53 +121,53 @@ public sealed class CairnClient
     /// so that adding conditional-GET support stayed binary-compatible: callers compiled against the earlier
     /// signature keep binding to it, and a positional <see cref="CancellationToken"/> still resolves there.
     /// </remarks>
-    public async Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty, string? ifNoneMatch, CancellationToken cancellationToken = default)
-    {
-        using var timebox = Timebox(cancellationToken);
-        using var request = CreateRequest(HttpMethod.Get, url);
-        if (ifNoneMatch is not null)
+    public Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty, string? ifNoneMatch, CancellationToken cancellationToken = default)
+        => TimeboxedAsync(async token =>
         {
-            request.Headers.TryAddWithoutValidation("If-None-Match", ifNoneMatch);
-        }
+            using var request = CreateRequest(HttpMethod.Get, url);
+            if (ifNoneMatch is not null)
+            {
+                request.Headers.TryAddWithoutValidation("If-None-Match", ifNoneMatch);
+            }
 
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timebox.Token).ConfigureAwait(false);
-        return await ReadCollectionResultAsync<TItem>(response, itemsProperty, timebox.Token).ConfigureAwait(false);
-    }
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            return await ReadCollectionResultAsync<TItem>(response, itemsProperty, token).ConfigureAwait(false);
+        }, cancellationToken);
 
     // A templated pagination link (e.g. a "next" carrying "{?page}") expands with the variables; with none,
     // every unresolved expression collapses per RFC 6570, so a templated next/prev stays followable.
-    internal async Task<CollectionResult<TItem>> FollowCollectionAsync<TItem>(Link link, object? variables, string itemsProperty, CancellationToken cancellationToken)
-    {
-        using var timebox = Timebox(cancellationToken);
-        using var request = CreateRequest(HttpMethod.Get, Authorize(ResolveHref(link, variables)));
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timebox.Token).ConfigureAwait(false);
-        return await ReadCollectionResultAsync<TItem>(response, itemsProperty, timebox.Token).ConfigureAwait(false);
-    }
+    internal Task<CollectionResult<TItem>> FollowCollectionAsync<TItem>(Link link, object? variables, string itemsProperty, CancellationToken cancellationToken)
+        => TimeboxedAsync(async token =>
+        {
+            using var request = CreateRequest(HttpMethod.Get, Authorize(ResolveHref(link, variables)));
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            return await ReadCollectionResultAsync<TItem>(response, itemsProperty, token).ConfigureAwait(false);
+        }, cancellationToken);
 
     /// <summary>Invokes an affordance, optionally with a request body and an <paramref name="ifMatch"/> ETag (optimistic concurrency). Does not throw on an HTTP error status.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="affordance"/> is null.</exception>
     /// <exception cref="InvalidOperationException">The affordance target is rejected by the configured link policy.</exception>
-    public async Task<ClientResult> InvokeAsync(Affordance affordance, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
-    {
-        using var timebox = Timebox(cancellationToken);
-        using var response = await SendAsync(affordance, body, ifMatch, timebox.Token).ConfigureAwait(false);
-        if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotModified)
+    public Task<ClientResult> InvokeAsync(Affordance affordance, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
+        => TimeboxedAsync(async token =>
         {
-            return ClientResult.Success((int)response.StatusCode);
-        }
+            using var response = await SendAsync(affordance, body, ifMatch, token).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotModified)
+            {
+                return ClientResult.Success((int)response.StatusCode);
+            }
 
-        return ClientResult.Failure((int)response.StatusCode, await ReadProblemAsync(response, timebox.Token).ConfigureAwait(false));
-    }
+            return ClientResult.Failure((int)response.StatusCode, await ReadProblemAsync(response, token).ConfigureAwait(false));
+        }, cancellationToken);
 
     /// <summary>Invokes an affordance and reads its returned resource, optionally with an <paramref name="ifMatch"/> ETag. Does not throw on an HTTP error status.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="affordance"/> is null.</exception>
     /// <exception cref="InvalidOperationException">The affordance target is rejected by the configured link policy.</exception>
-    public async Task<ClientResult<TResult>> InvokeAsync<TResult>(Affordance affordance, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
-    {
-        using var timebox = Timebox(cancellationToken);
-        using var response = await SendAsync(affordance, body, ifMatch, timebox.Token).ConfigureAwait(false);
-        return await ReadResultAsync<TResult>(response, timebox.Token).ConfigureAwait(false);
-    }
+    public Task<ClientResult<TResult>> InvokeAsync<TResult>(Affordance affordance, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
+        => TimeboxedAsync(async token =>
+        {
+            using var response = await SendAsync(affordance, body, ifMatch, token).ConfigureAwait(false);
+            return await ReadResultAsync<TResult>(response, token).ConfigureAwait(false);
+        }, cancellationToken);
 
     /// <summary>
     /// Submits a HAL-FORMS affordance: validates <paramref name="values"/> against <paramref name="fields"/>
@@ -616,16 +616,26 @@ public sealed class CairnClient
 
     // With headers-first responses HttpClient.Timeout covers only the wait for the headers; apply the same
     // budget across the whole exchange (send + body read) so a slowly dripping body cannot hold the caller
-    // past the timeout the buffered default used to enforce.
-    private CancellationTokenSource Timebox(CancellationToken cancellationToken)
+    // past the timeout the buffered default used to enforce. When the budget elapses, follow HttpClient's
+    // own convention — a TaskCanceledException with a TimeoutException inner — so callers can keep telling
+    // a timeout apart from their own cancellation.
+    private async Task<TResult> TimeboxedAsync<TResult>(Func<CancellationToken, Task<TResult>> exchange, CancellationToken cancellationToken)
     {
-        var timebox = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var timebox = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (_http.Timeout != Timeout.InfiniteTimeSpan)
         {
             timebox.CancelAfter(_http.Timeout);
         }
 
-        return timebox;
+        try
+        {
+            return await exchange(timebox.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (timebox.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            var message = $"The request was canceled due to the configured HttpClient.Timeout of {_http.Timeout.TotalSeconds} seconds elapsing.";
+            throw new TaskCanceledException(message, new TimeoutException(message, exception), timebox.Token);
+        }
     }
 
     // Builds a resource from a parsed element: binds the typed value and its links/affordances/fields/embedded.

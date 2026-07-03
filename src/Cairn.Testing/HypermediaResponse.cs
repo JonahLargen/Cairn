@@ -12,6 +12,18 @@ public sealed record HypermediaLink(string Href, string? Title)
 
     /// <summary>Whether <see cref="Href"/> is a URI template (HAL <c>templated</c>).</summary>
     public bool Templated { get; init; }
+
+    /// <summary>An optional media type hint for the target (RFC 8288 <c>type</c>).</summary>
+    public string? Type { get; init; }
+
+    /// <summary>An optional URL documenting the link's deprecation (HAL <c>deprecation</c>).</summary>
+    public string? Deprecation { get; init; }
+
+    /// <summary>An optional language hint for the target (RFC 8288 <c>hreflang</c>).</summary>
+    public string? Hreflang { get; init; }
+
+    /// <summary>An optional profile URI for the target (RFC 6906 <c>profile</c>).</summary>
+    public string? Profile { get; init; }
 }
 
 /// <summary>An affordance (action) parsed from a Cairn hypermedia response.</summary>
@@ -55,13 +67,42 @@ public sealed class HypermediaResponse
 
     /// <summary>Parses a single resource's hypermedia from a JSON body.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="json"/> is null.</exception>
-    /// <exception cref="FormatException">A link or action has a missing or empty <c>href</c> — a malformed payload that must fail the test rather than pass assertions silently.</exception>
+    /// <exception cref="FormatException">A link or action has a missing or empty <c>href</c> — a malformed payload that must fail the test rather than pass assertions silently — or the root is a JSON array (use <see cref="ParseAll"/> for array-root responses).</exception>
     public static HypermediaResponse Parse(string json)
     {
         ArgumentNullException.ThrowIfNull(json);
 
         using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind == JsonValueKind.Array)
+        {
+            // Silently returning an empty response would let every negative assertion pass on a body the
+            // caller never meant to treat as a single resource.
+            throw new FormatException("The response root is a JSON array; use HypermediaResponse.ParseAll to parse each element's hypermedia.");
+        }
+
         return ParseResource(document.RootElement);
+    }
+
+    /// <summary>Parses the hypermedia of each element of an array-root JSON body (e.g. a bare collection response).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="json"/> is null.</exception>
+    /// <exception cref="FormatException">The root is not a JSON array, or a link or action has a missing or empty <c>href</c>.</exception>
+    public static IReadOnlyList<HypermediaResponse> ParseAll(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new FormatException("The response root is not a JSON array; use HypermediaResponse.Parse for a single resource.");
+        }
+
+        var resources = new List<HypermediaResponse>();
+        foreach (var element in document.RootElement.EnumerateArray())
+        {
+            resources.Add(ParseResource(element));
+        }
+
+        return resources;
     }
 
     private static HypermediaResponse ParseResource(JsonElement root)
@@ -100,7 +141,8 @@ public sealed class HypermediaResponse
                             throw new FormatException($"The '{action.Name}' action is malformed: its 'href' is missing or empty.");
                         }
 
-                        affordances[action.Name] = new HypermediaAffordance(href, GetString(action.Value, "method") ?? string.Empty, GetString(action.Value, "title"));
+                        // An absent method defaults to GET, matching the client's parser and HAL-FORMS.
+                        affordances[action.Name] = new HypermediaAffordance(href, GetString(action.Value, "method") ?? "GET", GetString(action.Value, "title"));
                     }
                 }
             }
@@ -174,6 +216,10 @@ public sealed class HypermediaResponse
         {
             Name = GetString(element, "name"),
             Templated = GetBool(element, "templated") ?? false,
+            Type = GetString(element, "type"),
+            Deprecation = GetString(element, "deprecation"),
+            Hreflang = GetString(element, "hreflang"),
+            Profile = GetString(element, "profile"),
         };
     }
 
@@ -194,7 +240,8 @@ public sealed class HypermediaResponse
             target = selfHref ?? string.Empty;
         }
 
-        return new HypermediaTemplate(target, GetString(element, "method") ?? string.Empty, GetString(element, "title"))
+        // HAL-FORMS defaults an absent method to GET.
+        return new HypermediaTemplate(target, GetString(element, "method") ?? "GET", GetString(element, "title"))
         {
             ContentType = GetString(element, "contentType"),
             Fields = ParseFields(element),
@@ -244,9 +291,11 @@ public sealed class HypermediaResponse
             var values = new List<string>();
             foreach (var option in inline.EnumerateArray())
             {
-                if (GetString(option, "value") is { } value)
+                // An inline option is either a bare string or an object with a "value".
+                var value = option.ValueKind == JsonValueKind.String ? option.GetString() : GetString(option, "value");
+                if (!string.IsNullOrEmpty(value))
                 {
-                    values.Add(value);
+                    values.Add(value!);
                 }
             }
 
@@ -306,6 +355,16 @@ public static class HypermediaResponseExtensions
         ArgumentNullException.ThrowIfNull(response);
         var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return HypermediaResponse.Parse(json);
+    }
+
+    /// <summary>Reads an array-root response body (e.g. a bare collection) and parses each element's hypermedia.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="response"/> is null.</exception>
+    /// <exception cref="FormatException">The root is not a JSON array, or a link or action has a missing or empty <c>href</c>.</exception>
+    public static async Task<IReadOnlyList<HypermediaResponse>> ReadHypermediaListAsync(this HttpResponseMessage response, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return HypermediaResponse.ParseAll(json);
     }
 
     /// <summary>

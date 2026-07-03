@@ -10,9 +10,9 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace Cairn.Analyzers;
 
 /// <summary>
-/// Flags a <c>.WithLinks()</c> endpoint whose handler returns a type with no <c>LinkConfig&lt;T&gt;</c>
-/// declared anywhere in the compilation — the classic silent no-op where the endpoint opted into hypermedia
-/// but every response serializes without it.
+/// Flags an endpoint that opted into hypermedia — a <c>.WithLinks()</c> minimal-API endpoint or a
+/// <c>[CairnLinks]</c> controller action — whose handler returns a type with no <c>LinkConfig&lt;T&gt;</c>
+/// declared anywhere in the compilation: the classic silent no-op where every response serializes without links.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
@@ -23,15 +23,16 @@ public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = new(
         DiagnosticId,
         title: "WithLinks endpoint returns a type with no LinkConfig",
-        messageFormat: "This WithLinks() endpoint returns '{0}', but no LinkConfig<{0}> (or a base type's) is declared in this compilation, so it will serialize without hypermedia",
+        messageFormat: "This hypermedia-enabled endpoint returns '{0}', but no LinkConfig<{0}> (or a base type's) is declared in this compilation, so it will serialize without hypermedia",
         category: "Cairn",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "An endpoint that opts into hypermedia with WithLinks() only emits links for types with a registered LinkConfig<T>. Declare one for the returned type (and register it via AddLinks / AddLinksFromAssembly), or remove WithLinks().",
+        description: "An endpoint that opts into hypermedia with WithLinks() or [CairnLinks] only emits links for types with a registered LinkConfig<T>. Declare one for the returned type (and register it via AddLinks / AddLinksFromAssembly), remove the opt-in, or — when the config lives in another project — list the type in cairn_additional_configured_types (.editorconfig) or the CairnAdditionalConfiguredTypes MSBuild property.",
+        helpLinkUri: "https://jonahlargen.github.io/Cairn/articles/route-safety.html#cairn002-withlinks-endpoint-with-no-linkconfig",
         customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     private static readonly ImmutableHashSet<string> MapMethods = ImmutableHashSet.Create(
-        "Map", "MapGet", "MapPost", "MapPut", "MapPatch", "MapDelete", "MapMethods");
+        "Map", "MapGet", "MapPost", "MapPut", "MapPatch", "MapDelete", "MapMethods", "MapFallback");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => ImmutableArray.Create(Rule);
@@ -53,6 +54,10 @@ public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
             symbolContext => CollectConfig((INamedTypeSymbol)symbolContext.Symbol, configured),
             SymbolKind.NamedType);
 
+        context.RegisterSymbolAction(
+            symbolContext => CollectControllerAction((IMethodSymbol)symbolContext.Symbol, returned),
+            SymbolKind.Method);
+
         context.RegisterSyntaxNodeAction(
             nodeContext => CollectEndpoint(nodeContext, returned),
             SyntaxKind.InvocationExpression);
@@ -60,12 +65,14 @@ public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
         context.RegisterCompilationEndAction(endContext => Report(endContext, configured, returned));
     }
 
-    // A type deriving LinkConfig<T> (directly or transitively) configures T.
+    // A type deriving Cairn's LinkConfig<T> (directly or transitively) configures T. The base must be the
+    // real Cairn.LinkConfig<T>: a look-alike LinkConfig from another namespace configures nothing.
     private static void CollectConfig(INamedTypeSymbol symbol, ConcurrentDictionary<ITypeSymbol, byte> configured)
     {
         for (var current = symbol.BaseType; current is not null; current = current.BaseType)
         {
-            if (current is { Name: "LinkConfig", IsGenericType: true, TypeArguments.Length: 1 })
+            if (current is { Name: "LinkConfig", IsGenericType: true, TypeArguments.Length: 1 }
+                && current.ContainingNamespace is { Name: "Cairn", ContainingNamespace.IsGlobalNamespace: true })
             {
                 configured.TryAdd(current.TypeArguments[0], 0);
                 return;
@@ -73,10 +80,63 @@ public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
         }
     }
 
+    // The controller counterpart to .WithLinks(): a public action carrying [CairnLinks] — on the method, its
+    // controller, or a base controller (the attribute is inherited) — opts its responses into hypermedia.
+    private static void CollectControllerAction(IMethodSymbol method, ConcurrentBag<(ITypeSymbol, Location)> returned)
+    {
+        if (method.MethodKind != MethodKind.Ordinary || method.IsStatic || method.DeclaredAccessibility != Accessibility.Public)
+        {
+            return;
+        }
+
+        if (!HasCairnLinks(method))
+        {
+            return;
+        }
+
+        var location = method.Locations.FirstOrDefault() ?? Location.None;
+        foreach (var candidate in UnwrapReturnType(method.ReturnType))
+        {
+            returned.Add((candidate, location));
+        }
+    }
+
+    private static bool HasCairnLinks(IMethodSymbol method)
+    {
+        if (HasCairnLinksAttribute(method.GetAttributes()))
+        {
+            return true;
+        }
+
+        for (var type = method.ContainingType; type is not null; type = type.BaseType)
+        {
+            if (HasCairnLinksAttribute(type.GetAttributes()))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasCairnLinksAttribute(ImmutableArray<AttributeData> attributes)
+        => attributes.Any(static attribute => attribute.AttributeClass is { Name: "CairnLinksAttribute" } type
+            && IsCairnNamespace(type.ContainingNamespace));
+
     private static void CollectEndpoint(SyntaxNodeAnalysisContext context, ConcurrentBag<(ITypeSymbol, Location)> returned)
     {
         var invocation = (InvocationExpressionSyntax)context.Node;
         if (invocation.Expression is not MemberAccessExpressionSyntax { Name.Identifier.ValueText: "WithLinks" } member)
+        {
+            return;
+        }
+
+        // The call must bind to Cairn's WithLinks extension: a same-named extension from another library is
+        // not a hypermedia opt-in, and flagging it would be pure noise.
+        var info = context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken);
+        var symbol = (info.Symbol ?? (info.CandidateSymbols.Length == 1 ? info.CandidateSymbols[0] : null)) as IMethodSymbol;
+        if (symbol is not { Name: "WithLinks", IsExtensionMethod: true }
+            || !IsCairnNamespace(symbol.ContainingType.ContainingNamespace))
         {
             return;
         }
@@ -94,22 +154,74 @@ public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
         }
     }
 
+    private static bool IsCairnNamespace(INamespaceSymbol? space)
+    {
+        // Cairn or a nested Cairn.* namespace (WithLinks lives in Cairn.AspNetCore).
+        for (var current = space; current is { IsGlobalNamespace: false }; current = current.ContainingNamespace)
+        {
+            if (current is { Name: "Cairn", ContainingNamespace.IsGlobalNamespace: true })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static InvocationExpressionSyntax? FindMapInvocation(ExpressionSyntax expression)
     {
-        while (expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax inner } invocation)
+        // Depth-bounded to defend against pathological (or cyclic) variable chains.
+        for (var depth = 0; depth < 8; depth++)
         {
-            var name = inner.Name.Identifier.ValueText;
-            if (MapMethods.Contains(name))
+            while (expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax inner } invocation)
             {
-                return invocation;
+                var name = inner.Name.Identifier.ValueText;
+                if (MapMethods.Contains(name))
+                {
+                    return invocation;
+                }
+
+                if (name == "MapGroup")
+                {
+                    return null;
+                }
+
+                expression = inner.Expression;
             }
 
-            if (name == "MapGroup")
+            // A chain broken through a variable (`var e = app.MapGet(...); e.WithLinks();`) bottoms out at
+            // an identifier — continue from the variable's initializer, mirroring the Routes generator.
+            if (expression is IdentifierNameSyntax identifier && FindLocalInitializer(identifier) is { } initializer)
             {
-                return null;
+                expression = initializer;
+                continue;
             }
 
-            expression = inner.Expression;
+            return null;
+        }
+
+        return null;
+    }
+
+    // The initializer of the nearest local variable declaration with the identifier's name, searching the
+    // enclosing scopes outward (a block, a method/local function, or top-level statements).
+    private static ExpressionSyntax? FindLocalInitializer(IdentifierNameSyntax identifier)
+    {
+        var name = identifier.Identifier.ValueText;
+        for (SyntaxNode? scope = identifier.Parent; scope is not null; scope = scope.Parent)
+        {
+            if (scope is not (BlockSyntax or MethodDeclarationSyntax or LocalFunctionStatementSyntax or CompilationUnitSyntax))
+            {
+                continue;
+            }
+
+            foreach (var declarator in scope.DescendantNodes().OfType<VariableDeclaratorSyntax>())
+            {
+                if (declarator.Identifier.ValueText == name && declarator.Initializer is { } initializer)
+                {
+                    return initializer.Value;
+                }
+            }
         }
 
         return null;
@@ -141,9 +253,9 @@ public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
         return info.Symbol as IMethodSymbol ?? info.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
     }
 
-    // Peel the wrappers minimal APIs put around the payload — Task/ValueTask, result unions and value-results
-    // (Microsoft.AspNetCore.Http.HttpResults), arrays, sequences, and Cairn's paging envelopes — down to the
-    // DTO types the serializer will see.
+    // Peel the wrappers minimal APIs and MVC put around the payload — Task/ValueTask, result unions and
+    // value-results (Microsoft.AspNetCore.Http.HttpResults), ActionResult<T>, arrays, sequences, and Cairn's
+    // paging envelopes — down to the DTO types the serializer will see.
     private static IEnumerable<ITypeSymbol> UnwrapReturnType(ITypeSymbol type)
     {
         if (type is IArrayTypeSymbol array)
@@ -169,6 +281,7 @@ public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
             var unwraps =
                 definition.Name is "Task" or "ValueTask" && container == "System.Threading.Tasks"
                 || container == "Microsoft.AspNetCore.Http.HttpResults"
+                || definition.Name == "ActionResult" && container == "Microsoft.AspNetCore.Mvc"
                 || definition.Name is "PagedResource" or "CursorPage" && container == "Cairn.AspNetCore"
                 || IsSequence(named);
 
@@ -222,16 +335,63 @@ public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var reported = new HashSet<(ITypeSymbol, Location)>();
+        // Types configured in other projects can be listed in .editorconfig / a global analyzer config
+        // (cairn_additional_configured_types = OrderDto, Contracts.CustomerDto) or via an MSBuild
+        // CompilerVisibleProperty (CairnAdditionalConfiguredTypes) — matched by simple or fully qualified name.
+        var additional = AdditionalConfiguredTypes(context);
+
+        var reported = new HashSet<(ITypeSymbol, Location)>(ReportComparer.Instance);
         foreach (var (type, location) in returned)
         {
-            if (IsConfigured(type, configured) || !reported.Add((type, location)))
+            if (IsConfigured(type, configured)
+                || additional.Contains(type.Name)
+                || additional.Contains(type.ToDisplayString())
+                || !reported.Add((type, location)))
             {
                 continue;
             }
 
             context.ReportDiagnostic(Diagnostic.Create(Rule, location, type.Name));
         }
+    }
+
+    private static ImmutableHashSet<string> AdditionalConfiguredTypes(CompilationAnalysisContext context)
+    {
+        var provider = context.Options.AnalyzerConfigOptionsProvider;
+        var names = ImmutableHashSet.CreateBuilder<string>(System.StringComparer.Ordinal);
+        var raw = new List<string>();
+
+        if (provider.GlobalOptions.TryGetValue("cairn_additional_configured_types", out var global))
+        {
+            raw.Add(global);
+        }
+
+        if (provider.GlobalOptions.TryGetValue("build_property.CairnAdditionalConfiguredTypes", out var property))
+        {
+            raw.Add(property);
+        }
+
+        foreach (var tree in context.Compilation.SyntaxTrees)
+        {
+            if (provider.GetOptions(tree).TryGetValue("cairn_additional_configured_types", out var perTree))
+            {
+                raw.Add(perTree);
+            }
+        }
+
+        foreach (var list in raw)
+        {
+            foreach (var name in list.Split(','))
+            {
+                var trimmed = name.Trim();
+                if (trimmed.Length > 0)
+                {
+                    names.Add(trimmed);
+                }
+            }
+        }
+
+        return names.ToImmutable();
     }
 
     // Configs apply to derived resources too (runtime dispatch walks base types), so check the whole chain.
@@ -246,5 +406,18 @@ public sealed class MissingLinkConfigAnalyzer : DiagnosticAnalyzer
         }
 
         return false;
+    }
+
+    // Symbols compare by SymbolEqualityComparer — the default tuple comparison is reference equality, under
+    // which the same type from two analysis passes would double-report.
+    private sealed class ReportComparer : IEqualityComparer<(ITypeSymbol Type, Location Location)>
+    {
+        public static readonly ReportComparer Instance = new();
+
+        public bool Equals((ITypeSymbol Type, Location Location) x, (ITypeSymbol Type, Location Location) y)
+            => SymbolEqualityComparer.Default.Equals(x.Type, y.Type) && x.Location.Equals(y.Location);
+
+        public int GetHashCode((ITypeSymbol Type, Location Location) value)
+            => (SymbolEqualityComparer.Default.GetHashCode(value.Type) * 397) ^ value.Location.GetHashCode();
     }
 }

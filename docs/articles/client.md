@@ -274,6 +274,17 @@ A malformed *success* response follows the same no-throw model: a 2xx body that 
 
 `EnsureSuccess()` (on `ClientResult`, `ClientResult<T>`, and `CollectionResult<TItem>`) throws `CairnClientException`, which carries the status and the `Problem`, when you prefer exceptions over branching.
 
+### Timeouts
+
+The client reads responses headers-first, so `HttpClient.Timeout` alone would only cover the wait for the headers; the client applies the same budget across the whole exchange (send plus body read), and when it elapses it follows `HttpClient`'s own convention — a `TaskCanceledException` whose `InnerException` is a `TimeoutException`. Cancellation you requested through your own `CancellationToken` surfaces as a plain `OperationCanceledException`, so the two remain distinguishable:
+
+```csharp
+catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+{
+    // The HttpClient.Timeout budget elapsed.
+}
+```
+
 ## See also
 
 - [Getting started](getting-started.md)

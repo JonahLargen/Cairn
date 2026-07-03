@@ -366,6 +366,126 @@ class Program
         Assert.DoesNotContain(CSharpSyntaxTree.ParseText(generated).GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
     }
 
+    [Fact]
+    public void Renames_a_route_that_maps_to_a_reserved_method_name_and_reports_a_diagnostic()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/routes"", handler).WithName(""Routes"");
+        app.MapGet(""/equals/{id:int}"", handler).WithName(""equals"");
+        app.MapGet(""/text"", handler).WithName(""ToString"");
+    }
+}";
+
+        var result = RunDriver(source);
+        var generated = result.GeneratedTrees.Single().ToString();
+
+        // 'Routes' would collide with the class name (CS0542); 'Equals'/'ToString' would hide
+        // System.Object members (CS0108). Each is emitted under a '_' prefix instead of breaking the build.
+        Assert.Contains("public static global::Cairn.LinkTarget _Routes()", generated);
+        Assert.Contains(@"Route(""Routes"", null)", generated);
+        Assert.Contains("public static global::Cairn.LinkTarget _Equals(int id)", generated);
+        Assert.Contains("public static global::Cairn.LinkTarget _ToString()", generated);
+        Assert.Equal(3, result.Diagnostics.Count(d => d.Id == "CAIRN004"));
+        Assert.All(result.Diagnostics.Where(d => d.Id == "CAIRN004"), d => Assert.NotEqual(Location.None, d.Location));
+        AssertCatalogCompiles(generated);
+    }
+
+    [Fact]
+    public void A_regex_constraint_with_braces_does_not_truncate_or_drop_parameters()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/codes/{code:regex(^\\d{4}$)}/{id:int}"", handler).WithName(""GetCode"");
+        app.MapGet(""/tags/{tag:regex(^[a-z]{{2,10}}$)}/{page:int}"", handler).WithName(""GetTag"");
+    }
+}";
+
+        var generated = Run(source);
+
+        // The first '}' inside the constraint's own braces used to end the parameter, mangling its name
+        // and swallowing every parameter that followed.
+        Assert.Contains("public static global::Cairn.LinkTarget GetCode(string code, int id)", generated);
+        Assert.Contains("public static global::Cairn.LinkTarget GetTag(string tag, int page)", generated);
+    }
+
+    [Fact]
+    public void Includes_map_and_map_fallback_endpoints()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.Map(""/ping/{id:int}"", handler).WithName(""Ping"");
+        app.MapFallback(""/spa/{*path}"", handler).WithName(""Spa"");
+        app.MapFallback(handler).WithName(""Fallback"");
+    }
+}";
+
+        var generated = Run(source);
+
+        Assert.Contains("public static global::Cairn.LinkTarget Ping(int id)", generated);
+        Assert.Contains("public static global::Cairn.LinkTarget Spa(string path)", generated);
+        // The no-pattern MapFallback overload uses ASP.NET's implicit ""{*path:nonfile}"" template.
+        Assert.Contains("public static global::Cairn.LinkTarget Fallback(string path)", generated);
+    }
+
+    [Fact]
+    public void Inherits_the_route_prefix_from_a_base_controller()
+    {
+        const string source = @"
+using Microsoft.AspNetCore.Mvc;
+namespace Microsoft.AspNetCore.Mvc
+{
+    class RouteAttribute : System.Attribute { public RouteAttribute(string template) {} public string Name { get; set; } }
+    class HttpGetAttribute : System.Attribute { public HttpGetAttribute(string template) {} public string Name { get; set; } }
+}
+
+[Route(""api/v{version:int}"")]
+abstract class ApiControllerBase
+{
+}
+
+class OrdersController : ApiControllerBase
+{
+    [HttpGet(""orders/{id:int}"", Name = ""GetVersionedOrder"")]
+    public object Get(int id) => null;
+}";
+
+        var generated = Run(source);
+
+        // MVC applies a base controller's [Route] prefix when the derived controller declares none.
+        Assert.Contains("public static global::Cairn.LinkTarget GetVersionedOrder(int version, int id)", generated);
+    }
+
+    [Fact]
+    public void Reports_the_collision_diagnostic_at_the_losing_route_name()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/a"", handler).WithName(""GetUser"");
+        app.MapGet(""/b"", handler).WithName(""get-user"");
+    }
+}";
+
+        var diagnostics = RunDiagnostics(source);
+
+        var collision = Assert.Single(diagnostics, d => d.Id == "CAIRN003");
+        // A navigable location — the dropped name's argument — instead of Location.None.
+        Assert.NotEqual(Location.None, collision.Location);
+        Assert.Contains("get-user", collision.GetMessage());
+    }
+
     private static string Run(string source) => RunDriver(source).GeneratedTrees.Single().ToString();
 
     // Compiles the generated catalog against a LinkTarget stub, so name-binding errors the parser can't see

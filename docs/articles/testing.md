@@ -12,9 +12,9 @@ Parsing reads `_links`, `_actions`, HAL-FORMS `_templates`, and `_embedded` from
 - `Templates` — the HAL-FORMS templates as `HypermediaTemplate` values, with their fields.
 - `Embedded` — the `_embedded` resources per relation (a single embed parses as a one-element list).
 
-Each link is a `HypermediaLink(string Href, string? Title)` (with `Name` and `Templated`); each affordance is a `HypermediaAffordance(string Href, string Method, string? Title)`. A link or action without an `href` — or a template with an empty `target` — fails parsing with a `FormatException`; a template *omitting* `target` falls back to the `self` link.
+Each link is a `HypermediaLink(string Href, string? Title)` (with `Name`, `Templated`, and the RFC 8288 attributes `Type`, `Deprecation`, `Hreflang`, and `Profile`); each affordance is a `HypermediaAffordance(string Href, string Method, string? Title)` — an action or template that omits its `method` defaults to `GET`, as HAL-FORMS prescribes. A link or action without an `href` — or a template with an empty `target` — fails parsing with a `FormatException`; a template *omitting* `target` falls back to the `self` link.
 
-Three entry points cover the common cases:
+Four entry points cover the common cases:
 
 ```csharp
 using Cairn.Testing;
@@ -25,11 +25,15 @@ HypermediaResponse hypermedia = HypermediaResponse.Parse(json);
 // From an HttpResponseMessage:
 HypermediaResponse hypermedia = await response.ReadHypermediaAsync();
 
+// An array-root body (a bare collection): one HypermediaResponse per element.
+IReadOnlyList<HypermediaResponse> items = await response.ReadHypermediaListAsync();
+// (or HypermediaResponse.ParseAll(json) from a string)
+
 // GET a URL and parse in one step (fails with a clear message on a non-success status):
 HypermediaResponse hypermedia = await client.GetHypermediaAsync("/orders/42");
 ```
 
-`ReadHypermediaAsync` and `GetHypermediaAsync` accept an optional `CancellationToken`.
+`Parse` throws a `FormatException` on an array-root body (pointing at `ParseAll`) rather than silently parsing it as an empty resource, which would let every negative assertion pass. `ReadHypermediaAsync`, `ReadHypermediaListAsync`, and `GetHypermediaAsync` accept an optional `CancellationToken`.
 
 ## Asserting links and affordances
 
