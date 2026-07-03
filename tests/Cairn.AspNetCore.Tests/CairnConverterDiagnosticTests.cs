@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Cairn;
@@ -36,13 +35,10 @@ public class CairnConverterDiagnosticTests
         // The converter's output shape wins, so no _links can appear...
         Assert.DoesNotContain("_links", body, StringComparison.Ordinal);
 
-        // ...and the diagnostic says the converter is the reason, not a deferred sequence. It is written by
-        // an OnCompleted callback that races the client's read of the body, so poll briefly.
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (!logs.Messages.Any(m => m.Contains("custom JsonConverter", StringComparison.Ordinal)) && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(25);
-        }
+        // ...and the diagnostic says the converter is the reason, not a deferred sequence. It is written from
+        // a Response.OnCompleted callback that can land after the client has read the body, so wait for it
+        // (event-driven) before asserting.
+        await logs.WaitForAsync(m => m.Contains("custom JsonConverter", StringComparison.Ordinal));
 
         Assert.Contains(logs.Messages, m =>
             m.Contains(nameof(ConvOrder), StringComparison.Ordinal)
@@ -70,26 +66,5 @@ public class CairnConverterDiagnosticTests
     {
         public override void Configure(ILinkBuilder<ConvOrder> builder)
             => builder.Self(o => LinkTarget.Route("ConvGetOrder", new { id = o.Id }));
-    }
-
-    private sealed class CapturingLoggerProvider : ILoggerProvider
-    {
-        public ConcurrentBag<string> Messages { get; } = [];
-
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Messages);
-
-        public void Dispose()
-        {
-        }
-
-        private sealed class CapturingLogger(ConcurrentBag<string> messages) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-                => messages.Add(formatter(state, exception));
-        }
     }
 }

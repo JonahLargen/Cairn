@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Net;
 using Cairn;
@@ -45,6 +44,8 @@ public class CairnEmitDiagnostic304Tests
         builder.Services.AddCairn(o => o.AddLinks(new NotModifiedOrderLinks()));
 
         await using var app = builder.Build();
+        var completion = new ResponseCompletion();
+        completion.Use(app);
         app.MapGet("/nm/{id:int}", (int id) => TypedResults.Ok(new NotModifiedOrder(id, "v1")))
             .WithName("NmGetOrder")
             .WithETag((NotModifiedOrder o) => o.Version)
@@ -58,6 +59,12 @@ public class CairnEmitDiagnostic304Tests
         request.Headers.TryAddWithoutValidation("If-None-Match", "\"v1\"");
         using var response = await client.SendAsync(request);
 
+        // The emit-miss diagnostic (the "never emitted" warning and the unemitted meter) runs from a
+        // Response.OnCompleted callback. Wait for the response to fully complete — the barrier's callback is
+        // registered first, so it fires last, after Cairn's — before asserting the diagnostic did NOT fire;
+        // otherwise the absence could just mean the callback had not run yet.
+        await completion.WaitAsync();
+
         Assert.Equal(HttpStatusCode.NotModified, response.StatusCode);
         Assert.Equal(0, Interlocked.Read(ref unemitted));
         Assert.DoesNotContain(logs.Messages, m => m.Contains("never emitted", StringComparison.Ordinal));
@@ -69,26 +76,5 @@ public class CairnEmitDiagnostic304Tests
     {
         public override void Configure(ILinkBuilder<NotModifiedOrder> builder)
             => builder.Self(o => LinkTarget.Route("NmGetOrder", new { id = o.Id }));
-    }
-
-    private sealed class CapturingLoggerProvider : ILoggerProvider
-    {
-        public ConcurrentBag<string> Messages { get; } = [];
-
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Messages);
-
-        public void Dispose()
-        {
-        }
-
-        private sealed class CapturingLogger(ConcurrentBag<string> messages) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-                => messages.Add(formatter(state, exception));
-        }
     }
 }
