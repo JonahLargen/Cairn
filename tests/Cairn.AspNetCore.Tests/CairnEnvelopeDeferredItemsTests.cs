@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Text.Json;
 using Cairn;
 using Cairn.AspNetCore;
@@ -25,6 +24,8 @@ public class CairnEnvelopeDeferredItemsTests
         builder.Services.AddCairn(o => o.AddLinks(new DeferredItemLinks()));
 
         await using var app = builder.Build();
+        var completion = new ResponseCompletion();
+        completion.Use(app);
         app.MapGet("/dp", () =>
         {
             // A deferred LINQ projection: without buffering, the recorder and the serializer would each run
@@ -55,6 +56,10 @@ public class CairnEnvelopeDeferredItemsTests
         Assert.True(root.GetProperty("_links").TryGetProperty("self", out _));
 
         Assert.Equal(2, Volatile.Read(ref projections));   // each element projected exactly once
+
+        // Wait for the response to fully complete (the barrier fires after Cairn's emit-miss callback) before
+        // asserting the diagnostic did NOT fire — otherwise its absence could just mean the callback is pending.
+        await completion.WaitAsync();
         Assert.DoesNotContain(logs.Messages, m => m.Contains("never emitted", StringComparison.Ordinal));
     }
 
@@ -192,26 +197,5 @@ public class CairnEnvelopeDeferredItemsTests
     {
         public override void Configure(ILinkBuilder<DeferredItem> builder)
             => builder.Self(item => LinkTarget.Uri($"/di/{item.Id}"));
-    }
-
-    private sealed class CapturingLoggerProvider : ILoggerProvider
-    {
-        public ConcurrentBag<string> Messages { get; } = [];
-
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Messages);
-
-        public void Dispose()
-        {
-        }
-
-        private sealed class CapturingLogger(ConcurrentBag<string> messages) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-                => messages.Add(formatter(state, exception));
-        }
     }
 }

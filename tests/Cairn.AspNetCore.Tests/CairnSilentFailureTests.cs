@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Text.Json;
 using Cairn;
 using Cairn.AspNetCore;
@@ -84,14 +83,11 @@ public class CairnSilentFailureTests
 
         Assert.DoesNotContain("_links", body);
 
-        // The emit-miss warning is written by an OnCompleted callback that races the client's read of the
-        // body, so poll briefly for it. WarnOnce makes it idempotent — both requests race a single Mark — so
-        // once it appears its count is frozen at one and Assert.Single still catches a warn-once regression.
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (!logs.Messages.Any(m => m.Contains("MissOrder", StringComparison.Ordinal) && m.Contains("never emitted", StringComparison.Ordinal)) && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(25);
-        }
+        // The emit-miss warning is written from a Response.OnCompleted callback that can land after the client
+        // has read the body, so wait for it (event-driven) before asserting. WarnOnce makes it idempotent —
+        // both requests race a single Mark — so its count is frozen at one and Assert.Single still catches a
+        // warn-once regression.
+        await logs.WaitForAsync(m => m.Contains("MissOrder", StringComparison.Ordinal) && m.Contains("never emitted", StringComparison.Ordinal));
 
         Assert.Single(logs.Messages, m => m.Contains("MissOrder", StringComparison.Ordinal) && m.Contains("never emitted", StringComparison.Ordinal));
     }
@@ -202,6 +198,7 @@ public class CairnSilentFailureTests
         Assert.Equal(1, DeferredMvcController.Source.Enumerations);
     }
 
+    // CapturingLoggerProvider lives in DiagnosticTiming.cs; its WaitForAsync bridges the OnCompleted race.
     private static async Task<JsonElement> GetJsonAsync(HttpClient client, string path)
     {
         var json = await client.GetStringAsync(path);
@@ -250,27 +247,6 @@ public class CairnSilentFailureTests
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-    }
-
-    private sealed class CapturingLoggerProvider : ILoggerProvider
-    {
-        public ConcurrentBag<string> Messages { get; } = [];
-
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Messages);
-
-        public void Dispose()
-        {
-        }
-
-        private sealed class CapturingLogger(ConcurrentBag<string> messages) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-                => messages.Add(formatter(state, exception));
-        }
     }
 }
 
