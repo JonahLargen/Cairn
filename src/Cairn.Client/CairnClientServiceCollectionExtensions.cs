@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
 
 namespace Cairn.Client;
 
@@ -46,11 +47,35 @@ public static class CairnClientServiceCollectionExtensions
 
         if (options.AllowLink is { } allowLink)
         {
-            builder
-                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
-                .AddHttpMessageHandler(() => new LinkPolicyRedirectHandler(allowLink));
+            builder.AddHttpMessageHandler(() => new LinkPolicyRedirectHandler(allowLink));
+
+            // Disable auto-redirect on whatever primary handler the pipeline ends up with, rather than
+            // registering a specific one: a consumer replacing the primary handler (proxy, mTLS, ...) must
+            // not silently re-enable in-handler redirects the policy can never see. PostConfigure appends
+            // this action after every consumer-registered configuration, so it observes the final handler;
+            // a handler this can't recognize is caught at runtime by LinkPolicyRedirectHandler, which fails
+            // loudly when a response arrives through a redirect it did not inspect.
+            services.PostConfigure<HttpClientFactoryOptions>(builder.Name, factoryOptions =>
+                factoryOptions.HttpMessageHandlerBuilderActions.Add(b => DisableAutoRedirect(b.PrimaryHandler)));
         }
 
         return builder;
+    }
+
+    private static void DisableAutoRedirect(HttpMessageHandler handler)
+    {
+        while (handler is DelegatingHandler { InnerHandler: { } inner })
+        {
+            handler = inner;
+        }
+
+        if (handler is HttpClientHandler httpClientHandler)
+        {
+            httpClientHandler.AllowAutoRedirect = false;
+        }
+        else if (handler is SocketsHttpHandler socketsHttpHandler)
+        {
+            socketsHttpHandler.AllowAutoRedirect = false;
+        }
     }
 }

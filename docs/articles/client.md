@@ -167,7 +167,7 @@ foreach (AffordanceField field in order.Fields("ship"))
 }
 ```
 
-`AffordanceField` carries `Name`, `Prompt`, `Required`, `ReadOnly`, `Type`, `Placeholder`, `Regex`, `MaxLength`, `Min`, `Max`, and `Options` — enough to render or validate a form before invoking.
+`AffordanceField` carries `Name`, `Prompt`, `Required`, `ReadOnly`, `Type`, `Value`, `Templated`, `Placeholder`, `Regex`, `MinLength`, `MaxLength`, `Min`, `Max`, `Step`, `Cols`, `Rows`, `Options` (each an `AffordanceFieldOption` with a `Value` and optional `Prompt`), `OptionsLink`, and `SelectedValues` — enough to render or validate a form before invoking.
 
 ### Form-aware submission: `SubmitAsync`
 
@@ -236,7 +236,7 @@ builder.Services.AddCairnClient(o =>
 
 The policy fails closed: if a target cannot be resolved to an absolute URI (no `BaseAddress` set), the link is rejected rather than followed unchecked. A rejected target throws `InvalidOperationException`. When `AllowLink` is `null`, any server-supplied link is followed.
 
-When `AllowLink` is set through `AddCairnClient`, the policy is also enforced on **every redirect hop**: automatic redirect following moves into a Cairn handler that re-checks each 3xx target (up to 10 hops), applies the standard method rewrites (303 → GET; 301/302 from POST → GET; 307/308 preserve the method), strips the `Authorization` header on cross-origin redirects, and hands a body-preserving redirect it can't safely replay back to the caller as the 3xx response.
+When `AllowLink` is set through `AddCairnClient`, the policy is also enforced on **every redirect hop**: automatic redirect following moves into a Cairn handler that re-checks each 3xx target (up to 10 hops), applies the standard method rewrites (303 → GET; 301/302 from POST → GET; 307/308 preserve the method), strips the `Authorization`, `Cookie`, and `Proxy-Authorization` headers on cross-origin redirects, and hands a body-preserving redirect it can't safely replay back to the caller as the 3xx response.
 
 ## Error handling
 

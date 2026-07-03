@@ -13,7 +13,9 @@ internal sealed class LinkPolicyRedirectHandler(Func<Uri, bool> allowLink) : Del
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        var sent = request.RequestUri;
         var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureRedirectsAreVisible(sent, response);
 
         for (var hops = 0; hops < MaxRedirects && IsRedirect(response.StatusCode) && response.Headers.Location is { } location; hops++)
         {
@@ -38,7 +40,7 @@ internal sealed class LinkPolicyRedirectHandler(Func<Uri, bool> allowLink) : Del
             foreach (var header in request.Headers)
             {
                 // Credentials never travel to another origin the original request didn't target.
-                if (header.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase) && !SameOrigin(origin, target))
+                if (IsCredentialHeader(header.Key) && !SameOrigin(origin, target))
                 {
                     continue;
                 }
@@ -49,9 +51,29 @@ internal sealed class LinkPolicyRedirectHandler(Func<Uri, bool> allowLink) : Del
             response.Dispose();
             request = next;
             response = await base.SendAsync(next, cancellationToken).ConfigureAwait(false);
+            EnsureRedirectsAreVisible(target, response);
         }
 
         return response;
+    }
+
+    // Authorization, Cookie, and Proxy-Authorization all carry credentials; forwarding any of them to a
+    // different origin would leak them to a host the caller never targeted.
+    private static bool IsCredentialHeader(string name)
+        => name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Cookie", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase);
+
+    // If the response came back from a different URI than was sent, an inner handler followed a redirect
+    // itself — hops this policy never saw. That is a misconfiguration (a primary handler with
+    // AllowAutoRedirect left on); fail loudly instead of silently skipping enforcement.
+    private static void EnsureRedirectsAreVisible(Uri? sent, HttpResponseMessage response)
+    {
+        if (sent is not null && response.RequestMessage?.RequestUri is { } final && final != sent)
+        {
+            throw new InvalidOperationException(
+                $"The response for '{sent}' arrived from '{final}': an inner handler followed a redirect the link policy could not inspect. Disable AllowAutoRedirect on the primary HTTP handler.");
+        }
     }
 
     private static bool IsRedirect(HttpStatusCode status)

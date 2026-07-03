@@ -363,10 +363,17 @@ internal static class UriTemplate
         }
     }
 
+    // Wire-shaped scalars, not .NET display strings: lowercase bools and round-trip ("O") date/time
+    // values expand to something a server can parse back.
     private static string? Stringify(object? value) => value switch
     {
         null => null,
         string text => text,
+        bool flag => flag ? "true" : "false",
+        DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
+        DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
+        DateOnly dateOnly => dateOnly.ToString("O", CultureInfo.InvariantCulture),
+        TimeOnly timeOnly => timeOnly.ToString("O", CultureInfo.InvariantCulture),
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString(),
     };

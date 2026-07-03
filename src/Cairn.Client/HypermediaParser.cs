@@ -11,9 +11,9 @@ internal sealed record ParsedHypermedia(
     JsonElement Embedded)
 {
     public static readonly ParsedHypermedia Empty = new(
-        new Dictionary<string, IReadOnlyList<Link>>(),
-        new Dictionary<string, Affordance>(),
-        new Dictionary<string, IReadOnlyList<AffordanceField>>(),
+        new Dictionary<string, IReadOnlyList<Link>>(StringComparer.OrdinalIgnoreCase),
+        new Dictionary<string, Affordance>(StringComparer.OrdinalIgnoreCase),
+        new Dictionary<string, IReadOnlyList<AffordanceField>>(StringComparer.OrdinalIgnoreCase),
         [],
         default);
 }
@@ -28,9 +28,10 @@ internal static class HypermediaParser
             return ParsedHypermedia.Empty;
         }
 
-        var links = new Dictionary<string, IReadOnlyList<Link>>(StringComparer.Ordinal);
-        var affordances = new Dictionary<string, Affordance>(StringComparer.Ordinal);
-        var fields = new Dictionary<string, IReadOnlyList<AffordanceField>>(StringComparer.Ordinal);
+        // Relation types are case-insensitive (RFC 8288 §2.1), matching how the server compares them.
+        var links = new Dictionary<string, IReadOnlyList<Link>>(StringComparer.OrdinalIgnoreCase);
+        var affordances = new Dictionary<string, Affordance>(StringComparer.OrdinalIgnoreCase);
+        var fields = new Dictionary<string, IReadOnlyList<AffordanceField>>(StringComparer.OrdinalIgnoreCase);
         List<Curie>? curies = null;
 
         if (root.TryGetProperty("_links", out var linksElement) && linksElement.ValueKind == JsonValueKind.Object)
@@ -50,7 +51,7 @@ internal static class HypermediaParser
                 }
 
                 // The reserved curies relation additionally defines prefixes for resolving relation docs.
-                if (entry.Name == "curies")
+                if (string.Equals(entry.Name, "curies", StringComparison.OrdinalIgnoreCase))
                 {
                     foreach (var link in parsed)
                     {
@@ -79,11 +80,19 @@ internal static class HypermediaParser
 
         if (root.TryGetProperty("_templates", out var templatesElement) && templatesElement.ValueKind == JsonValueKind.Object)
         {
+            // HAL-FORMS: target is optional — a template without one is submitted to the resource itself.
+            var selfHref = links.TryGetValue("self", out var selfLinks) && selfLinks.Count > 0 ? selfLinks[0].Href : null;
             foreach (var entry in templatesElement.EnumerateObject())
             {
-                if (IsUsable(entry.Name) && GetString(entry.Value, "target") is { } target && IsUsable(target))
+                var target = GetString(entry.Value, "target");
+                if (!IsUsable(target))
                 {
-                    affordances[entry.Name] = new Affordance(entry.Name, target, GetString(entry.Value, "method") ?? "GET")
+                    target = selfHref;
+                }
+
+                if (IsUsable(entry.Name) && IsUsable(target))
+                {
+                    affordances[entry.Name] = new Affordance(entry.Name, target!, GetString(entry.Value, "method") ?? "GET")
                     {
                         Title = GetString(entry.Value, "title"),
                         ContentType = GetString(entry.Value, "contentType"),
@@ -151,12 +160,21 @@ internal static class HypermediaParser
                     Required = GetBool(property, "required") ?? false,
                     ReadOnly = GetBool(property, "readOnly") ?? false,
                     Type = GetString(property, "type"),
+                    Value = GetString(property, "value"),
+                    Templated = GetBool(property, "templated") ?? false,
                     Placeholder = GetString(property, "placeholder"),
                     Regex = GetString(property, "regex"),
+                    MinLength = GetInt(property, "minLength"),
                     MaxLength = GetInt(property, "maxLength"),
                     Min = GetDouble(property, "min"),
                     Max = GetDouble(property, "max"),
+                    Step = GetDouble(property, "step"),
+                    Cols = GetInt(property, "cols"),
+                    Rows = GetInt(property, "rows"),
                     Options = ParseOptions(property),
+                    OptionsLink = property.TryGetProperty("options", out var options) && options.ValueKind == JsonValueKind.Object
+                        && options.TryGetProperty("link", out var optionsLink) ? GetString(optionsLink, "href") : null,
+                    SelectedValues = ParseSelectedValues(property),
                 });
             }
         }
@@ -164,7 +182,7 @@ internal static class HypermediaParser
         return fields;
     }
 
-    private static IReadOnlyList<string> ParseOptions(JsonElement property)
+    private static IReadOnlyList<AffordanceFieldOption> ParseOptions(JsonElement property)
     {
         if (!property.TryGetProperty("options", out var options) || options.ValueKind != JsonValueKind.Object
             || !options.TryGetProperty("inline", out var inline) || inline.ValueKind != JsonValueKind.Array)
@@ -172,14 +190,34 @@ internal static class HypermediaParser
             return [];
         }
 
-        var values = new List<string>();
+        var values = new List<AffordanceFieldOption>();
         foreach (var option in inline.EnumerateArray())
         {
-            // An inline option is either a string or an object with a "value".
+            // An inline option is either a string or an object with a "value" (and an optional "prompt").
             var value = option.ValueKind == JsonValueKind.String ? option.GetString() : GetString(option, "value");
             if (IsUsable(value))
             {
-                values.Add(value!);
+                values.Add(new AffordanceFieldOption(value!) { Prompt = GetString(option, "prompt") });
+            }
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<string> ParseSelectedValues(JsonElement property)
+    {
+        if (!property.TryGetProperty("options", out var options) || options.ValueKind != JsonValueKind.Object
+            || !options.TryGetProperty("selectedValues", out var selected) || selected.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var values = new List<string>();
+        foreach (var entry in selected.EnumerateArray())
+        {
+            if (entry.ValueKind == JsonValueKind.String && entry.GetString() is { } value)
+            {
+                values.Add(value);
             }
         }
 

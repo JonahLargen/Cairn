@@ -193,7 +193,7 @@ if (order.HasAffordance("cancel"))
 }
 ```
 
-`Fields("create")` returns each field as an `AffordanceField` (its `Name`, `Prompt`, `Required`, `ReadOnly`, `Type`, `Placeholder`, `Regex`, `MaxLength`, `Min`, `Max`, and `Options`) so a caller can build the request body before invoking. For form-aware submission — where the client validates the body against those fields *before* sending — use `Resource<T>.SubmitAsync(name, values)` instead. See [The typed client](client.md) for `Resource<T>`, `AffordanceField`, `InvokeAsync`, and `SubmitAsync`.
+`Fields("create")` returns each field as an `AffordanceField` (its `Name`, `Prompt`, `Required`, `ReadOnly`, `Type`, `Value`, `Placeholder`, `Regex`, `MinLength`, `MaxLength`, `Min`, `Max`, `Step`, `Cols`, `Rows`, and `Options`) so a caller can build the request body before invoking. For form-aware submission — where the client validates the body against those fields *before* sending — use `Resource<T>.SubmitAsync(name, values)` instead. See [The typed client](client.md) for `Resource<T>`, `AffordanceField`, `InvokeAsync`, and `SubmitAsync`.
 
 ## See also
 

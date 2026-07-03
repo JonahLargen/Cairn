@@ -79,7 +79,7 @@ public class CairnClientRobustnessTests
 
         var status = fields.Single(f => f.Name == "status");
         Assert.Equal("Order status", status.Prompt);
-        Assert.Equal(["Pending", "Shipped"], status.Options);
+        Assert.Equal(["Pending", "Shipped"], status.Options.Select(option => option.Value));
         Assert.True(fields.Single(f => f.Name == "id").ReadOnly);
     }
 
