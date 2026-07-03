@@ -1,404 +1,347 @@
-# Cairn v1 — Enterprise Review & Roadmap Recommendations
+# Cairn — Enterprise Review, Second Edition (post-fix-wave)
 
-A full-surface review of the library as shipped (v1 on NuGet), conducted July 2026.
-Scope: all eight packages, docs, CI/release pipeline, and the competitive landscape.
-Baseline health: **build clean (0 warnings), all 348 tests pass on net10.0** — the findings
-below are on top of an unusually disciplined codebase for a young library. Nothing found
-is critical data corruption; the majors are things enterprise adopters will hit early.
+Reviewed at `main` = `aba3217` (July 2026), i.e. after PRs **#66** (client fidelity/
+hardening), **#67** (server spec-correctness), **#68** (docs/packaging drift), and
+**#69** (flaky-test fix). Every claimed fix was re-verified against the current code
+and its regression tests; the diffs were also reviewed for newly introduced bugs.
 
-Legend: 🔴 major · 🟡 minor · 🔵 suggestion. File references are to the current `main`.
+Baseline health: **build clean (0 warnings), 412 tests pass on net10.0** (up from 348 —
+the fix wave brought genuine regression coverage, including the OpenAPI-pollution test
+the first review asked for).
+
+Release context: tags `v0.6.5`/`v0.6.6` both point at PR #67, so the currently
+published packages include the #66/#67 fixes; **#68 and #69 are not yet released.**
+
+Legend: 🔴 major · 🟠 medium · 🟡 minor · 🔵 suggestion.
 
 ---
 
-## 1. Bug fixes (verified, ship as a patch release)
+## 1. Status of the first review's findings
 
-### Client (`Cairn.Client`)
+**Verified fixed (31 items).** Every bug in the first review's client (9/9), server
+(18/18), and docs/packaging-drift (4/4) lists is fixed, correctly, with tests:
 
-- 🔴 **HAL-FORMS templates without `target` are silently dropped.**
-  `src/Cairn.Client/HypermediaParser.cs:84` requires `target`; the spec makes it optional
-  (absent ⇒ submit to the resource's `self` href). `Cairn.Testing` already implements the
-  correct fallback (`src/Cairn.Testing/HypermediaResponse.cs:191-195`) — mirror it.
-- 🔴 **Boolean submissions fail validation against options the server itself emitted.**
-  Server emits bool options as `"true"`/`"false"` (`HalFormsSchema.cs:97`); client
-  stringifies a JSON bool via `JsonElement.ToString()` → `"True"`/`"False"`, failing the
-  ordinal membership check (`src/Cairn.Client/CairnClient.cs:252-253`). Use `GetRawText()`
-  for non-string scalars or compare case-insensitively.
-- 🔴 **Rel comparison is case-sensitive, violating RFC 8288 §2.1.** The server compares
-  rels case-insensitively throughout; the client's link/affordance dictionaries use
-  `StringComparer.Ordinal` (`LinkMap.cs:9`, `HypermediaParser.cs:31-33`), `curies`
-  matching is ordinal (`HypermediaParser.cs:53`, `Resource.cs:70`), and `_embedded`
-  lookup is case-sensitive. `HasLink("Self")` fails against a server emitting `self`.
-- 🔴 **`ConfigurePrimaryHttpMessageHandler` silently disables the SSRF/link policy.**
-  The redirect policy depends on the specific primary handler registered in
-  `CairnClientServiceCollectionExtensions.cs:47-52`; any consumer replacing the primary
-  handler (proxies, mTLS, HTTP/2 pooling — all common) re-enables in-handler
-  auto-redirects and `LinkPolicyRedirectHandler` never sees another hop. Mutate the
-  existing handler via `ConfigureAdditionalHttpMessageHandlers`-style hooks instead, and
-  fail loudly if the handler observes an already-followed redirect.
-- 🔴 **Every response is fully double-buffered with no size cap** —
-  `CairnClient.cs:60,92,435,470` (buffered read → `ReadAsByteArrayAsync` copy →
-  `JsonDocument.Parse`). For a client that threat-models hostile servers, a
-  2 GB body is accepted. Use `ResponseHeadersRead` + `JsonDocument.ParseAsync(stream)`
-  and/or document `MaxResponseContentBufferSize`.
-- 🟡 **Redirect handler forwards `Cookie`/`Proxy-Authorization` cross-origin**
-  (`LinkPolicyRedirectHandler.cs:38-47`) — it strips `Authorization` only; match
-  `HttpClientHandler` redirect behavior.
-- 🟡 **Bind failures masquerade as "not valid JSON"** (`CairnClient.cs:442-451`), and
-  `NotSupportedException` escapes the documented no-throw contract.
-- 🟡 **`UriTemplate.Stringify`** emits `True`/`False` for bools and locale-formatted
-  `DateTime` (`UriTemplate.cs:366-372`) — lowercase bools, use round-trip `"O"` format.
-- 🟡 **HAL-FORMS parse round-trip loses data**: field `value` never parsed and absent from
-  `AffordanceField`; option `prompt`s discarded; `options.link`, `selectedValues`,
-  `minLength`, `step`, `cols`/`rows`, property-level `templated` unparsed
-  (`HypermediaParser.cs:148-187`).
+- **Client (#66):** target-less HAL-FORMS templates fall back to `self`; boolean
+  option validation via `GetRawText()`; RFC 8288 case-insensitive rels everywhere
+  (maps, curies, `_embedded`); `UriTemplate` lowercase bools + round-trip date
+  formats; full HAL-FORMS field round-trip (`Value`, `MinLength`, `Step`,
+  `Cols`/`Rows`, option prompts as `AffordanceFieldOption`, `options.link`,
+  `selectedValues`); the redirect/SSRF policy now mutates the final primary handler
+  via `PostConfigure` (survives `ConfigurePrimaryHttpMessageHandler`) and fails loudly
+  on unseen redirects; `Cookie`/`Proxy-Authorization` stripped cross-origin; responses
+  are headers-first and streamed with a real `MaxResponseContentBufferSize`
+  enforcement (`CappedBodyStream`) and a timeout budget across the body read; bind
+  failures report as bind failures and `NotSupportedException` stays inside the
+  result contract.
+- **Server (#67):** RFC 9110 negotiation (specificity ranking, q=0 exclusion,
+  `application/*+json` no longer selecting plain JSON, DefaultFormat tie-break);
+  HAL-FORMS field names from the serializer contract (`[JsonPropertyName]`, naming
+  policies); per-culture schema caching for localizable prompts; enum options
+  serialized through host options (`JsonStringEnumConverter` honored); `minLength`
+  emitted/validated/documented; OpenAPI phantom-property injection scoped to
+  types that can carry hypermedia, applied schemas marked `readOnly`, placeholders
+  stripped (— but see the regression in §2); accurate converter-DTO diagnostic;
+  init-only envelope writes eliminated; CORS preflights pass through the OPTIONS
+  handler; RFC 9745-valid `Deprecation` always (`@unix-seconds`; date-less overload
+  uses registration time, documented); ETag percent-quoting instead of 500s;
+  `If-None-Match` on unsafe methods → 412 including the `*` create-only idiom;
+  policy names validated at startup via an `IHostedService`; `AddCurie` requires
+  `{rel}` and HAL no longer advertises affordance-only curies;
+  `default(LinkRelation)` fails fast; `WithExtension` rejects reserved problem
+  members; paging registrations walk base types; the three URI-template edge cases.
+- **Docs/packaging (#68):** README dead CHANGELOG link → Releases; docs builds
+  fetch full history + pinned docfx TFM; collection conditional requests actually
+  implemented (`GetCollectionAsync(ifNoneMatch)`, `CollectionResource.ETag`) so the
+  docs claim is now true; packages.md corrected.
+- **Flaky test (#69):** a real synchronization fix (TCS-signalled log capture + an
+  outermost-middleware completion barrier for negative assertions), not a
+  sleep/retry hack; it also closed the inverse false-pass race the flake report
+  didn't cover.
 
-### Server (`Cairn.AspNetCore` / `Cairn.Core`)
+**Resolved as-designed (1).** Deferred sequences inside immutable results
+(`TypedResults.Ok(query)`) can still enumerate twice, but the diagnostic now fires
+eagerly at request time and says the right thing — the review asked for detection,
+and detection is what shipped.
 
-- 🔴 **Content negotiation is order-dependent and ignores media-range specificity**
-  (`Internal/CairnLinkRecorder.cs:335-355`). `Accept: */*, application/hal+json` (both
-  q=1) serves the default format because the first tie wins; RFC 9110 §12.5.1 requires
-  exact type > `application/*+json` > `application/*` > `*/*`. Also: `q=0` does not
-  exclude a format (`:338`), and `application/*+json` can select plain
-  `application/json`, which is outside the requested range (`:413-417`).
-- 🔴 **HAL-FORMS field names ignore the app's JSON contract** (`Internal/HalFormsSchema.cs:44`):
-  camelCase is hardcoded; `[JsonPropertyName]` and `PropertyNamingPolicy` (snake_case
-  shops) are ignored, so generic clients build payloads whose fields the endpoint
-  silently drops. Resolve names via the serializer's `JsonTypeInfo`.
-- 🔴 **HAL-FORMS schema cache freezes the first request's culture**
-  (`HalFormsSchema.cs:14,18,46`) — `DisplayAttribute.ResourceType` prompts are resolved
-  once per process; a French caller can see German prompts forever. Key the cache by
-  culture or resolve prompts per request.
-- 🔴 **DTOs with custom `JsonConverter`s lose all hypermedia silently, and the diagnostic
-  blames the wrong thing** (`Internal/CairnLinkInjectionModifier.cs:44-47` +
-  `CairnLinkRecorder.cs:583-585` — the emit-miss message points at deferred LINQ).
-  Detect the contract-kind mismatch and say so.
-- 🔴 **OpenAPI schema pollution** *(empirically reproduced against a live host)*:
-  `_links`/`_embedded`/`_actions`/`_templates` are injected into *every* object
-  contract, so `AddOpenApi` documents four phantom properties on every schema —
-  including request bodies and unconfigured DTOs (`CairnLinkInjectionModifier.cs:49-52`;
-  acknowledged in `src/Cairn.OpenApi/HypermediaSchemaTransformer.cs:20-23`; custom
-  formatter property names leak the same way). Strip placeholders (identifiable via
-  `AttributeProvider is null`) from non-linked types and all request schemas, and add
-  the regression test that would have caught this (existing tests only check media
-  types and the no-`AddCairn` case).
-- 🔴 **`UseCairnOptionsHandler` can hijack CORS preflights and answers before authz**
-  (`Internal/CairnOptionsMiddleware.cs:25-41`) — skip requests carrying
-  `Access-Control-Request-Method`; document ordering relative to `UseCors`.
-- 🟡 **`Deprecation: true` is invalid under final RFC 9745** (published March 2025 —
-  the boolean form died with the draft). `CairnDeprecationExtensions.cs:42-44` emits it
-  when no date is given; default to a date or obsolete the date-less overload.
-- 🟡 **`If-None-Match` on unsafe methods unhandled** — `PUT … If-None-Match: *`
-  (create-only idiom) has no support; RFC 9110 §13.1.2 requires 412 on match
-  (`CairnPreconditions.cs`, `CairnETagExtensions.cs:45-49`).
-- 🟡 **`WithETag` can 500 at request time** on selector values containing `"` or
-  non-ASCII (`CairnETagExtensions.cs:71-72` `FormatException`).
-- 🟡 **Policy-name typos surface as request-time 500s** — all policies are known at
-  registration; pre-validate at startup (`Internal/AuthorizationPolicyLinkAuthorizer.cs:57`).
-- 🟡 **`AddCurie` doesn't require `{rel}`** yet emits `templated: true` unconditionally
-  (`CairnOptions.cs:159-165` + `CairnLinkRecorder.cs:841`); HAL responses also advertise
-  curies for affordance-name prefixes that never appear in a HAL document
-  (`CairnLinkRecorder.cs:816`).
-- 🟡 **`default(LinkRelation)` is a nullability hole** → `ArgumentNullException`
-  mid-serialization (`src/Cairn.Core/LinkRelation.cs:18-35`).
-- 🟡 **`HypermediaProblem.WithExtension("status", …)` clobbers the numeric `status`**
-  (`HypermediaProblem.cs:84-87`) — reject reserved member names.
-- 🟡 **Envelope materialization mutates user objects via reflection** — including
-  `init`-only properties on records (`CairnLinkRecorder.cs:660-698`); a cached shared
-  envelope gets rewritten from a request thread. Deferred sequences in
-  `TypedResults.Ok(...)` are enumerated **twice** (double DB query) with only a
-  post-response warning (`CairnLinkRecorder.cs:25-30`).
-- 🟡 **`AddPaging`/`AddCursorPaging` lookups use exact runtime type** — subclasses of a
-  registered envelope get no links, inconsistent with `LinkConfigRegistry` inheritance
-  (`CairnOptions.cs:199-221`).
-- 🟡 **Options-level `JsonStringEnumConverter` not detected** — enum form options emit
-  numeric values that string-enum endpoints won't bind (`HalFormsSchema.cs:116-119`).
-- 🟡 **`minLength` never emitted** despite `[StringLength(MinimumLength=…)]`/`[MinLength]`
-  being available (`HalFormsSchema.cs:52`); client validation is asymmetric too.
-- 🟡 **URI template edge cases**: explode-map with `;` emits `;key=` instead of `;key`
-  for empty values (`UriTemplate.cs:198-201`); prefix modifier on composites and
-  reserved operators (`=`, `!`, `@`, `|`) are silently accepted instead of erroring
-  (RFC 6570 §2.4.1 processing error).
+**Everything else from the first review remains open** — §3 below is the
+re-verified list.
 
-### Tooling (analyzers / generator / Swashbuckle / Testing)
+---
+
+## 2. New issues introduced by the fix wave
+
+- 🟠 **Injection scoping regression: derived-only configs behind a base-typed
+  declaration lose all links** — `src/Cairn.AspNetCore/Internal/CairnLinkInjectionModifier.cs:63-67`.
+  `CanCarryHypermedia` is evaluated against the *declared* type when the serializer
+  contract is built, but the compute stage dispatches on the *runtime* type. A
+  `List<BaseAnimal>` holding `DerivedDog` items, where only `DerivedDog` has a
+  `LinkConfig`, records links that can never be emitted. **Empirically bisected:
+  passes at `3b9e051^`, fails at `3b9e051`.** Two aggravations: the post-response
+  diagnostic then emits the misleading "deferred sequence" message
+  (`CairnLinkRecorder.cs:706-708`), and a `LinkConfig` registered *after* a type's
+  contract is first built (the registry explicitly supports late `Add`) permanently
+  loses emission for that type. Both worked before the PR because injection was
+  unconditional. Fix: also inject when any *derivable* config could apply (e.g.
+  non-sealed declared types), or dispatch `CanCarryHypermedia` on runtime types
+  observed at compute time and invalidate the contract cache.
+- 🟠 **The redirect fail-loudly check false-positives on URI-rewriting inner
+  handlers** — `src/Cairn.Client/LinkPolicyRedirectHandler.cs:70-77`.
+  `EnsureRedirectsAreVisible` throws whenever `response.RequestMessage.RequestUri`
+  differs from the sent URI. A consumer handler that mutates the request URI (e.g.
+  appends an API-key query parameter — a common pattern) makes **every request**
+  throw, with a message that misdiagnoses the cause. *Empirically confirmed on a
+  plain 200 GET.* Also: that throw path doesn't dispose the just-received response
+  (the rejected-redirect path at `:26` does). Fix: compare minus the query, or
+  carve out same-origin, and dispose before throwing.
+- 🔴 **`GetCollectionAsync` change is binary- and source-breaking — not yet
+  shipped, decide before the next release** — `src/Cairn.Client/CairnClient.cs`
+  (PR #68). Inserting `string? ifNoneMatch = null` before the `CancellationToken`
+  changes the signature `(string, string, CancellationToken)` →
+  `(string, string, string?, CancellationToken)`: assemblies compiled against
+  v0.6.6 throw `MissingMethodException` at runtime, and positional
+  `GetCollectionAsync<T>(url, "items", ct)` callers no longer compile. Since
+  v0.6.6 = `3b9e051`, this break has **not** shipped yet — release a side-by-side
+  overload instead (or accept the break deliberately at 0.x and release-note it).
+  The meta-finding: nothing caught this because `PublicAPI.Shipped.txt` was never
+  promoted (the whole shipped surface still sits in Unshipped) and
+  `EnablePackageValidation` is absent — both still-open items from the first
+  review, now with a concrete bite mark.
+- 🟡 **Startup policy validator can false-positive on dynamic policy providers**
+  — `src/Cairn.AspNetCore/Internal/AuthorizationPolicyStartupValidator.cs:60`.
+  The `DefaultAuthorizationService` guard covers replaced services, not replaced
+  *providers*: a custom `IAuthorizationPolicyProvider` that materializes policies
+  after boot (store-backed) fails `StartAsync` for a policy that would work at
+  request time; and `GetPolicyAsync` is awaited unguarded, so a throwing provider
+  crashes startup without the curated message. Add an opt-out and a try/catch.
+- 🟡 **Unbounded per-culture schema cache growth** —
+  `src/Cairn.AspNetCore/Internal/HalFormsSchema.cs:22,38,45`. The cache key uses raw
+  `CurrentUICulture.Name`; a host that sets UI culture straight from
+  `Accept-Language` (arbitrary culture strings) grows one cached list per distinct
+  culture per localizable input type, forever. Clamp to a bounded set or LRU.
+- 🟡 **Templated `self` used verbatim as a template-target fallback** —
+  `src/Cairn.Client/HypermediaParser.cs:84`. The new fallback takes
+  `selfLinks[0].Href` without checking `Templated`; a target-less template plus
+  `"self": {"href": "/orders/{id}", "templated": true}` produces an affordance that
+  submits literal braces. Expand-with-no-variables or skip.
+- 🟡 **Release-note the new fail-fast behaviors.** Correct per spec, but upgrading
+  consumers can newly throw where v0.6.x was silently wrong: `UriTemplate` now
+  raises `FormatException` for prefix-on-composite and op-reserve operators,
+  `AddCurie` without `{rel}` throws at startup, and `default(LinkRelation)` throws
+  at construction. All deliberate — say so in the release notes.
+- 🔵 Nits, recorded for completeness: client maps now collapse rels differing only
+  by case (last-wins replace, not merge — a sloppy server can hide a link);
+  timeout-budget cancellation surfaces as a bare `OperationCanceledException`
+  rather than the `TaskCanceledException`+`TimeoutException` convention;
+  duplicate identical Accept ranges take the first q rather than the highest;
+  Accept parameters beyond `q` are ignored when ranking (over-selects only);
+  a curied affordance renamed by `AsDefault()` still advertises its curie;
+  the negative-assertion test barrier (`DiagnosticTiming.ResponseCompletion`)
+  arms one waiter at a time and relies on `OnCompleted` LIFO ordering —
+  acknowledged in its comments, fine for current use.
+
+---
+
+## 3. Still open from the first review (re-verified against current `main`)
+
+### Tooling — untouched by the fix wave; all fourteen findings stand
+
+The four PRs changed nothing under `src/Cairn.Analyzers`, `src/Cairn.SourceGenerators`,
+`src/Cairn.CodeFixes`, `src/Cairn.Swashbuckle`, or `src/Cairn.Testing`.
 
 - 🔴 **CAIRN001 never validates `LinkTarget.RouteTemplate(...)`**
-  (`RouteNameAnalyzer.cs:82` checks `method == "Route"` only). `RouteTemplate` resolves
-  by route name identically at runtime and fails identically on a typo — a silent false
-  negative on a first-class API, with no test covering it.
-- 🔴 **The CAIRN001 code fix is invisible in IDEs.** CAIRN001 is reported from
-  `RegisterCompilationEndAction` and tagged `CompilationEnd`; Roslyn does not offer
-  lightbulb fixes for compilation-end diagnostics (dotnet/roslyn#24827), so the
-  "Change route name to '…'" fix only fires in tests and batch tooling. Either
-  restructure (compilation-start-cached name index consulted from the node action) or
-  document the limitation.
-- 🔴 **A route named `Routes` generates uncompilable code.** `Sanitize("Routes")` (any
-  casing) collides with the enclosing `Routes` class → CS0542; routes named
-  `Equals`/`GetHashCode`/`ToString` hide `object` members → CS0108, fatal under the
-  consumer's `TreatWarningsAsErrors` (`RoutesGenerator.cs:381-425`). The generator
-  guards route-vs-route collisions but not these; rename or drop with a diagnostic.
-- 🔴 **Cairn.Swashbuckle requires Swashbuckle.AspNetCore ≥ 10.x** — the filter signature
-  (`Apply(IOpenApiSchema, …)`, `CairnSwaggerSchemaFilter.cs:17-19`) is
-  source/binary-incompatible with Swashbuckle 6.x–9.x (Microsoft.OpenApi 1.x), where
-  most of the installed base lives. Deliberate or not, nothing in the package
-  description or docs says so — document the floor prominently (or multi-target
-  behind `#if`).
-- 🟡 **CAIRN002 never analyzes the MVC opt-in path** — `[CairnLinks]` controller actions
-  are not covered at all, and `var ep = app.MapGet(...); ep.WithLinks();` (chain broken
-  through a variable) is silently skipped (`MissingLinkConfigAnalyzer.cs:76-95`). Also
-  no cross-project escape hatch: one local `LinkConfig` plus the rest in a referenced
-  assembly false-positives with no `cairn_additional_configured_types` equivalent.
-- 🟡 **Named-argument reordering defeats CAIRN001** —
-  `LinkTarget.Route(routeValues: v, routeName: "x")` is skipped
-  (`RouteNameAnalyzer.cs:226-231` takes the positionally-first argument); and
-  `LinkTarget.WithName(...)` (a HAL link *name*, not a route) is collected as a declared
-  route name because `WithName` collection is receiver-blind (`:75-81`).
-- 🟡 **Analyzer hygiene nits**: `MissingLinkConfigAnalyzer.cs:225` builds a
-  `HashSet<(ITypeSymbol, Location)>` without `SymbolEqualityComparer` (RS1024
-  territory); no `helpLinkUri` on any descriptor; `AnalyzerReleases.Shipped.md` is still
-  empty although the rules are published (fold the promotion into RELEASING.md).
-- 🟡 **Generator: regex route constraints with `{}` corrupt parameter parsing**
-  (`RoutesGenerator.cs:296-341` — first-`}` scan; `{slug:regex(^\d{{4}}$)}` drops the
-  parameter). Use brace-depth scanning.
-- 🟡 **Generator: `app.Map(...)` endpoints are invisible** to the `Routes.*` catalog
-  (`RoutesGenerator.cs:210`) though the analyzer handles them; inherited controller
-  `[Route]` prefixes also missed (`:106-117`).
-- 🟡 **CAIRN002 matches any `.WithLinks()` syntactically** and `LinkConfig<T>` detection
-  ignores namespace → false positives with third-party code
-  (`MissingLinkConfigAnalyzer.cs:66-86`). CAIRN001 false-positives on MVC
+  (`RouteNameAnalyzer.cs:82` — `method == "Route"` only). Identical runtime failure
+  mode on typos; no test covers it.
+- 🔴 **The CAIRN001 code fix is invisible in IDEs** — compilation-end diagnostics
+  get no lightbulb (dotnet/roslyn#24827); the fix only fires in tests/batch tools.
+  Restructure (compilation-start-cached name index consulted from the node action)
+  or document the limitation.
+- 🔴 **A route named `Routes` generates uncompilable code** (CS0542); routes named
+  `Equals`/`GetHashCode`/`ToString` hide `object` members (CS0108 — fatal under
+  consumer `TreatWarningsAsErrors`). `RoutesGenerator.cs` `Sanitize` (~`:471`) and
+  the emission loop (`:385-404`) guard route-vs-route collisions only.
+- 🔴 **Cairn.Swashbuckle requires Swashbuckle.AspNetCore ≥ 10.x** — the
+  `IOpenApiSchema` filter signature is incompatible with 6.x–9.x where most of the
+  installed base lives; nothing documents the floor.
+- 🟡 **CAIRN002 misses the MVC opt-in path** — `[CairnLinks]` actions never
+  analyzed; `var ep = app.MapGet(...); ep.WithLinks();` silently skipped; no
+  cross-project escape hatch (`MissingLinkConfigAnalyzer.cs:76-95`).
+- 🟡 **Named-argument reordering defeats CAIRN001**
+  (`LinkTarget.Route(routeValues: v, routeName: "x")` skipped, ~`:226-236`);
+  receiver-blind `WithName` collection even counts `LinkTarget.WithName(...)` (a HAL
+  link name) as a declared route.
+- 🟡 **Analyzer hygiene**: `HashSet<(ITypeSymbol, Location)>` without
+  `SymbolEqualityComparer` (`MissingLinkConfigAnalyzer.cs:225`); no `helpLinkUri` on
+  any descriptor; `AnalyzerReleases.Shipped.md` still empty though the rules are
+  published (fold promotion into RELEASING.md).
+- 🟡 **Generator**: regex constraints with `{}` corrupt parameter parsing
+  (first-`}` scan, `RoutesGenerator.cs:298`); `app.Map(...)`/`MapFallback` invisible
+  to the catalog (`:210`) though the analyzer covers them; inherited controller
+  `[Route]` prefixes missed; CAIRN003 reported at `Location.None`.
+- 🟡 **CAIRN002 matches any `.WithLinks()` syntactically**, `LinkConfig<T>`
+  detection is namespace-blind, and CAIRN001 false-positives on MVC
   conventional-route names (`MapControllerRoute(name: …)` never collected).
-- 🟡 **Testing package disagrees with the spec and the client**: absent `method` defaults
-  to `""` instead of `GET` (`HypermediaResponse.cs:103,197`), and bare-string inline
-  options aren't parsed (`:239-257`) though the client accepts them.
-- 🟡 **Testing can't parse Cairn's own collection wire shape** —
-  `HypermediaResponse.Parse` on a bare JSON-array root (how Cairn serializes bare
-  collections, `CairnLinkRecorder.cs:104-109`) silently returns an all-empty response
-  instead of erroring (`HypermediaResponse.cs:59-75`). Add
-  `ParseAll`/`ReadHypermediaListAsync` for array roots; throw on array in `Parse`.
-- 🟡 **Testing parser captures only `name`/`title`/`templated` per link** — the wire's
-  `type`/`deprecation`/`hreflang`/`profile` members can't be asserted at all.
+- 🟡 **Cairn.Testing**: `Parse` on a bare JSON-array root — Cairn's own collection
+  wire shape — silently returns an all-empty response (`HypermediaResponse.cs:59-75`;
+  add `ParseAll`, throw on array in `Parse`); absent `method` defaults to `""`
+  instead of the spec's `GET` (`:103,:197`); bare-string inline options dropped
+  (`:239-257`); link `type`/`deprecation`/`hreflang`/`profile` unparsed and
+  therefore unassertable.
 
-### Docs / packaging drift (all confirmed)
+### Enterprise/server posture — open except one partial
 
-- 🔴 **`README.md:17` links `CHANGELOG.md`, which was deleted in #62** — a dead link on
-  GitHub *and inside every published package* (README is packed). Point at GitHub
-  Releases (release notes are already auto-generated).
-- 🔴 **Docs builds are a latent build-breaker**: `docs.yml:26` / `ci.yml:57-58` use
-  shallow checkouts — MinVer warns on shallow clones and warnings are errors repo-wide.
-  `docfx.json` also doesn't pin `TargetFramework`, so which TFM the API docs describe is
-  arbitrary.
-- 🟡 `docs/articles/client.md:209` claims collection requests support 304, but
-  `GetCollectionAsync` has no `ifNoneMatch` parameter and `CollectionResource` has no
-  `ETag` — the 304 branch is unreachable through the public API. Implement it (better)
-  or fix the doc.
-- 🟡 `docs/articles/packages.md:20` claims Cairn.Testing references Cairn.Core; it is
-  deliberately dependency-free.
+- 🔴 **Absolute links trust the `Host` header by default.** Behind a proxy without
+  `UseForwardedHeaders`, every link reflects an attacker-controlled Host. The safe
+  modes exist (`PublicBaseUri`, `PathRelative`) but nothing warns when neither is
+  configured. One-time startup warning, or default to `PathRelative` in a breaking
+  window.
+- 🔴 **OutputCache is a footgun.** `CairnLinkRecorder.cs:255` still claims `Vary:
+  Accept` protects OutputCache — that middleware ignores response `Vary` (needs a
+  `VaryByHeader("Accept")` policy) — and policy-gated links personalize bodies, so a
+  shared cache can replay privileged affordances to anonymous users. Needs a caching
+  docs page + a warn-once when policy-gated links meet `IOutputCacheFeature`.
+- 🟡 **App-wide costs — partially addressed by #67.** Injection is now scoped to
+  types that can carry hypermedia, so unconfigured DTOs no longer pay the
+  injected-getter cost and the `JsonUnmappedMemberHandling.Disallow` semantic change
+  is confined to configured types. Still open: the startup filter registers an
+  `OnStarting` callback on literally every request, deprecation metadata or not
+  (`CairnServiceCollectionExtensions.cs:36`, `CairnHeadersMiddleware.cs:18`).
+- 🟡 **Per-templated-link linear endpoint scan** —
+  `LinkGeneratorUrlResolver.cs:106-119` still walks all endpoints per
+  `RouteTemplate` link per item per request. Cache by name, invalidate with
+  `EndpointDataSource.GetChangeToken()`.
+- 🟡 **AOT/trimming story implied but not delivered** — `CairnJsonContext`
+  advertises Native AOT; no `IsAotCompatible`/`IsTrimmable` anywhere, reflection
+  unannotated. Annotate or drop the claim.
+- 🟡 **`HypermediaProblem` bypasses `CustomizeProblemDetails`** — error bodies skip
+  the pipeline where teams add `traceId`; still takes raw href strings rather than
+  `LinkTarget.Route`.
+- 🟡 **`IAsyncEnumerable<T>` responses silently lose links** — by design, warned in
+  logs, but still absent from the README's "when not to use" framing.
+- 🟡 **Options freeze silently** — no `IOptionsMonitor`, and `Configure<CairnOptions>`
+  after first resolution is ignored (`CairnServiceCollectionExtensions.cs:37`).
+  #67's policy validator fixed the worst request-time-500 case; formatter/config
+  late-registration validation is still absent.
 
----
+### Packaging / repo hygiene — all open, individually re-verified
 
-## 2. Spec misapplications — summary of what's wrong vs. what's right
-
-Beyond the individual items above, the shape of the story:
-
-**Wrong or non-conforming**: negotiation tie-breaking/q=0/`*+json` handling (RFC 9110);
-client rel case-sensitivity (RFC 8288); `Deprecation: true` (RFC 9745 final); missing
-`If-None-Match` on unsafe methods (RFC 9110 §13.1.2); HAL-FORMS optional-`target`
-handling in the client; curies without `{rel}`; two URI-template edge cases (RFC 6570);
-HAL-FORMS `regex` carries .NET-dialect patterns where the spec implies HTML5/ECMAScript
-semantics (works Cairn↔Cairn, breaks cross-implementation — at minimum document it).
-
-**Verified correct (worth advertising)**: If-Match strong / If-None-Match weak comparison
-semantics, `*` handling, ETag-on-304, 412/428 bodies; `Vary: Accept` emission and dedup;
-HAL curies always-array with `name`+`templated`; single-link vs link-array emission; the
-full RFC-relevant link-object property set; `LinkRelation` case-insensitive equality;
-HAL-FORMS `contentType` defaulting; RFC 6570 pct-triplet passthrough/astral handling;
-RFC 9457 member names and extension handling. The URI template implementation is
-notably conformant overall.
-
-**Consider one default change**: HAL-FORMS recommends the sole/primary template use the
-reserved `default` key; today a typical single-template document keys by action name
-unless `AsDefault()` is called, which generic HAL-FORMS clients won't look up first.
-
----
-
-## 3. New features the library should have
-
-Ordered by leverage:
-
-1. **Client pagination iterator** — `IAsyncEnumerable<Resource<TItem>>` /
-   `IAsyncEnumerable<TItem>` that walks `next` to exhaustion (with page/item caps).
-   The single highest-value client DX addition; trivially demoable.
-2. **Resource-based authorization** — `RequireAuthorization` is caller-only by design
-   (documented honestly at `LinkConfig.cs:97-103`), but
-   `AuthorizeAsync(user, resource, policy)` is *the* enterprise authorization idiom.
-   `ILinkAuthorizer.AuthorizeAsync(string policy)` cannot grow this non-breakingly —
-   design the v2 seam now (see §6).
-3. **Gated embeds** — `Embed`/`EmbedMany` accept no `When()`/`RequireAuthorization()`
-   (`LinkConfig.cs:55-63`), yet embedding is exactly where data leaks.
-4. **Startup options validation** — `ValidateOnStart`-style checks: unknown policy names,
-   duplicate formatter media types, forced-but-unregistered formats (all currently
-   request-time 500s), `AddCurie` template validation. Also `IOptionsMonitor` or at
-   least fail-loudly-on-late-`Configure` (options freeze silently today,
-   `CairnServiceCollectionExtensions.cs:37`).
-5. **Per-request base-URI resolver** — one global `PublicBaseUri` can't do multi-tenant
-   hosts; `TransformUrl` skips pagination links and explicit hrefs, so a tenant rewrite
-   covers only part of the document. Add `Func<HttpContext, Uri>`.
-6. **`Location`/`ETag` on `ClientResult`** — a 201-with-Location create affordance
-   currently gives the caller only a status code (`CairnClient.cs:119-128`).
-7. **HAL-FORMS `options.link` (options by reference)** — remote value lists are what real
-   forms need (country lists, lookups); Spring supports it; the inline-only model caps out fast.
-8. **Localization hook** for prompts/titles (ties into the culture-cache bug above).
-9. **HTTP `Link` header emission (RFC 8288)** — cheap, spec-pure, gives HEAD requests and
-   generic clients (Ketting) something to chew on.
-10. **OpenAPI completeness** — `WithDeprecation` endpoints should set
-    `operation.Deprecated = true` and document the `Deprecation`/`Sunset`/`Link`
-    response headers (the metadata is already discoverable); `WithETag` endpoints
-    should document `ETag`/304/412 (add an `ETagMetadata` marker — today it's
-    filter-only); `HypermediaProblem` should implement `IEndpointMetadataProvider` so
-    endpoints returning it document anything at all; typed `_embedded` schemas; and
-    per-format schema variants so `application/hal+json` responses don't advertise
-    `_actions` (see `Shared/HypermediaJsonSchemas.cs:36-43` — one schema serves three
-    shapes).
-11. **Client observability** — an `ActivitySource` with `link.relation`/`affordance.name`
-    tags; the server side is genuinely well instrumented, the client has nothing.
-12. **Testing package gaps** — `NotHaveTemplate`, embedded-count assertions, `And`-chain
-    continuity from embedded assertions, status/content-type/ETag helpers.
+No `PackageIcon`; no `EnablePackageValidation`/`PackageValidationBaselineVersion`
+(§2's binary break is the cost of this, made concrete); no `SECURITY.md`,
+`CONTRIBUTING.md`, dependabot, or issue templates; workflow actions tag-pinned
+rather than SHA-pinned — including third-party `NuGet/login@v1` on the OIDC
+publishing path (`release.yml:50`, `id-token: write`); coverlet referenced but
+coverage never collected; no `concurrency` group in `ci.yml`; RELEASING.md still
+omits the PublicAPI Unshipped→Shipped promotion (also now with a §2 bite mark);
+strong-naming decision undocumented; analyzers ship only inside Cairn.AspNetCore
+(Core-only contract assemblies get no CAIRN001/002) via hardcoded
+`bin\$(Configuration)\netstandard2.0\` pack paths.
 
 ---
 
-## 4. What a Sr dev will complain about after installing
+## 4. Spec-conformance summary (post-#66/#67)
 
-1. **Absolute links trust the `Host` header by default.** Behind a proxy without
-   `UseForwardedHeaders`, every link in every body reflects an attacker-controlled Host
-   (poisoning + internal hostname leakage). The safe modes exist (`PublicBaseUri`,
-   `PathRelative`) but the *default* is the dangerous one and nothing warns. Emit a
-   one-time startup warning when neither forwarded-headers nor `PublicBaseUri` is
-   configured — or flip the default to `PathRelative` in v2.
-2. **Output caching is a footgun.** Code comments and docs claim `Vary: Accept` protects
-   OutputCache — ASP.NET Core's OutputCache middleware ignores response `Vary` (needs
-   `VaryByHeader("Accept")` policy). Worse: `RequireAuthorization`-gated links
-   personalize bodies, so a shared cache can replay admin affordances to anonymous
-   users. Needs a dedicated caching docs page + a runtime warn-once when policy-gated
-   links meet `IOutputCacheFeature`.
-3. **App-wide costs once `AddCairn` is called**: every serialized object in the app pays
-   the injected-property getters (AsyncLocal read + `Items` lookups × 4), and the
-   startup filter adds an `OnStarting` callback to literally every request. Injected
-   contract properties also change strict-binding semantics
-   (`JsonUnmappedMemberHandling.Disallow` no longer rejects inbound `_links`).
-4. **The AOT/trimming story is implied but not delivered.** `CairnJsonContext` advertises
-   "standard Native AOT setup", but no project sets `IsAotCompatible`/`IsTrimmable` and
-   none of the reflection (`Activator.CreateInstance`, `MakeGenericType`,
-   `assembly.GetTypes()`, `GetProperties`) is annotated — trimming strips envelope
-   properties with zero warnings. Either annotate and declare it, or drop the claim.
-5. **`HypermediaProblem` bypasses `CustomizeProblemDetails`** — error bodies skip the
-   pipeline where teams add `traceId`/correlation IDs, so Cairn's errors are shaped
-   differently from the rest of the API. It also takes raw href strings, forfeiting the
-   library's own `LinkTarget.Route` machinery on the error path.
-6. **`IAsyncEnumerable<T>` responses silently lose links** (by design; warned once in
-   logs). Fine as a constraint — but it belongs in the README's "when not to use"
-   section, not just a log line.
-7. **Per-templated-link linear endpoint scan** — `FindPattern` walks all endpoints per
-   `RouteTemplate` link per item per request (`LinkGeneratorUrlResolver.cs:106-119`);
-   500 endpoints × 100 items = 50k scans/request. Cache by name with
-   `EndpointDataSource.GetChangeToken()` invalidation.
-8. **Packaging/repo gaps** (all absent): `EnablePackageValidation` +
-   `PackageValidationBaselineVersion` (nothing catches binary breaks vs last shipped
-   version), package icon, `SECURITY.md`, `CONTRIBUTING.md`, dependabot (NuGet + action
-   pins), issue templates, SHA-pinned actions (third-party `NuGet/login@v1` sits on the
-   OIDC publishing path with `id-token: write`), coverage collection (coverlet is
-   referenced but never invoked), CI `concurrency` group, RELEASING.md missing the
-   PublicAPI Unshipped→Shipped promotion step.
-9. **Strong naming: decide now.** Defensible to skip on net8+, but impossible to add
-   post-1.0 without an identity break; some enterprise NuGet gatekeeping still requires
-   it. Document the decision either way.
-10. **Analyzers ship only inside Cairn.AspNetCore** — a project referencing just
-    Cairn.Core (where `LinkTarget.Route` lives, e.g. a shared contracts assembly holding
-    the `LinkConfig<T>`s) gets no CAIRN001/002 at all. Probably intentional; document
-    it, and note the packing uses hardcoded `bin\$(Configuration)\netstandard2.0\` paths
-    that would silently pack stale DLLs on a TFM change.
+**Now verified conformant** (moved from the first review's "wrong" column):
+negotiation specificity/q=0/`*+json` (RFC 9110 §12.5.1); client rel
+case-insensitivity (RFC 8288 §2.1); `Deprecation: @unix-seconds` (RFC 9745 final);
+`If-None-Match` on unsafe methods → 412 (RFC 9110 §13.1.2); HAL-FORMS optional
+`target` in the client; curies with required `{rel}`; the RFC 6570 edge cases
+(`;` ifemp in exploded maps, prefix-on-composite and op-reserve now processing
+errors). Already-correct strengths stand: If-Match/If-None-Match comparison
+semantics, ETag-on-304, 412/428 bodies, `Vary: Accept` emission, link-object
+property set, HAL-FORMS `contentType` defaulting, RFC 9457 member handling.
+
+**Remaining spec notes**: HAL-FORMS `regex` still carries .NET-dialect patterns
+where the spec implies ECMAScript semantics (fine Cairn↔Cairn; document it);
+the sole/primary template still isn't keyed `default` unless `AsDefault()` is
+declared (HAL-FORMS clients look `default` up first); no 406 path (legal —
+"SHOULD send 406 *or* disregard" — worth a docs sentence); Accept parameters
+beyond `q` ignored in ranking (§2 nit).
 
 ---
 
-## 5. Features competitors have that Cairn doesn't
+## 5. Feature gaps (unchanged priorities, minus what #68 delivered)
 
-Context: the .NET hypermedia space is a graveyard (Halcyon, WebApi.Hal, SirenDotNet,
-RiskFirst.Hateoas — all dead/dormant), and they died of the diseases Cairn already
-cured: model wrapping, pipeline takeover, single-maintainer opacity. The live
-competition is Spring HATEOAS (JVM), JsonApiDotNetCore, and "just use GraphQL/OData"
-pressure.
+Collection conditional requests shipped in #68 (modulo the §2 signature concern).
+The rest of the first review's list stands, ordered by leverage:
 
-| Gap | Who has it | Verdict |
-| --- | --- | --- |
-| **Browsable explorer UI** | Spring (HAL Explorer auto-configured at API root) | **Do it.** Cairn already emits compatible HAL/HAL-FORMS; a small middleware serving HAL Explorer + a hosted live sample is the highest-conversion demo in this space. |
-| **Siren format** | D2L, dead .NET libs | **Do it.** Siren's typed-field `actions` map 1:1 onto Cairn affordances; every .NET Siren lib is dead — free vacancy, and the `IHypermediaFormatter` SPI mostly exists (but see §6 on its limits). |
-| **ALPS profile generation** | Spring auto-publishes ALPS | **Do it (cheap).** Cairn already knows every rel, method, and field; generating the profile doc is nearly free and doubles as agent-readable semantics. |
-| **Multi-hop client traversal** | Spring Traverson, JS traverson/Ketting | Sugar over `FollowAsync` — `Follow("orders", "next", "item")`. Low cost. |
-| **TypeScript/browser client** | wertzui/HAL (Angular pkg), Ketting (React) | Hypermedia's payoff is rendered UI; at minimum publish a docs page proving Ketting interop against a Cairn API. |
-| **Query-side story** (filter/sort/sparse fieldsets) | JsonApiDotNetCore, OData | Blunt it, don't build it: a small opt-in query-param → pagination-envelope binding, or an OData-paging integration sample. Evaluations are lost on `?filter=&sort=` alone. |
-| **CRUD scaffolding / template** | JsonApiDotNetCore (models→API), Spring Data REST | A `dotnet new cairn-api` template is the immediate-productivity hook; ideology doesn't drive adoption, deleted boilerplate does. |
-| **JSON:API format** | JsonApiDotNetCore | **Skip for now** — they own it in .NET and the full spec is heavy. Note: the current formatter SPI *cannot* express JSON:API's document reshaping anyway (§6). |
-| Collection+JSON / UBER / Mason | Spring (barely used) | **Skip.** Community fatigue with generic hypermedia types is real. |
-
-Standards watch: HAL remains an expired draft used as de-facto standard; HAL-FORMS is
-still a working draft under `application/prs.hal-forms+json`; **RFC 9745 (Deprecation)
-went final in March 2025** — Cairn's boolean emission is now formally invalid (§1).
-
----
-
-## 6. Wildcard — the strategic bets
-
-### a) `Cairn.Mcp`: affordances as agent tools (first-mover, any ecosystem)
-
-The 2025-26 hypermedia thesis is that HATEOAS was waiting for AI agents: runtime tool
-discovery, contextual capability exposure, provider-controlled exploration. A Cairn
-response *is already* a dynamically-scoped tool list — state-gated, authorization-gated,
-with human-readable titles and typed HAL-FORMS fields. A package that exposes an MCP
-server whose per-session tools are the *currently valid* affordances of the resources an
-agent has traversed would be a first-mover feature in any ecosystem, not just .NET.
-Nobody in .NET has this. HAL-FORMS field schemas map directly onto MCP tool input
-schemas; `When()`/`RequireAuthorization()` become the tool-visibility filter.
-
-### b) Positioning: "the missing piece of Microsoft's own API guidance"
-
-Microsoft's API design guidance recommends HATEOAS; ASP.NET Core ships nothing for it.
-That one sentence is the wedge. Pair it with: a hosted sample browsable in HAL Explorer,
-an honest "Cairn vs GraphQL vs OData" comparison page (the objection every evaluation
-raises), a FastEndpoints integration sample (their community has no hypermedia story),
-and the htmx-renaissance framing — "hypermedia for your JSON APIs, the way htmx is
-hypermedia for your HTML; AI agents are the new machine client."
-
-### c) Fix the v2 extensibility seams while the user base is small
-
-Three interfaces will block the roadmap above and can only change breakingly:
-
-1. `ILinkAuthorizer.AuthorizeAsync(string policy)` — no `ClaimsPrincipal`, no resource
-   parameter ⇒ resource-based auth (§3.2) can never be added compatibly.
-2. `ILinkUrlResolver.Resolve(LinkTarget)` — synchronous, no request context ⇒ signed
-   URLs, tenant lookups, async resolution all impossible.
-3. `IHypermediaFormatter` — can inject properties but cannot **reshape the document**
-   (`Properties` read once at startup) ⇒ JSON:API and full Siren are inexpressible;
-   "custom formats" currently oversells. `HypermediaFormat` being a public enum on
-   `CairnOptions.DefaultFormat` also means built-ins can't become formatter-based
-   without churn.
-
-Redesigning these seams (plus the default-URL-style decision in §4.1 and gated embeds)
-is the core of a v2 breaking window. Everything else in this review is non-breaking.
+1. **Client pagination iterator** — `IAsyncEnumerable<Resource<TItem>>` walking
+   `next` to exhaustion. Highest-value client DX addition.
+2. **Resource-based authorization** — `AuthorizeAsync(user, resource, policy)`;
+   requires the v2 `ILinkAuthorizer` seam (§7).
+3. **Gated embeds** — `Embed`/`EmbedMany` still accept no
+   `When()`/`RequireAuthorization()`, yet embedding is where data leaks.
+4. **Per-request base-URI resolver** — multi-tenant hosts; `TransformUrl` still
+   skips pagination links and explicit hrefs.
+5. **`Location`/`ETag` on `ClientResult`** — a 201-create affordance still yields
+   only a status code.
+6. **HAL-FORMS `options.link`** (options by reference) — remote value lists.
+7. **HTTP `Link` header emission** (RFC 8288) — cheap, spec-pure, useful for HEAD.
+8. **OpenAPI completeness** — `operation.Deprecated` + `Deprecation`/`Sunset`
+   header docs (metadata already discoverable); `ETagMetadata` so `WithETag`
+   endpoints document `ETag`/304/412; `IEndpointMetadataProvider` on
+   `HypermediaProblem`; typed `_embedded` schemas; per-format schema variants
+   (one schema still serves three shapes, `Shared/HypermediaJsonSchemas.cs:36-43`).
+9. **Client observability** — an `ActivitySource` with `link.relation` /
+   `affordance.name` tags; server-side OTel is done, client has none.
+10. **Testing surface** — `NotHaveTemplate`, embedded-count assertions, `And`-chain
+    continuity, status/content-type/ETag helpers (plus the §3 parser fixes).
 
 ---
 
-## Suggested sequencing
+## 6. Competitive positioning (unchanged from the first review)
 
-1. **v1.0.x patches (now)** — §1 bugs (client spec fixes, negotiation, CORS-preflight
-   skip, RFC 9745 emission, converter diagnostic), dead CHANGELOG link, docs-build
-   shallow-clone fix, packaging hygiene (icon, validation, dependabot, SECURITY.md,
-   SHA-pinned actions).
-2. **v1.1 (weeks)** — client pagination iterator, `Location`/`ETag` on results,
-   collection conditional requests (docs already promise them), startup options
-   validation, HAL-FORMS naming-policy + culture fixes, `minLength`, Host-header
-   startup warning, OutputCache docs page + guardrail, endpoint-pattern cache,
-   HAL Explorer middleware + hosted demo, `dotnet new` template.
-3. **v1.2 (quarter)** — Siren formatter (validates the reworked SPI in preview), ALPS
-   generation, `Link` header emission, `options.link`, client OTel, Traverson-style
-   sugar, Ketting interop docs, GraphQL/OData comparison page.
-4. **v2 (design now, ship when ready)** — authorizer/resolver/formatter seam redesign,
-   resource-based authorization, gated embeds, per-request base URI, PathRelative (or
-   warned-Absolute) default, AOT/trimming posture for Core+Client, `Cairn.Mcp` flagship.
+The .NET hypermedia space is a graveyard whose corpses died of model-wrapping,
+pipeline takeover, and maintenance opacity — all things Cairn avoids. Live pressure
+is Spring HATEOAS, JsonApiDotNetCore, and "just use GraphQL/OData."
+
+Do: **HAL Explorer compatibility + hosted browsable demo** (highest-conversion
+move in this space); **Siren formatter** (typed-field `actions` map 1:1 onto
+affordances; every .NET Siren lib is dead); **ALPS profile generation** (nearly
+free — Cairn knows every rel/method/field); `dotnet new cairn-api` template;
+Traverson-style multi-hop client sugar; Ketting-interop docs page; an honest
+"Cairn vs GraphQL vs OData" comparison. Blunt the query-side objection with a
+small opt-in query-param binding or an OData-paging sample.
+Skip: JSON:API (owned by JsonApiDotNetCore; inexpressible in the current
+formatter SPI anyway), Collection+JSON/UBER/Mason.
+
+Wildcard, unchanged and still first-mover: **`Cairn.Mcp`** — a Cairn response is
+already a dynamically-scoped, state- and authorization-gated tool list with
+human-readable titles and typed HAL-FORMS field schemas; exposing current
+affordances as MCP tools for AI agents has no equivalent in any ecosystem.
+Positioning wedge: "the missing piece of Microsoft's own API design guidance,"
+riding the htmx-renaissance narrative with AI agents as the new machine client.
+
+---
+
+## 7. v2 seams (unchanged — fix while the user base is small)
+
+1. `ILinkAuthorizer.AuthorizeAsync(string policy)` — no principal, no resource ⇒
+   resource-based auth can never be added compatibly.
+2. `ILinkUrlResolver.Resolve(LinkTarget)` — sync, no request context ⇒ signed
+   URLs, tenant lookups, async resolution impossible.
+3. `IHypermediaFormatter` — injects properties but cannot reshape documents
+   (`Properties` read once at startup) ⇒ JSON:API and full Siren inexpressible;
+   `HypermediaFormat` as a public enum couples built-ins to the options surface.
+
+Plus the two default-posture decisions best made in a breaking window: link URL
+style (`PathRelative` vs warned-`Absolute`) and gated embeds.
+
+---
+
+## 8. Suggested sequencing (updated)
+
+1. **Before the next release (v0.6.7 / v0.7.0)** — decide the `GetCollectionAsync`
+   break (overload vs release-noted break); fix the 🟠 injection-scoping regression
+   and the 🟠 redirect false-positive; promote `PublicAPI.Shipped.txt` and turn on
+   `EnablePackageValidation` with a baseline so this class of issue is caught
+   mechanically; release-note the new fail-fast behaviors.
+2. **Next minor wave** — tooling fixes (RouteTemplate analyzer coverage, `Routes`
+   name collision, code-fix visibility decision, Swashbuckle floor documentation,
+   Testing parser fixes); Host-header startup warning; OutputCache docs page +
+   guardrail; endpoint-pattern cache; packaging hygiene batch (icon, SECURITY.md,
+   dependabot, SHA pins, coverage, concurrency).
+3. **Feature wave** — client pagination iterator, `Location`/`ETag` on results,
+   client OTel, HAL Explorer middleware + hosted demo, `dotnet new` template,
+   `options.link`, `Link` header emission, OpenAPI completeness batch.
+4. **v2 window** — the three seams, resource-based authorization, gated embeds,
+   per-request base URI, URL-style default, AOT/trimming posture, Siren formatter
+   (validates the reworked SPI), ALPS generation, `Cairn.Mcp` flagship.
