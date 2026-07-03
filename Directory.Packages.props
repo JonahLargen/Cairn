@@ -27,7 +27,7 @@
     <PackageVersion Include="Swashbuckle.AspNetCore.SwaggerGen" Version="10.2.2" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
-    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="coverlet.collector" Version="10.0.1" />
   </ItemGroup>
 
   <!-- Per-TFM floors: keep net8.0/net9.0 targets on their own package generation instead of
