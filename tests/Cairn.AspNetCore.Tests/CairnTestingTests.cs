@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Net;
 using System.Text.Json.Serialization;
 using Cairn;
 using Cairn.AspNetCore;
@@ -293,6 +294,73 @@ public class CairnTestingTests
         const string json = """{"_links":{"self":{"href":"/o/42"}},"_templates":{"default":{"method":"PUT"}}}""";
 
         HypermediaResponse.Parse(json).Should().HaveTemplate("default").WithMethod(HttpMethod.Put).WithTarget("/o/42");
+    }
+
+    [Fact]
+    public void Parse_throws_on_an_array_root_and_ParseAll_parses_each_element()
+    {
+        const string json = """[{"id":1,"_links":{"self":{"href":"/o/1"}}},{"id":2,"_links":{"self":{"href":"/o/2"}}}]""";
+
+        // A silently-empty response would let every negative assertion pass; the error points at ParseAll.
+        var arrayRoot = Assert.Throws<FormatException>(() => HypermediaResponse.Parse(json));
+        Assert.Contains("ParseAll", arrayRoot.Message);
+
+        var resources = HypermediaResponse.ParseAll(json);
+        Assert.Equal(2, resources.Count);
+        Assert.Equal("/o/1", resources[0].Links["self"].Href);
+        Assert.Equal("/o/2", resources[1].Links["self"].Href);
+
+        var objectRoot = Assert.Throws<FormatException>(() => HypermediaResponse.ParseAll("""{"id":1}"""));
+        Assert.Contains("Parse", objectRoot.Message);
+    }
+
+    [Fact]
+    public async Task ReadHypermediaListAsync_parses_an_array_root_body()
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""[{"_links":{"self":{"href":"/i/1"}}}]"""),
+        };
+
+        var resources = await response.ReadHypermediaListAsync();
+
+        var resource = Assert.Single(resources);
+        Assert.Equal("/i/1", resource.Links["self"].Href);
+    }
+
+    [Fact]
+    public void An_absent_method_defaults_to_get_for_actions_and_templates()
+    {
+        var hypermedia = HypermediaResponse.Parse(
+            """{"_links":{"self":{"href":"/o/1"}},"_actions":{"reload":{"href":"/o/1"}},"_templates":{"default":{}}}""");
+
+        // HAL-FORMS prescribes GET when a template omits its method; _actions mirrors that.
+        Assert.Equal("GET", hypermedia.Affordances["reload"].Method);
+        Assert.Equal("GET", hypermedia.Templates["default"].Method);
+        hypermedia.Should().HaveAffordance("reload").WithMethod(HttpMethod.Get);
+    }
+
+    [Fact]
+    public void Parses_bare_string_inline_options()
+    {
+        var hypermedia = HypermediaResponse.Parse(
+            """{"_templates":{"update":{"target":"/o/1","properties":[{"name":"status","options":{"inline":["open","closed",{"value":"archived"}]}}]}}}""");
+
+        var field = Assert.Single(hypermedia.Templates["update"].Fields);
+        Assert.Equal(["open", "closed", "archived"], field.Options);
+    }
+
+    [Fact]
+    public void Parses_link_type_deprecation_hreflang_and_profile()
+    {
+        var hypermedia = HypermediaResponse.Parse(
+            """{"_links":{"self":{"href":"/o/1","type":"application/hal+json","deprecation":"https://api.example/deprecations/o","hreflang":"en","profile":"https://api.example/profiles/order"}}}""");
+
+        var link = hypermedia.Links["self"];
+        Assert.Equal("application/hal+json", link.Type);
+        Assert.Equal("https://api.example/deprecations/o", link.Deprecation);
+        Assert.Equal("en", link.Hreflang);
+        Assert.Equal("https://api.example/profiles/order", link.Profile);
     }
 
     [Fact]

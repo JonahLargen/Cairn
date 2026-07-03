@@ -218,6 +218,93 @@ class Config
         Assert.Empty(suppressed);
     }
 
+    [Fact]
+    public async Task Flags_an_unknown_route_template_name()
+    {
+        const string source = @"
+namespace Cairn { public static class LinkTarget { public static object Route(string routeName, object routeValues = null) => routeName; public static object RouteTemplate(string routeName, object routeValues = null) => routeName; } }
+public static class EndpointExtensions { public static T WithName<T>(this T builder, string name) => builder; }
+class Config
+{
+    void Endpoints() { new object().WithName(""SearchOrders""); }
+    object Link() => Cairn.LinkTarget.RouteTemplate(""SearchOrder"");
+}";
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Contains("SearchOrder", diagnostic.GetMessage());
+        Assert.Equal("SearchOrders", diagnostic.Properties["suggestion"]);
+    }
+
+    [Fact]
+    public async Task Validates_reordered_named_arguments()
+    {
+        const string source = @"
+namespace Cairn { public static class LinkTarget { public static object Route(string routeName, object routeValues = null) => routeName; } }
+public static class EndpointExtensions { public static T WithName<T>(this T builder, string name) => builder; }
+class Config
+{
+    void Endpoints() { new object().WithName(""GetOrder""); }
+    object Link() => Cairn.LinkTarget.Route(routeValues: new { id = 1 }, routeName: ""GetOrderr"");
+}";
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Contains("GetOrderr", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public async Task A_link_target_with_name_is_not_a_route_declaration()
+    {
+        // Mirrors the real shape: LinkTarget.WithName is an instance method (the per-link HAL name),
+        // which always binds ahead of any WithName extension.
+        const string source = @"
+namespace Cairn { public class LinkTarget { public static LinkTarget Route(string routeName, object routeValues = null) => new LinkTarget(); public LinkTarget WithName(string name) => this; } }
+public static class EndpointExtensions { public static T WithName<T>(this T builder, string name) => builder; }
+class Config
+{
+    void Endpoints() { new object().WithName(""GetOrder""); }
+    object Link() => Cairn.LinkTarget.Route(""GetOrder"").WithName(""payment"");
+    object Broken() => Cairn.LinkTarget.Route(""payment"");
+}";
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        // The per-link HAL name set by LinkTarget.WithName must not register 'payment' as a route name.
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Contains("payment", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public async Task Collects_conventional_controller_route_names()
+    {
+        const string source = @"
+namespace Cairn { public static class LinkTarget { public static object Route(string routeName, object routeValues = null) => routeName; } }
+public static class EndpointExtensions
+{
+    public static object MapControllerRoute(this object app, string name, string pattern) => app;
+    public static object MapAreaControllerRoute(this object app, string name, string areaName, string pattern) => app;
+}
+class Config
+{
+    void Endpoints(object app)
+    {
+        app.MapControllerRoute(""default"", ""{controller}/{action}"");
+        app.MapAreaControllerRoute(""admin"", ""Admin"", ""admin/{controller}/{action}"");
+    }
+    object Default() => Cairn.LinkTarget.Route(""default"");
+    object Admin() => Cairn.LinkTarget.Route(""admin"");
+    object Broken() => Cairn.LinkTarget.Route(""defualt"");
+}";
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Contains("defualt", diagnostic.GetMessage());
+    }
+
     private static async Task<ImmutableArray<Diagnostic>> AnalyzeAsync(string source, Dictionary<string, string>? globalConfig = null)
     {
         var tree = CSharpSyntaxTree.ParseText(source);

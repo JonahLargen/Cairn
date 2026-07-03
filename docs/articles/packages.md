@@ -11,7 +11,7 @@ Cairn ships as a small set of focused NuGet packages. Most applications install 
 | `Cairn.Client` | A typed client for consuming Cairn hypermedia APIs: read a resource's value, links, and affordances; navigate by relation; invoke affordances. | In a consumer (service, worker, or test) that calls a Cairn API. |
 | `Cairn.Testing` | Test assertion helpers for links, affordances, templates, and snapshots — no third-party assertion library required. | In a test project asserting on hypermedia output. |
 | `Cairn.OpenApi` | Surfaces hypermedia links and affordances in the OpenAPI document via `Microsoft.AspNetCore.OpenApi` (.NET 10 only). | When you generate OpenAPI with `Microsoft.AspNetCore.OpenApi`. |
-| `Cairn.Swashbuckle` | Surfaces hypermedia links and affordances in the Swagger/OpenAPI document via schema and operation filters. | When you generate OpenAPI with Swashbuckle (the choice on .NET 8/9). |
+| `Cairn.Swashbuckle` | Surfaces hypermedia links and affordances in the Swagger/OpenAPI document via schema and operation filters. Requires Swashbuckle.AspNetCore 10.0 or later. | When you generate OpenAPI with Swashbuckle (the choice on .NET 8/9). |
 
 ## Cairn.Core
 
@@ -63,7 +63,7 @@ See [Testing](testing.md).
 Two interchangeable packages that describe hypermedia in your API document — pick the one that matches your OpenAPI generator:
 
 - `Cairn.OpenApi` — `AddCairnHypermedia()` on `OpenApiOptions` (`Microsoft.AspNetCore.OpenApi`); registers a schema transformer and an operation transformer.
-- `Cairn.Swashbuckle` — `AddCairnHypermedia()` on `SwaggerGenOptions` (Swashbuckle); registers a schema filter and an operation filter.
+- `Cairn.Swashbuckle` — `AddCairnHypermedia()` on `SwaggerGenOptions` (Swashbuckle); registers a schema filter and an operation filter. Requires **Swashbuckle.AspNetCore 10.0 or later**: the filters build on the interface-based OpenAPI.NET 2.x object model (`IOpenApiSchema`) that Swashbuckle adopted in 10.x, so earlier Swashbuckle versions fail to load them.
 
 ```bash
 dotnet add package Cairn.OpenApi

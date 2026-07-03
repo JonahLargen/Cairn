@@ -5,6 +5,7 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 
 namespace Cairn.SourceGenerators;
 
@@ -19,7 +20,23 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         category: "Cairn",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Two route names that reduce to the same C# method name cannot both appear in the Routes catalog; rename one.");
+        description: "Two route names that reduce to the same C# method name cannot both appear in the Routes catalog; rename one.",
+        helpLinkUri: "https://jonahlargen.github.io/Cairn/articles/route-safety.html#cairn003-route-name-collision");
+
+    private static readonly DiagnosticDescriptor ReservedMethodName = new(
+        id: "CAIRN004",
+        title: "Route name maps to a reserved method name in the generated catalog",
+        messageFormat: "Route name '{0}' maps to '{1}', which is reserved in the Routes catalog; the method was emitted as '{2}' instead",
+        category: "Cairn",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "A route name that reduces to the catalog's own class name ('Routes', CS0542) or a member inherited from System.Object ('Equals', 'GetHashCode', 'ToString', ..., CS0108) cannot be emitted as-is; the generator prefixes it with '_'. Rename the route to control the generated method name.",
+        helpLinkUri: "https://jonahlargen.github.io/Cairn/articles/route-safety.html#cairn004-reserved-method-name");
+
+    // Method names the catalog cannot declare: its own class name (CS0542) and the members every type
+    // inherits from System.Object, which a same-named static method would hide (CS0108).
+    private static readonly ImmutableHashSet<string> ReservedMethodNames = ImmutableHashSet.Create(
+        "Routes", "Equals", "GetHashCode", "ToString", "GetType", "ReferenceEquals", "MemberwiseClone", "Finalize");
 
     // The named-route attributes discovered via ForAttributeWithMetadataName. Matching by metadata name keeps
     // the provider incremental (the compiler pre-filters candidates) and stops look-alike attributes from
@@ -97,7 +114,10 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             }
 
             var actionTemplate = FirstConstructorStringArgument(attribute) ?? string.Empty;
-            builder.Add(new RouteInfo(name, ParseParameters(CombineController(prefix, actionTemplate))));
+            var location = attribute.ApplicationSyntaxReference?.GetSyntax() is { } syntax
+                ? LocationInfo.From(syntax.GetLocation())
+                : default;
+            builder.Add(new RouteInfo(name, ParseParameters(CombineController(prefix, actionTemplate)), location));
         }
 
         return builder.ToImmutable();
@@ -105,11 +125,15 @@ public sealed class RoutesGenerator : IIncrementalGenerator
 
     private static string? ControllerRoutePrefix(INamedTypeSymbol type)
     {
-        foreach (var attribute in type.GetAttributes())
+        // MVC inherits a base controller's [Route] prefix when the derived controller declares none.
+        for (var current = type; current is not null; current = current.BaseType)
         {
-            if (attribute.AttributeClass?.Name == "RouteAttribute")
+            foreach (var attribute in current.GetAttributes())
             {
-                return FirstConstructorStringArgument(attribute);
+                if (attribute.AttributeClass?.Name == "RouteAttribute")
+                {
+                    return FirstConstructorStringArgument(attribute);
+                }
             }
         }
 
@@ -167,7 +191,7 @@ public sealed class RoutesGenerator : IIncrementalGenerator
 
         var receiver = ((MemberAccessExpressionSyntax)withName.Expression).Expression;
         return FindRouteTemplate(context.SemanticModel, receiver, cancellationToken) is { } template
-            ? new RouteInfo(name, ParseParameters(template))
+            ? new RouteInfo(name, ParseParameters(template), LocationInfo.From(withName.ArgumentList.Arguments[0].Expression.GetLocation()))
             : null;
     }
 
@@ -207,9 +231,11 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         while (expression is InvocationExpressionSyntax invocation && invocation.Expression is MemberAccessExpressionSyntax member)
         {
             var method = member.Name.Identifier.ValueText;
-            if (endpointTemplate is null && method is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
+            if (endpointTemplate is null && method is "Map" or "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods" or "MapFallback")
             {
-                endpointTemplate = FirstStringArgument(semanticModel, invocation, cancellationToken);
+                // MapFallback's no-pattern overload matches ASP.NET's implicit "{*path:nonfile}" template.
+                endpointTemplate = FirstStringArgument(semanticModel, invocation, cancellationToken)
+                    ?? (method == "MapFallback" ? "/{*path:nonfile}" : null);
             }
             else if (method == "MapGroup" && FirstStringArgument(semanticModel, invocation, cancellationToken) is { } prefix)
             {
@@ -295,12 +321,38 @@ public sealed class RoutesGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var end = template.IndexOf('}', index);
-            if (end < 0)
+            // "{{" is an escaped literal brace, not a parameter.
+            if (index + 1 < template.Length && template[index + 1] == '{')
+            {
+                index += 2;
+                continue;
+            }
+
+            // Scan to the matching close brace by depth, not the first '}': a constraint's own braces —
+            // "{id:regex(^\\d{4}$)}" or the doubled "{{...}}" escape form — must not truncate the parameter.
+            var depth = 1;
+            var scan = index + 1;
+            while (scan < template.Length && depth > 0)
+            {
+                if (template[scan] == '{')
+                {
+                    depth++;
+                }
+                else if (template[scan] == '}')
+                {
+                    depth--;
+                }
+
+                scan++;
+            }
+
+            // No matching close brace — the template is malformed past this point.
+            if (depth > 0)
             {
                 break;
             }
 
+            var end = scan - 1;
             var content = template.Substring(index + 1, end - index - 1).TrimStart('*');
 
             // Both optional markers make the parameter optional for callers too: an inline default
@@ -390,12 +442,21 @@ public sealed class RoutesGenerator : IIncrementalGenerator
                 continue;
             }
 
+            // The catalog cannot declare a method named after its own class (CS0542) or after a member
+            // inherited from System.Object (CS0108) — emit it under a '_' prefix and make the rename visible.
+            if (ReservedMethodNames.Contains(method))
+            {
+                var renamed = "_" + method;
+                context.ReportDiagnostic(Diagnostic.Create(ReservedMethodName, route.Location.ToLocation(), route.Name, method, renamed));
+                method = renamed;
+            }
+
             if (emitted.TryGetValue(method, out var winner))
             {
                 // A distinct route name that reduces to an already-emitted method is dropped; warn so the loss is visible.
                 if (!string.Equals(winner, route.Name, StringComparison.Ordinal))
                 {
-                    context.ReportDiagnostic(Diagnostic.Create(RouteNameCollision, Location.None, route.Name, winner, method));
+                    context.ReportDiagnostic(Diagnostic.Create(RouteNameCollision, route.Location.ToLocation(), route.Name, winner, method));
                 }
 
                 continue;
@@ -501,5 +562,19 @@ public sealed class RoutesGenerator : IIncrementalGenerator
     private static bool IsIdentifier(string name)
         => name.Length > 0 && (char.IsLetter(name[0]) || name[0] == '_') && name.All(static c => char.IsLetterOrDigit(c) || c == '_');
 
-    private readonly record struct RouteInfo(string Name, string Parameters);
+    private readonly record struct RouteInfo(string Name, string Parameters, LocationInfo Location);
+
+    // A value-equatable stand-in for Location: holding the Location itself in RouteInfo would defeat the
+    // incremental provider's caching (Locations don't compare across runs), so the pieces needed to rebuild
+    // it are carried instead — and CAIRN003/CAIRN004 become navigable rather than reported at Location.None.
+    private readonly record struct LocationInfo(string? FilePath, TextSpan Span, LinePositionSpan LineSpan)
+    {
+        public static LocationInfo From(Location location)
+            => location.SourceTree is { } tree
+                ? new LocationInfo(tree.FilePath, location.SourceSpan, location.GetLineSpan().Span)
+                : default;
+
+        public Location ToLocation()
+            => FilePath is null ? Location.None : Location.Create(FilePath, Span, LineSpan);
+    }
 }

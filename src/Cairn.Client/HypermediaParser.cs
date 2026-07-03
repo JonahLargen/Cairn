@@ -81,7 +81,10 @@ internal static class HypermediaParser
         if (root.TryGetProperty("_templates", out var templatesElement) && templatesElement.ValueKind == JsonValueKind.Object)
         {
             // HAL-FORMS: target is optional — a template without one is submitted to the resource itself.
-            var selfHref = links.TryGetValue("self", out var selfLinks) && selfLinks.Count > 0 ? selfLinks[0].Href : null;
+            // A templated self link is expanded with no variables (unresolved expressions collapse per
+            // RFC 6570) so the fallback target never carries literal '{...}' braces onto the wire.
+            var self = links.TryGetValue("self", out var selfLinks) && selfLinks.Count > 0 ? selfLinks[0] : null;
+            var selfHref = self is { Templated: true } ? UriTemplate.Expand(self.Href, null) : self?.Href;
             foreach (var entry in templatesElement.EnumerateObject())
             {
                 var target = GetString(entry.Value, "target");
