@@ -6,14 +6,17 @@ on:
   push:
     tags: [ 'v*' ]
 
-permissions:
-  contents: write # create the GitHub release
-  id-token: write # GitHub OIDC token for NuGet.org Trusted Publishing
+permissions: {}
 
 jobs:
   release:
     name: Publish to NuGet
     runs-on: ubuntu-latest
+    # Write access is scoped to this job rather than the whole workflow
+    # (OpenSSF Scorecard Token-Permissions: least privilege at top level).
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # GitHub OIDC token for NuGet.org Trusted Publishing
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
