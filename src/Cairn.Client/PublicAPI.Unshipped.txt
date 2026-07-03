@@ -56,7 +56,7 @@ Cairn.Client.CairnClient.CairnClient(System.Net.Http.HttpClient! http, System.Te
 Cairn.Client.CairnClient.FollowAsync<T>(Cairn.Link! link, object? variables, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.ClientResult<T>!>!
 Cairn.Client.CairnClient.FollowAsync<T>(Cairn.Link! link, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.ClientResult<T>!>!
 Cairn.Client.CairnClient.GetAsync<T>(string! url, string? ifNoneMatch = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.ClientResult<T>!>!
-Cairn.Client.CairnClient.GetCollectionAsync<TItem>(string! url, string! itemsProperty = "items", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.CollectionResult<TItem>!>!
+Cairn.Client.CairnClient.GetCollectionAsync<TItem>(string! url, string! itemsProperty = "items", string? ifNoneMatch = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.CollectionResult<TItem>!>!
 Cairn.Client.CairnClient.InvokeAsync(Cairn.Affordance! affordance, object? body = null, string? ifMatch = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.ClientResult!>!
 Cairn.Client.CairnClient.InvokeAsync<TResult>(Cairn.Affordance! affordance, object? body = null, string? ifMatch = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.ClientResult<TResult>!>!
 Cairn.Client.CairnClient.SubmitAsync(Cairn.Affordance! affordance, System.Collections.Generic.IReadOnlyList<Cairn.Client.AffordanceField!>! fields, object? values = null, string? ifMatch = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.ClientResult!>!
@@ -90,6 +90,7 @@ Cairn.Client.ClientResult<T>.Status.get -> int
 Cairn.Client.ClientResult<T>.Value.get -> T?
 Cairn.Client.CollectionResource<TItem>
 Cairn.Client.CollectionResource<TItem>.Affordances.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Cairn.Affordance!>!
+Cairn.Client.CollectionResource<TItem>.ETag.get -> string?
 Cairn.Client.CollectionResource<TItem>.FollowAsync(string! relation, object? variables, string! itemsProperty = "items", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.CollectionResult<TItem>!>!
 Cairn.Client.CollectionResource<TItem>.FollowAsync(string! relation, string! itemsProperty = "items", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Cairn.Client.CollectionResult<TItem>!>!
 Cairn.Client.CollectionResource<TItem>.HasAffordance(string! name) -> bool

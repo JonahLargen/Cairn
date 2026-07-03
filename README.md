@@ -14,7 +14,7 @@
 [Documentation](https://jonahlargen.github.io/Cairn) ·
 [Getting started](https://jonahlargen.github.io/Cairn/articles/getting-started.html) ·
 [Sample API](samples/Cairn.Sample.Api) ·
-[Changelog](CHANGELOG.md)
+[Releases](https://github.com/JonahLargen/Cairn/releases)
 
 </div>
 

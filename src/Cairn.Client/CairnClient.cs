@@ -105,12 +105,19 @@ public sealed class CairnClient
 
     /// <summary>
     /// Gets a collection from <paramref name="url"/>, with each item as a navigable resource. <paramref name="itemsProperty"/>
-    /// names the array property on an envelope (default <c>items</c>); a bare JSON array is read directly. Does not throw on an HTTP error status.
+    /// names the array property on an envelope (default <c>items</c>); a bare JSON array is read directly. Pass
+    /// <paramref name="ifNoneMatch"/> (an ETag) for a conditional GET — a <c>304</c> response surfaces as
+    /// <see cref="CollectionResult{TItem}.IsNotModified"/>. Does not throw on an HTTP error status.
     /// </summary>
-    public async Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty = "items", CancellationToken cancellationToken = default)
+    public async Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty = "items", string? ifNoneMatch = null, CancellationToken cancellationToken = default)
     {
         using var timebox = Timebox(cancellationToken);
         using var request = CreateRequest(HttpMethod.Get, url);
+        if (ifNoneMatch is not null)
+        {
+            request.Headers.TryAddWithoutValidation("If-None-Match", ifNoneMatch);
+        }
+
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timebox.Token).ConfigureAwait(false);
         return await ReadCollectionResultAsync<TItem>(response, itemsProperty, timebox.Token).ConfigureAwait(false);
     }
@@ -486,9 +493,14 @@ public sealed class CairnClient
     private async Task<CollectionResult<TItem>> ReadCollectionResultAsync<TItem>(HttpResponseMessage response, string itemsProperty, CancellationToken cancellationToken)
     {
         var status = (int)response.StatusCode;
+        var etag = response.Headers.ETag?.ToString();
+
+        // 304 Not Modified answers a conditional collection GET: the caller's cached page is still fresh and
+        // no body was sent, so surface a bodiless success (empty items) that preserves the ETag, mirroring the
+        // single-resource path.
         if (response.StatusCode == HttpStatusCode.NotModified)
         {
-            return CollectionResult<TItem>.Success(status, new CollectionResource<TItem>(this, [], Empty<IReadOnlyList<Link>>(), Empty<Affordance>()));
+            return CollectionResult<TItem>.Success(status, new CollectionResource<TItem>(this, [], Empty<IReadOnlyList<Link>>(), Empty<Affordance>(), etag));
         }
 
         if (!response.IsSuccessStatusCode)
@@ -504,14 +516,14 @@ public sealed class CairnClient
 
         if (document is null)
         {
-            return CollectionResult<TItem>.Success(status, new CollectionResource<TItem>(this, [], Empty<IReadOnlyList<Link>>(), Empty<Affordance>()));
+            return CollectionResult<TItem>.Success(status, new CollectionResource<TItem>(this, [], Empty<IReadOnlyList<Link>>(), Empty<Affordance>(), etag));
         }
 
         using (document)
         {
             try
             {
-                return CollectionResult<TItem>.Success(status, ReadCollection<TItem>(document.RootElement, itemsProperty));
+                return CollectionResult<TItem>.Success(status, ReadCollection<TItem>(document.RootElement, itemsProperty, etag));
             }
             catch (Exception exception) when (exception is JsonException or NotSupportedException)
             {
@@ -520,7 +532,7 @@ public sealed class CairnClient
         }
     }
 
-    private CollectionResource<TItem> ReadCollection<TItem>(JsonElement root, string itemsProperty)
+    private CollectionResource<TItem> ReadCollection<TItem>(JsonElement root, string itemsProperty, string? etag)
     {
         // A bare array carries no collection-level links; an envelope's links live on its root object.
         var parsed = root.ValueKind == JsonValueKind.Object ? HypermediaParser.Parse(root) : ParsedHypermedia.Empty;
@@ -539,7 +551,7 @@ public sealed class CairnClient
             }
         }
 
-        return new CollectionResource<TItem>(this, items, links, affordances);
+        return new CollectionResource<TItem>(this, items, links, affordances, etag);
     }
 
     // Streams the body straight into the parser — the only whole-body buffer is the JsonDocument's own —

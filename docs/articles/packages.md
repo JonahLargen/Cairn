@@ -17,7 +17,7 @@ Cairn ships as a small set of focused NuGet packages. Most applications install 
 
 The hypermedia model and resolution engine: `Link`, `LinkRelation`, `IanaLinkRelations`, `Affordance`, `LinkTarget`, `LinkSet`, `EmbeddedResource`, `LinkContext`, and the configuration surface — `LinkConfig<T>`, `ILinkBuilder<T>`, `ILinkSpec<T>`, `IAffordanceSpec<T>`, and `LinkConfigRegistry`. It has no ASP.NET dependency, so link configurations can live in a domain or contracts assembly.
 
-`Cairn.AspNetCore`, `Cairn.Client`, `Cairn.Testing`, `Cairn.OpenApi`, and `Cairn.Swashbuckle` all reference `Cairn.Core`, so it normally arrives transitively. See [Link configurations](link-configs.md) for the builder API.
+`Cairn.AspNetCore`, `Cairn.Client`, `Cairn.OpenApi`, and `Cairn.Swashbuckle` all reference `Cairn.Core`, so it normally arrives transitively. (`Cairn.Testing` is deliberately dependency-free — it parses hypermedia responses on its own rather than referencing the model.) See [Link configurations](link-configs.md) for the builder API.
 
 ## Cairn.AspNetCore
 

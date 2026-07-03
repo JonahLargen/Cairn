@@ -14,17 +14,22 @@ public sealed class CollectionResource<TItem>
         CairnClient client,
         IReadOnlyList<Resource<TItem>> items,
         IReadOnlyDictionary<string, IReadOnlyList<Link>> links,
-        IReadOnlyDictionary<string, Affordance> affordances)
+        IReadOnlyDictionary<string, Affordance> affordances,
+        string? etag = null)
     {
         _client = client;
         _linksByRelation = links;
         Items = items;
         Links = LinkMap.Flatten(links);
         Affordances = affordances;
+        ETag = etag;
     }
 
     /// <summary>The items, each with its own value, links, and affordances.</summary>
     public IReadOnlyList<Resource<TItem>> Items { get; }
+
+    /// <summary>The response's <c>ETag</c>, if any — pass it as <c>ifNoneMatch</c> to a later <see cref="CairnClient.GetCollectionAsync{TItem}"/> for a conditional read.</summary>
+    public string? ETag { get; }
 
     /// <summary>The collection's links (e.g. <c>next</c>/<c>prev</c>), keyed by relation. Use <see cref="LinksFor"/> for a relation with several links.</summary>
     public IReadOnlyDictionary<string, Link> Links { get; }
