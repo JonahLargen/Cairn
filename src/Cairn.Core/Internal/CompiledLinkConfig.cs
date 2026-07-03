@@ -65,25 +65,16 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
                 continue;
             }
 
-            var targets = await spec.Targets(typed, context).ConfigureAwait(false) ?? [];
+            if (spec.SingleTarget is { } single)
+            {
+                AddLink(links, spec, await single(typed, context).ConfigureAwait(false), context);
+                continue;
+            }
+
+            var targets = await spec.Targets!(typed, context).ConfigureAwait(false) ?? [];
             foreach (var target in targets)
             {
-                if (ResolveHref(spec.Relation, target, context) is { } href)
-                {
-                    var templated = target is ExplicitLinkTarget { Templated: true } or RouteTemplateLinkTarget;
-
-                    // Per-target attributes (LinkTarget.With*) override the spec-level ones, so members of a
-                    // multi-link relation can each carry their own name/title/hreflang/....
-                    links.Add(new Link(spec.Relation, href, templated)
-                    {
-                        Title = target.Title ?? spec.TitleText,
-                        Type = target.Type ?? spec.TypeText,
-                        Name = target.Name ?? spec.NameText,
-                        Deprecation = target.Deprecation ?? spec.DeprecationText,
-                        Hreflang = target.Hreflang ?? spec.HreflangText,
-                        Profile = target.Profile ?? spec.ProfileText,
-                    });
-                }
+                AddLink(links, spec, target, context);
             }
         }
 
@@ -117,6 +108,28 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
         return links.Count == 0 && affordances.Count == 0 && (embedded is null || embedded.Count == 0)
             ? LinkSet.Empty
             : new LinkSet(links, affordances, embedded);
+    }
+
+    private static void AddLink(List<Link> links, LinkSpec<T> spec, LinkTarget target, LinkContext context)
+    {
+        if (ResolveHref(spec.Relation, target, context) is not { } href)
+        {
+            return;
+        }
+
+        var templated = target is ExplicitLinkTarget { Templated: true } or RouteTemplateLinkTarget;
+
+        // Per-target attributes (LinkTarget.With*) override the spec-level ones, so members of a
+        // multi-link relation can each carry their own name/title/hreflang/....
+        links.Add(new Link(spec.Relation, href, templated)
+        {
+            Title = target.Title ?? spec.TitleText,
+            Type = target.Type ?? spec.TypeText,
+            Name = target.Name ?? spec.NameText,
+            Deprecation = target.Deprecation ?? spec.DeprecationText,
+            Hreflang = target.Hreflang ?? spec.HreflangText,
+            Profile = target.Profile ?? spec.ProfileText,
+        });
     }
 
     private static async ValueTask<bool> IncludeAsync(HypermediaSpec<T> spec, T resource, LinkContext context, CancellationToken cancellationToken)

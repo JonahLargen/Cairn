@@ -11,10 +11,17 @@ namespace Cairn.AspNetCore.Internal;
 internal sealed class WarnOnce
 {
     private readonly ConcurrentDictionary<string, bool> _marked = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<Type, bool>> _markedTypes = new(StringComparer.Ordinal);
 
     /// <summary>Whether this is the first time the (category, key) pair is seen by this host.</summary>
     public bool Mark(string category, string key) => _marked.TryAdd($"{category}|{key}", true);
 
     /// <summary>Whether this is the first time the (category, type) pair is seen by this host.</summary>
-    public bool Mark(string category, Type type) => Mark(category, type.FullName ?? type.Name);
+    public bool Mark(string category, Type type)
+    {
+        // Type-keyed marks are checked per resource on hot paths (e.g. every item of an unconfigured
+        // collection), so the already-marked case must not build a composite string key per call.
+        var types = _markedTypes.GetOrAdd(category, static _ => new());
+        return types.TryAdd(type, true);
+    }
 }

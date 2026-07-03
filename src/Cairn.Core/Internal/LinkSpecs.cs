@@ -20,7 +20,11 @@ internal abstract class HypermediaSpec<T>
 /// <summary>A recorded link declaration; yields one or more targets for its relation.</summary>
 internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
 {
-    public required Func<T, LinkContext, ValueTask<IEnumerable<LinkTarget>>> Targets { get; init; }
+    // Exactly one of these is set. Link()/Self() declare a single target; keeping that delegate unwrapped
+    // lets the build stage resolve it without allocating a one-element array and enumerator per resource.
+    public Func<T, LinkContext, ValueTask<LinkTarget>>? SingleTarget { get; init; }
+
+    public Func<T, LinkContext, ValueTask<IEnumerable<LinkTarget>>>? Targets { get; init; }
 
     public string? NameText { get; private set; }
 
@@ -215,7 +219,7 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
     public ILinkSpec<T> Link(LinkRelation relation, Func<T, LinkContext, ValueTask<LinkTarget>> target)
     {
         ArgumentNullException.ThrowIfNull(target);
-        var spec = new LinkSpec<T> { Relation = relation, Targets = async (resource, context) => new[] { await target(resource, context).ConfigureAwait(false) } };
+        var spec = new LinkSpec<T> { Relation = relation, SingleTarget = target };
         LinkSpecs.Add(spec);
         return spec;
     }

@@ -9,10 +9,16 @@ using Microsoft.Extensions.Logging;
 namespace Cairn.Benchmarks;
 
 /// <summary>
-/// Answers "what does Cairn cost per response?" end to end: the same 1,000-item page served through an
-/// in-process server without Cairn (baseline), with the endpoint filter + compute + emit pipeline, and with
-/// the filter attached but the item type unconfigured (isolating the filter and the per-object emit-stage
-/// lookups from link computation). Single-resource variants show the per-request floor.
+/// Answers "what does Cairn cost per collection response?" end to end via TestHost, at a representative page
+/// size (50) and a stress size (1000). The same page is served five ways: without links (floor), with links
+/// hand-rolled in the handler (the real-world alternative), through the WithLinks pipeline with route-based
+/// configs, with explicit-URI configs (skipping LinkGenerator), and with the filter attached but the item
+/// type unconfigured (isolating the filter plus per-object emit-stage lookups from link computation).
+///
+/// Responses are drained to <see cref="Stream.Null"/> through a pooled copy buffer instead of buffered into
+/// a byte[]: a linked payload is legitimately several times larger than the plain one, and buffering it
+/// client-side would charge that size difference (including LOH churn above 85 KB) to the Allocated column,
+/// conflating "the response carries more data" with the pipeline cost being measured.
 /// </summary>
 [MemoryDiagnoser]
 public class EndToEndBenchmarks
@@ -20,27 +26,73 @@ public class EndToEndBenchmarks
     private WebApplication _app = null!;
     private HttpClient _client = null!;
 
+    /// <summary>50 approximates a typical API page; 1000 is a deliberate stress case.</summary>
+    [Params(50, 1000)]
+    public int PageItems { get; set; }
+
     [GlobalSetup]
     public async Task Setup()
     {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseTestServer();
-        builder.Services.AddCairn(options => options.AddLinks(new OrderLinks()));
+        builder.Services.AddCairn(options => options
+            .AddLinks(new OrderLinks())
+            .AddLinks(new UriOrderLinks()));
 
         _app = builder.Build();
 
-        var items = Enumerable.Range(1, 1000).Select(i => new OrderDto(i, i % 5)).ToArray();
-        var unconfigured = Enumerable.Range(1, 1000).Select(i => new UnconfiguredDto(i)).ToArray();
+        var totalCount = PageItems * 5;
+        var items = Enumerable.Range(1, PageItems).Select(i => new OrderDto(i, i % 5)).ToArray();
+        var uriItems = Enumerable.Range(1, PageItems).Select(i => new UriOrderDto(i, i % 5)).ToArray();
+        var unconfigured = Enumerable.Range(1, PageItems).Select(i => new UnconfiguredDto(i)).ToArray();
 
-        _app.MapGet("/plain", () => TypedResults.Ok(new PagedResource<OrderDto>(items, Page: 2, PageSize: 1000, TotalCount: 5000)));
-        _app.MapGet("/linked", () => TypedResults.Ok(new PagedResource<OrderDto>(items, Page: 2, PageSize: 1000, TotalCount: 5000)))
-            .WithLinks();
-        _app.MapGet("/unconfigured", () => TypedResults.Ok(new PagedResource<UnconfiguredDto>(unconfigured, Page: 2, PageSize: 1000, TotalCount: 5000)))
-            .WithLinks();
+        _app.MapGet("/plain", () => TypedResults.Ok(new PagedResource<OrderDto>(items, Page: 2, PageSize: items.Length, TotalCount: totalCount)));
 
-        _app.MapGet("/one-plain", () => TypedResults.Ok(new OrderDto(1, 1)));
-        _app.MapGet("/one-linked", () => TypedResults.Ok(new OrderDto(1, 1))).WithLinks();
+        // The projection runs per request, like it would in a real handler: link hrefs depend on the item ids
+        // and the request's host, so a hand-rolling developer cannot precompute them at startup.
+        _app.MapGet("/hand-rolled", (HttpContext http) =>
+        {
+            var baseUrl = $"{http.Request.Scheme}://{http.Request.Host}";
+            var projected = new HandRolledOrderDto[items.Length];
+            for (var i = 0; i < items.Length; i++)
+            {
+                var order = items[i];
+                projected[i] = new HandRolledOrderDto(order.Id, order.Status)
+                {
+                    Links = new Dictionary<string, HandRolledLink>(2)
+                    {
+                        ["self"] = new($"{baseUrl}/orders/{order.Id}"),
+                        ["collection"] = new("/orders"),
+                    },
+                    Actions = order.Status == 1
+                        ? new Dictionary<string, HandRolledAction>(1) { ["cancel"] = new($"{baseUrl}/orders/{order.Id}/cancel", "POST") }
+                        : null,
+                };
+            }
+
+            var pageUrl = $"{baseUrl}{http.Request.Path}";
+            return TypedResults.Ok(new HandRolledPage<HandRolledOrderDto>(
+                projected,
+                Page: 2,
+                PageSize: items.Length,
+                TotalCount: totalCount,
+                Links: new Dictionary<string, HandRolledLink>(5)
+                {
+                    ["self"] = new($"{pageUrl}?page=2"),
+                    ["first"] = new($"{pageUrl}?page=1"),
+                    ["last"] = new($"{pageUrl}?page=5"),
+                    ["prev"] = new($"{pageUrl}?page=1"),
+                    ["next"] = new($"{pageUrl}?page=3"),
+                }));
+        });
+
+        _app.MapGet("/linked", () => TypedResults.Ok(new PagedResource<OrderDto>(items, Page: 2, PageSize: items.Length, TotalCount: totalCount)))
+            .WithLinks();
+        _app.MapGet("/linked-uri", () => TypedResults.Ok(new PagedResource<UriOrderDto>(uriItems, Page: 2, PageSize: uriItems.Length, TotalCount: totalCount)))
+            .WithLinks();
+        _app.MapGet("/unconfigured", () => TypedResults.Ok(new PagedResource<UnconfiguredDto>(unconfigured, Page: 2, PageSize: unconfigured.Length, TotalCount: totalCount)))
+            .WithLinks();
 
         _app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new OrderDto(id, 1))).WithName("BenchGetOrder");
         _app.MapPost("/orders/{id:int}/cancel", (int id) => TypedResults.NoContent()).WithName("BenchCancelOrder");
@@ -56,18 +108,24 @@ public class EndToEndBenchmarks
         await _app.DisposeAsync();
     }
 
-    [Benchmark(Baseline = true, Description = "1000-item page, no Cairn")]
-    public Task<byte[]> Page1000Plain() => _client.GetByteArrayAsync("/plain");
+    [Benchmark(Baseline = true, Description = "page, no links")]
+    public Task PagePlain() => DrainAsync("/plain");
 
-    [Benchmark(Description = "1000-item page, WithLinks + configs")]
-    public Task<byte[]> Page1000Linked() => _client.GetByteArrayAsync("/linked");
+    [Benchmark(Description = "page, hand-rolled links")]
+    public Task PageHandRolled() => DrainAsync("/hand-rolled");
 
-    [Benchmark(Description = "1000-item page, WithLinks, unconfigured items")]
-    public Task<byte[]> Page1000Unconfigured() => _client.GetByteArrayAsync("/unconfigured");
+    [Benchmark(Description = "page, WithLinks + route configs")]
+    public Task PageLinked() => DrainAsync("/linked");
 
-    [Benchmark(Description = "single resource, no Cairn")]
-    public Task<byte[]> SinglePlain() => _client.GetByteArrayAsync("/one-plain");
+    [Benchmark(Description = "page, WithLinks + explicit-URI configs")]
+    public Task PageLinkedExplicitUri() => DrainAsync("/linked-uri");
 
-    [Benchmark(Description = "single resource, WithLinks + config")]
-    public Task<byte[]> SingleLinked() => _client.GetByteArrayAsync("/one-linked");
+    [Benchmark(Description = "page, WithLinks, unconfigured items")]
+    public Task PageUnconfigured() => DrainAsync("/unconfigured");
+
+    private async Task DrainAsync(string path)
+    {
+        using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead);
+        await response.Content.CopyToAsync(Stream.Null);
+    }
 }
