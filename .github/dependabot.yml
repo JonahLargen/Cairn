@@ -12,3 +12,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Roslyn is deliberately floored at 4.8.0 (see Directory.Packages.props) so the
+      # shipped analyzers/generators load on every SDK that can build net8.0. Bumping
+      # it would raise the minimum compiler consumers need, and partial bumps fail
+      # restore with NU1608 (the Microsoft.CodeAnalysis.* packages require matching
+      # versions of each other).
+      - dependency-name: "Microsoft.CodeAnalysis.*"
