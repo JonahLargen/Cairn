@@ -102,6 +102,66 @@ public class CairnCurieSectionsTests
         Assert.True(root.GetProperty("_links").TryGetProperty("self", out _));
     }
 
+    [Fact]
+    public async Task A_hal_forms_response_omits_the_curie_of_a_sole_default_keyed_template()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.DefaultFormat = HypermediaFormat.HalForms;
+            o.AddCurie("acme", "https://docs.example.com/rels/{rel}");
+            o.AddLinks(new AffordanceCurieLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/cf/{id:int}", (int id) => TypedResults.Ok(new CurieSectionOrder(id))).WithName("CfGetOrder").WithLinks();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var root = JsonDocument.Parse(await client.GetStringAsync("/cf/7")).RootElement;
+
+        // The sole template emits under the reserved "default" key, so no acme:-prefixed key appears in the
+        // document — a curie for the prefix would document a relation the document doesn't carry.
+        Assert.True(root.GetProperty("_templates").TryGetProperty("default", out _));
+        Assert.False(root.GetProperty("_templates").TryGetProperty("acme:reorder", out _));
+        Assert.False(root.GetProperty("_links").TryGetProperty("curies", out _));
+    }
+
+    [Fact]
+    public async Task A_hal_forms_response_omits_the_curie_of_an_AsDefault_affordance_but_keeps_named_ones()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.DefaultFormat = HypermediaFormat.HalForms;
+            o.AddCurie("acme", "https://docs.example.com/rels/{rel}");
+            o.AddCurie("beta", "https://docs.example.com/beta/{rel}");
+            o.AddLinks(new MixedDefaultCurieLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/cm/{id:int}", (int id) => TypedResults.Ok(new CurieSectionOrder(id))).WithName("CmGetOrder").WithLinks();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var root = JsonDocument.Parse(await client.GetStringAsync("/cm/7")).RootElement;
+
+        // acme:approve is renamed to "default" on the wire, so only beta (used by the still-named
+        // beta:reject template) is advertised.
+        Assert.True(root.GetProperty("_templates").TryGetProperty("default", out _));
+        Assert.True(root.GetProperty("_templates").TryGetProperty("beta:reject", out _));
+
+        var curies = root.GetProperty("_links").GetProperty("curies");
+        Assert.Equal(JsonValueKind.Array, curies.ValueKind);
+        var names = curies.EnumerateArray().Select(c => c.GetProperty("name").GetString()).ToList();
+        Assert.Contains("beta", names);
+        Assert.DoesNotContain("acme", names);
+    }
+
     private sealed record CurieSectionOrder(int Id)
     {
         public CurieSectionChild Child { get; } = new(Id);
@@ -124,6 +184,16 @@ public class CairnCurieSectionsTests
         {
             builder.Self(o => LinkTarget.Uri($"/ce/{o.Id}"));
             builder.Embed("acme:child", o => o.Child);
+        }
+    }
+
+    private sealed class MixedDefaultCurieLinks : LinkConfig<CurieSectionOrder>
+    {
+        public override void Configure(ILinkBuilder<CurieSectionOrder> builder)
+        {
+            builder.Self(o => LinkTarget.Uri($"/cm/{o.Id}"));
+            builder.Affordance("acme:approve", o => LinkTarget.Uri($"/cm/{o.Id}/approve")).Post().AsDefault();
+            builder.Affordance("beta:reject", o => LinkTarget.Uri($"/cm/{o.Id}/reject")).Post();
         }
     }
 }

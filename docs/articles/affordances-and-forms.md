@@ -93,7 +93,7 @@ public sealed class CreateOrderInput
 public enum ShippingSpeed { Standard, Express, Overnight }
 ```
 
-The affordance above renders (HAL-FORMS) as:
+The affordance above renders (HAL-FORMS) as — assuming the resource declares other affordances too; a response whose *only* template this is would key it `default` instead (see [the default template](#the-default-template-asdefault)):
 
 ```json
 {
@@ -144,8 +144,11 @@ Each serializable instance property of the input type becomes one template prope
 | `[Range(min, max)]` | `min` / `max` | bounds converted to numbers |
 | `[StringLength]` or `[MaxLength]` | `maxLength` | `StringLength.MaximumLength` preferred, else `MaxLength.Length` |
 | `[StringLength(MinimumLength = ...)]` or `[MinLength]` | `minLength` | omitted when zero |
-| `[RegularExpression(pattern)]` | `regex` | the pattern |
+| `[RegularExpression(pattern)]` | `regex` | the .NET pattern, carried verbatim — see the note below |
 | `[EmailAddress]` | `type: "email"` | takes precedence over the inferred type |
+
+> [!NOTE]
+> The `regex` value is the `[RegularExpression]` pattern **verbatim** — Cairn does not translate it. HAL-FORMS clients typically validate `regex` with their own engine (a browser or JavaScript client uses ECMAScript regular expressions), and .NET-specific constructs — inline options like `(?i)`, named groups with `(?'name'...)`, balancing groups, `\p{...}` with .NET-only category names, comments in `(?x)` mode — will fail or behave differently there. If non-Cairn clients consume your forms, keep validation patterns to the ECMAScript-compatible subset. Server-side validation still uses the .NET pattern, so the attribute stays authoritative either way.
 
 ### Field type mapping
 
@@ -178,7 +181,11 @@ builder.Affordance("cancel", o => LinkTarget.Route("CancelOrder", new { id = o.I
 
 In HAL-FORMS this renders `_templates.default` (the `update` name is dropped from `_templates`) alongside `_templates.cancel`. Other formats are unaffected: the Default format still emits `_actions.update` under its declared name. An affordance literally named `default` (any casing) behaves the same way.
 
-Because `default` can only mean one thing, registration throws an `InvalidOperationException` if more than one affordance *unconditionally* claims it — two `AsDefault()` calls, or an `AsDefault()` plus an affordance named `default`. Claimants gated with `When(...)` or `RequireAuthorization(...)` are exempt, so mutually exclusive defaults are fine ("approve is the default when pending, reopen when closed").
+When a response carries **exactly one** template, it is keyed `default` even without `AsDefault()` — a sole template is unambiguously the primary action, and a generic HAL-FORMS client that only looks up the reserved key should find it. As soon as a second affordance emits on the same response, unmarked templates keep their declared names.
+
+An affordance emitted under `default` never shows its declared name in the document, so a curie-prefixed name (e.g. `acme:approve`) does **not** cause the `acme` curie to be advertised for it — there would be no `acme:`-prefixed key for the curie to document.
+
+Because `default` can only mean one thing, registration throws an `InvalidOperationException` if more than one affordance *unconditionally* claims it — two `AsDefault()` calls, or an `AsDefault()` plus an affordance named `default`. Claimants gated with `When(...)` or `RequireAuthorization(...)` are exempt, so mutually exclusive defaults are fine ("approve is the default when pending, reopen when closed"). If gating goes wrong and two claimants emit on the same response anyway, the last one wins on the wire and a warning is logged once per resource type.
 
 ## Invoking affordances from a client
 

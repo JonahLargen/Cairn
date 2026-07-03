@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Cairn.AspNetCore.Internal;
 
@@ -122,7 +124,7 @@ internal sealed class CairnLinkInjectionModifier
                 "_links" => payload.Links,
                 "_embedded" => payload.Embedded,
                 "_actions" when CairnLinkStore.GetFormat(http) == HypermediaFormat.Default => payload.Actions,
-                "_templates" when CairnLinkStore.GetFormat(http) == HypermediaFormat.HalForms => ToTemplates(payload.Actions, typeInfo.Options),
+                "_templates" when CairnLinkStore.GetFormat(http) == HypermediaFormat.HalForms => ToTemplates(payload.Actions, typeInfo.Options, http, typeInfo.Type),
                 _ => null,
             };
         };
@@ -131,7 +133,7 @@ internal sealed class CairnLinkInjectionModifier
         typeInfo.Properties.Add(property);
     }
 
-    private static IReadOnlyDictionary<string, HalFormsTemplate>? ToTemplates(IReadOnlyDictionary<string, HalAction>? actions, System.Text.Json.JsonSerializerOptions serializer)
+    private static IReadOnlyDictionary<string, HalFormsTemplate>? ToTemplates(IReadOnlyDictionary<string, HalAction>? actions, System.Text.Json.JsonSerializerOptions serializer, HttpContext http, Type resourceType)
     {
         if (actions is null)
         {
@@ -139,11 +141,31 @@ internal sealed class CairnLinkInjectionModifier
         }
 
         // Template names serialize verbatim (never renamed by DictionaryKeyPolicy); an affordance marked
-        // AsDefault() emits under the reserved "default" key HAL-FORMS clients look up first.
+        // AsDefault() emits under the reserved "default" key HAL-FORMS clients look up first. A resource
+        // whose response carries exactly one template is keyed "default" too — it is unambiguously the
+        // primary action, and a generic HAL-FORMS client that only knows the reserved key should find it
+        // without the config author remembering AsDefault().
+        var sole = actions.Count == 1;
         var templates = new VerbatimKeyDictionary<HalFormsTemplate>(StringComparer.OrdinalIgnoreCase);
+        string? defaultClaimant = null;
         foreach (var (name, action) in actions)
         {
-            templates[action.IsDefault ? "default" : name] = new HalFormsTemplate(action.Method, action.Href)
+            var key = sole || action.IsDefault ? "default" : name;
+            if (string.Equals(key, "default", StringComparison.OrdinalIgnoreCase))
+            {
+                // Registration-time validation only rejects *unconditional* double claims; When()- or
+                // policy-gated AsDefault() affordances are meant to be mutually exclusive at runtime. When
+                // that invariant breaks and two emit on one response, the wire silently keeps the last —
+                // surface it.
+                if (defaultClaimant is not null)
+                {
+                    WarnDefaultCollision(http, resourceType, defaultClaimant, name);
+                }
+
+                defaultClaimant = name;
+            }
+
+            templates[key] = new HalFormsTemplate(action.Method, action.Href)
             {
                 Title = action.Title,
                 ContentType = action.ContentType ?? "application/json",
@@ -152,5 +174,20 @@ internal sealed class CairnLinkInjectionModifier
         }
 
         return templates;
+    }
+
+    private static void WarnDefaultCollision(HttpContext http, Type resourceType, string first, string second)
+    {
+        var services = http.RequestServices;
+        if (services.GetService<ILoggerFactory>() is { } loggerFactory
+            && services.GetService<WarnOnce>() is { } warnOnce
+            && warnOnce.Mark("default-template-collision", resourceType))
+        {
+            loggerFactory.CreateLogger("Cairn.AspNetCore").LogWarning(
+                "Cairn: affordances '{First}' and '{Second}' on {ResourceType} both claimed the reserved 'default' HAL-FORMS template key on the same response; only the last one is emitted. Make the When()/RequireAuthorization() conditions of AsDefault() affordances mutually exclusive.",
+                first,
+                second,
+                resourceType.Name);
+        }
     }
 }

@@ -168,6 +168,7 @@ internal static class CairnLinkRecorder
 
         var linkSet = await scope.Engine.BuildAsync(value, scope.Context, http.RequestAborted);
         WarnIfActionsBlocked(scope, value, linkSet);
+        WarnIfPolicyGatedUnderOutputCaching(http, scope, value);
 
         if (linkSet.IsEmpty)
         {
@@ -223,6 +224,7 @@ internal static class CairnLinkRecorder
         {
             var linkSet = await scope.Engine.BuildAsync(envelope, scope.Context, http.RequestAborted);
             WarnIfActionsBlocked(scope, envelope, linkSet);
+            WarnIfPolicyGatedUnderOutputCaching(http, scope, envelope);
             var embedded = await RecordEmbeddedAsync(http, linkSet, scope);
             var configured = ToPayload(linkSet, embedded, scope);
 
@@ -252,7 +254,10 @@ internal static class CairnLinkRecorder
 
     // Per-endpoint .WithHypermediaFormat() forces a format; otherwise the Accept header may negotiate one;
     // otherwise the global default applies. A negotiable response varies by Accept — advertise that so
-    // shared caches (CDNs, OutputCache) don't replay one client's shape to another (RFC 9110 §12.5.5).
+    // HTTP caches (CDNs, proxies, the ResponseCaching middleware) don't replay one client's shape to
+    // another (RFC 9110 §12.5.5). ASP.NET Core's OutputCache is NOT covered by this header: it ignores the
+    // response's Vary and only splits on what its policy names, so output-cached negotiable endpoints need
+    // CacheOutput(p => p.SetVaryByHeader("Accept")) — see docs/articles/caching.md.
     // When a custom formatter wins, the built-in format stays Default but the formatter's properties
     // supersede the built-in emission.
     private static (HypermediaFormat Format, IHypermediaFormatter? Custom) ResolveFormat(HttpContext http, CairnOptions options)
@@ -570,6 +575,30 @@ internal static class CairnLinkRecorder
                     RouteTemplateLinkTarget template => $"route template '{template.RouteName}'",
                     _ => "an explicit URI",
                 });
+        }
+    }
+
+    // A link config that gates links or affordances behind authorization policies produces per-caller
+    // hypermedia. OutputCache stores one response per policy-defined key — it ignores the response's Vary
+    // header entirely — so on an output-cached endpoint one caller's link set is replayed to every other
+    // caller (showing actions they can't invoke, or hiding ones they could). Warn once per resource type;
+    // the config referencing a policy at all is the signal, whether or not this caller passed the gate.
+    private static void WarnIfPolicyGatedUnderOutputCaching(HttpContext http, RecordScope scope, object value)
+    {
+        if (scope.Logger is not { } logger
+            || http.Features.Get<Microsoft.AspNetCore.OutputCaching.IOutputCacheFeature>() is null
+            || scope.Configs?.GetConfig(value.GetType()) is not Cairn.Internal.IPolicyReportingConfig reporting
+            || reporting.Policies.Count == 0)
+        {
+            return;
+        }
+
+        if (scope.WarnOnce.Mark("output-cache-policy", value.GetType()))
+        {
+            logger.LogWarning(
+                "Cairn: the link configuration for {ResourceType} gates hypermedia behind authorization policies, and this response is subject to output caching (IOutputCacheFeature is present). OutputCache ignores the Vary header, so one caller's policy-dependent links would be replayed to other callers from the shared cache. Vary the cache by caller, or don't output-cache endpoints returning {ResourceType}. See the caching documentation.",
+                value.GetType().Name,
+                value.GetType().Name);
         }
     }
 
@@ -1020,7 +1049,7 @@ internal static class CairnLinkRecorder
         CollectCuries(links?.Keys, curies, used, seen);
         if (scope.Format != HypermediaFormat.Hal)
         {
-            CollectCuries(actions?.Keys, curies, used, seen);
+            CollectCuries(EmittedActionNames(actions, scope.Format), curies, used, seen);
         }
 
         CollectCuries(embedded?.Keys, curies, used, seen);
@@ -1033,6 +1062,34 @@ internal static class CairnLinkRecorder
         links ??= new VerbatimKeyDictionary<HalLinkValue>(StringComparer.OrdinalIgnoreCase);
         links["curies"] = new HalLinkValue(used, alwaysArray: true);
         return links;
+    }
+
+    // The affordance names that actually appear as keys on the wire. In HAL-FORMS, an affordance emitted
+    // under the reserved "default" template key — marked AsDefault(), or the response's sole template — never
+    // shows its own name in the document, so a curie advertised for its prefix would document a relation the
+    // document doesn't carry. Cairn's own _actions shape (and custom formatters' documents) keep the names.
+    private static IEnumerable<string>? EmittedActionNames(IReadOnlyDictionary<string, HalAction>? actions, HypermediaFormat format)
+    {
+        if (actions is null || format != HypermediaFormat.HalForms)
+        {
+            return actions?.Keys;
+        }
+
+        if (actions.Count == 1)
+        {
+            return null;   // the sole template is keyed "default" regardless of AsDefault()
+        }
+
+        List<string>? names = null;
+        foreach (var (name, action) in actions)
+        {
+            if (!action.IsDefault)
+            {
+                (names ??= []).Add(name);
+            }
+        }
+
+        return names;
     }
 
     private static void CollectCuries(IEnumerable<string>? relations, IReadOnlyDictionary<string, string> curies, List<HalLink> used, HashSet<string> seen)

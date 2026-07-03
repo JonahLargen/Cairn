@@ -31,7 +31,9 @@ public class CairnClientFormsTests
         using var httpClient = app.GetTestClient();
 
         var order = (await new CairnClient(httpClient).GetAsync<FieldOrder>("/orders/42")).EnsureSuccess();
-        var fields = order.Fields("cancel");
+
+        // The response's sole template is keyed under the reserved "default" HAL-FORMS name.
+        var fields = order.Fields("default");
 
         var reason = fields.Single(f => f.Name == "reason");
         Assert.True(reason.Required);

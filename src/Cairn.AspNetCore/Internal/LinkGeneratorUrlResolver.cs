@@ -12,7 +12,7 @@ internal sealed class LinkGeneratorUrlResolver(
     LinkGenerator linkGenerator,
     IHttpContextAccessor accessor,
     CairnOptions options,
-    EndpointDataSource endpoints) : ILinkUrlResolver
+    RoutePatternCache patterns) : ILinkUrlResolver
 {
     public string? Resolve(LinkTarget target) => target switch
     {
@@ -44,7 +44,7 @@ internal sealed class LinkGeneratorUrlResolver(
     private string? ResolveRouteTemplate(RouteTemplateLinkTarget target)
     {
         var http = accessor.HttpContext;
-        if (http is null || FindPattern(target.RouteName) is not { } pattern)
+        if (http is null || patterns.Find(target.RouteName) is not { } pattern)
         {
             return null;
         }
@@ -101,22 +101,6 @@ internal sealed class LinkGeneratorUrlResolver(
             : options.PublicBaseUri is { } publicBase
                 ? $"{publicBase.Scheme}://{publicBase.Authority}{BasePath(publicBase)}"
                 : $"{http.Request.Scheme}://{http.Request.Host}{http.Request.PathBase}";
-
-    // Endpoint names are matched case-insensitively, like LinkGenerator's address schemes.
-    private RoutePattern? FindPattern(string routeName)
-    {
-        foreach (var endpoint in endpoints.Endpoints)
-        {
-            if (endpoint is RouteEndpoint route
-                && (string.Equals(route.Metadata.GetMetadata<IRouteNameMetadata>()?.RouteName, routeName, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(route.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName, routeName, StringComparison.OrdinalIgnoreCase)))
-            {
-                return route.RoutePattern;
-            }
-        }
-
-        return null;
-    }
 
     private string? Transform(HttpContext http, string? url)
         => url is not null && options.TransformUrl is { } transform ? transform(http, url) : url;

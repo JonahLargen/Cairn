@@ -161,7 +161,7 @@ builder.Link("audit-log", o => LinkTarget.Route("GetOrderAudit", new { id = o.Id
     .RequireAuthorization();
 ```
 
-Authorization gating uses the engine's `ILinkAuthorizer`, which evaluates the policy against the current caller. The default policy admits an authenticated caller. Named policies are validated at startup: when the host uses the default authorization service, a policy name no `AddPolicy(...)` registered fails `app.StartAsync()` with a clear error instead of a request-time 500. Authorization-gated affordances also show up on controllers — see [controllers.md](controllers.md) — and a denied transition surfaces as a problem response — see [error-responses.md](error-responses.md).
+Authorization gating uses the engine's `ILinkAuthorizer`, which evaluates the policy against the current caller. The default policy admits an authenticated caller. Named policies are validated at startup: when the host uses the default authorization service, a policy name no `AddPolicy(...)` registered fails `app.StartAsync()` with a clear error instead of a request-time 500. If the host resolves policies *dynamically* — a custom `IAuthorizationPolicyProvider` backed by a database or per-tenant store that only materializes policies after boot — disable the startup check with `o.ValidateAuthorizationPolicies = false` (a provider that throws during the startup lookup is skipped with a logged warning rather than failing the host). Authorization-gated affordances also show up on controllers — see [controllers.md](controllers.md) — and a denied transition surfaces as a problem response — see [error-responses.md](error-responses.md).
 
 Two things to keep in mind:
 

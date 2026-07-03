@@ -19,6 +19,13 @@ namespace Cairn.AspNetCore.Internal;
 /// </summary>
 internal static class HalFormsSchema
 {
+    // Localizable types key their cache entries by CultureInfo.CurrentUICulture.Name, which under
+    // RequestLocalization's AcceptLanguageHeaderRequestCultureProvider is derived from a client-controlled
+    // header — an attacker (or just a diverse client population) can mint unbounded distinct culture names.
+    // Once the cache is full, schemas for unseen (type, culture) pairs are rebuilt per request instead of
+    // being cached; correctness is unaffected.
+    private const int MaxCacheEntries = 1024;
+
     private static readonly ConditionalWeakTable<JsonSerializerOptions, ConcurrentDictionary<(Type Input, string Culture), IReadOnlyList<HalFormsProperty>>> Caches = new();
 
     // Whether a type's prompts resolve through localized resources; only those types cache per culture.
@@ -42,6 +49,14 @@ internal static class HalFormsSchema
 
         var properties = Build(input, serializer, out var localizable);
         Localizable[input] = localizable;
+
+        // The count/add race can overshoot the cap by a few concurrent entries; that slack is fine — the
+        // point is that the cache cannot grow linearly with distinct request cultures.
+        if (cache.Count >= MaxCacheEntries)
+        {
+            return properties;
+        }
+
         return cache.GetOrAdd((input, localizable ? CultureInfo.CurrentUICulture.Name : string.Empty), properties);
     }
 
@@ -115,6 +130,11 @@ internal static class HalFormsSchema
             ReadOnly = IsReadOnly(property) ? true : null,
             Type = property.GetCustomAttribute<EmailAddressAttribute>() is not null ? "email" : MapType(underlying),
             Placeholder = display?.GetPrompt(),
+
+            // The .NET pattern is carried verbatim — no translation. HAL-FORMS clients validate regex with
+            // their own engine (typically ECMAScript), so .NET-only constructs ((?i) inline options,
+            // balancing groups, (?'name'...), ...) won't work for non-Cairn clients; see
+            // docs/articles/affordances-and-forms.md.
             Regex = property.GetCustomAttribute<RegularExpressionAttribute>()?.Pattern,
             MinLength = MinLengthOf(property),
             MaxLength = property.GetCustomAttribute<StringLengthAttribute>()?.MaximumLength ?? MaxLengthOf(property),

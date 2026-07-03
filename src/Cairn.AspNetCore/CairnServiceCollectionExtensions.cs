@@ -33,8 +33,18 @@ public static class CairnServiceCollectionExtensions
 
         services.AddHttpContextAccessor();
         services.TryAddSingleton<WarnOnce>();
+        services.TryAddSingleton<RoutePatternCache>();
         services.TryAddEnumerable(ServiceDescriptor.Transient<IStartupFilter, CairnHeadersStartupFilter>());
-        services.TryAddSingleton<CairnOptions>(static provider => provider.GetRequiredService<IOptions<CairnOptions>>().Value);
+
+        // The options freeze on first resolution: every consumer below reads them through this singleton, and
+        // startup-built caches (JSON contracts, negotiation, policy validation) never see configuration that
+        // lands later — so late structural mutation fails loudly instead of being silently ignored.
+        services.TryAddSingleton<CairnOptions>(static provider =>
+        {
+            var options = provider.GetRequiredService<IOptions<CairnOptions>>().Value;
+            options.Freeze();
+            return options;
+        });
         services.TryAddSingleton<ILinkConfigProvider>(static provider => provider.GetRequiredService<CairnOptions>().Registry);
         services.TryAddSingleton<IPaginationEnvelopeProvider>(static provider => new OptionsPaginationEnvelopeProvider(provider.GetRequiredService<CairnOptions>()));
         services.TryAddSingleton<ILinkEngine, LinkEngine>();
@@ -47,6 +57,7 @@ public static class CairnServiceCollectionExtensions
         // Every policy a link config references is known at registration time — validate them while the host
         // starts instead of surfacing a typo as a request-time 500.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService, AuthorizationPolicyStartupValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService, CairnStartupWarnings>());
 
         return services;
     }

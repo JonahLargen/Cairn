@@ -317,16 +317,17 @@ public class CairnTestingTests
 
         var hypermedia = await client.GetHypermediaAsync("/orders/7");
 
+        // The response's sole template is keyed under the reserved "default" HAL-FORMS name.
         hypermedia.Should()
             .HaveSelfLink()
-            .And.HaveTemplate("cancel")
+            .And.HaveTemplate("default")
             .WithMethod(HttpMethod.Post)
             .WithContentType("application/json")
             .HaveField("reason").ThatIsRequired().WithType("text").WithRegex("^[a-z ]+$")
             .And.HaveField("notify").ThatIsOptional();
 
         // A bool input has no HAL-FORMS type of its own; it is described via a two-value options list.
-        Assert.Equal(["true", "false"], hypermedia.Templates["cancel"].Fields.Single(field => field.Name == "notify").Options);
+        Assert.Equal(["true", "false"], hypermedia.Templates["default"].Fields.Single(field => field.Name == "notify").Options);
     }
 
     [Fact]

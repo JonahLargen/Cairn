@@ -19,6 +19,9 @@ All warnings log under the category `Cairn.AspNetCore` at `Warning` level, and e
 | Deferred envelope items without a settable property | A pagination envelope exposes deferred items but no settable property to buffer them back into (the property is init-only or computed), so the sequence is enumerated twice and item links may be lost. |
 | Custom `JsonConverter` on a resource type | Hypermedia was computed for a type whose JSON contract is handled by a custom converter, so the property injection can never emit it. |
 | Computed but never emitted | Hypermedia was computed for instances that never reached the serializer — typically a deferred sequence whose re-enumeration produced fresh instances. Materialize (`ToList()`) before wrapping. |
+| Policy-gated links under output caching | A resource whose link config references authorization policies was computed on a request subject to `OutputCache` (which ignores `Vary`), so one caller's link set could be replayed to others. See [Caching](caching.md). |
+| `default` template collision | Two `When()`/policy-gated `AsDefault()` affordances both emitted on the same response and collided on the reserved HAL-FORMS `default` key; the last one wins on the wire. |
+| Absolute URLs trust the incoming `Host` | Logged once at startup when `UrlStyle` is `Absolute` and neither `ForwardedHeadersOptions` nor `PublicBaseUri` is configured — links reflect whatever `Host` the client sent. See [Link URL policy](url-policy.md). |
 
 In `Strict` mode (`o.Mode = LinkResolutionMode.Strict`) an unresolved link throws a `LinkResolutionException` instead of dropping — see [getting started](getting-started.md).
 

@@ -96,7 +96,7 @@ public class CairnHalFormsContractTests
     private static async Task<List<string>> FieldNamesAsync(HttpClient client)
     {
         var document = JsonDocument.Parse(await client.GetStringAsync("/orders/7"));
-        return document.RootElement.GetProperty("_templates").GetProperty("update").GetProperty("properties")
+        return document.RootElement.GetProperty("_templates").GetProperty("default").GetProperty("properties")
             .EnumerateArray().Select(p => p.GetProperty("name").GetString()!).ToList();
     }
 
@@ -104,7 +104,7 @@ public class CairnHalFormsContractTests
         => FieldOf(JsonDocument.Parse(await client.GetStringAsync("/orders/7")), name);
 
     private static JsonElement FieldOf(JsonDocument document, string name)
-        => document.RootElement.GetProperty("_templates").GetProperty("update").GetProperty("properties")
+        => document.RootElement.GetProperty("_templates").GetProperty("default").GetProperty("properties")
             .EnumerateArray().Single(p => p.GetProperty("name").GetString() == name);
 
     private static async Task<WebApplication> StartAsync(Action<IServiceCollection>? configureServices = null, bool localize = false)
