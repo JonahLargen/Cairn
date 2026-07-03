@@ -159,7 +159,7 @@ public class CairnMvcTests
         await using var app = await StartAsync(o => o.DefaultFormat = HypermediaFormat.HalForms);
 
         var root = await GetJsonAsync(app.Client, "/mvc/orders/42");
-        var cancel = root.GetProperty("_templates").GetProperty("cancel");
+        var cancel = root.GetProperty("_templates").GetProperty("default");
 
         Assert.Equal("POST", cancel.GetProperty("method").GetString());
         Assert.EndsWith("/mvc/orders/42/cancel", cancel.GetProperty("target").GetString());

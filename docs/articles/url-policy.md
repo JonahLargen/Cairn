@@ -22,6 +22,9 @@ Every absolute link is now rooted at `https://api.example.com` regardless of wha
 
 Both `UrlStyle` and `PublicBaseUri` apply to route-resolved links, affordances, **and** [pagination](pagination.md) links.
 
+> [!NOTE]
+> With `Absolute` URLs, the request's `Host` header is what links are built from — and it is client-controlled and proxy-rewritten. When neither `ForwardedHeadersOptions` (via the options system) nor `PublicBaseUri` is configured, Cairn logs a one-time warning at startup. Configure forwarded headers, pin `PublicBaseUri`, or switch to `PathRelative` to silence it.
+
 ## Post-processing: `TransformUrl`
 
 `TransformUrl` runs after resolution on each route-resolved link and affordance URL:

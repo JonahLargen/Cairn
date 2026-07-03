@@ -47,7 +47,7 @@ public class CairnFormatTests
         var root = await ReadJsonAsync(response);
 
         Assert.False(root.TryGetProperty("_actions", out _));
-        var cancel = root.GetProperty("_templates").GetProperty("cancel");
+        var cancel = root.GetProperty("_templates").GetProperty("default");
         Assert.Equal("POST", cancel.GetProperty("method").GetString());
         Assert.EndsWith("/o/42/cancel", cancel.GetProperty("target").GetString());
         Assert.Equal("application/prs.hal-forms+json", response.Content.Headers.ContentType?.MediaType);
@@ -86,7 +86,7 @@ public class CairnFormatTests
         await using var app = await StartAsync(o => o.DefaultFormat = HypermediaFormat.HalForms);
 
         var root = await GetJsonAsync(app.Client, "/o/42");
-        var properties = root.GetProperty("_templates").GetProperty("cancel").GetProperty("properties").EnumerateArray().ToList();
+        var properties = root.GetProperty("_templates").GetProperty("default").GetProperty("properties").EnumerateArray().ToList();
         var byName = properties.ToDictionary(p => p.GetProperty("name").GetString()!);
 
         var reason = byName["reason"];

@@ -42,13 +42,18 @@ The standard members map directly to the RFC 9457 fields:
 
 ```csharp
 public HypermediaProblem WithLink(string relation, string href, string? title = null)
+public HypermediaProblem WithLink(string relation, LinkTarget target, string? title = null)
 public HypermediaProblem WithAction(string name, string href, string method = "POST")
+public HypermediaProblem WithAction(string name, LinkTarget target, string method = "POST")
 public HypermediaProblem WithExtension(string name, object? value)
 ```
 
 - `WithLink` adds an entry to the problem's `_links`. Each entry has an `href`, plus a `title` when supplied. Repeated calls for the same relation emit a HAL link array under that relation (a single link stays an object), and relations differing only in case group into one entry under the first-declared casing, per RFC 8288 — the same rules as the [main formatter](formats.md). Keys are emitted verbatim, unaffected by any JSON dictionary-key policy.
 - `WithAction` adds an affordance to the problem's `_actions` — for example a `retry` the client can invoke. `method` defaults to `POST`.
+- Both accept a `LinkTarget` instead of a raw href — `LinkTarget.Route("GetOrder", new { id })` resolves through the host's [URL policy](url-policy.md) (`UrlStyle`, `PublicBaseUri`) exactly like a link config's targets, so problem links survive route restructuring too. An unresolvable target is dropped in `Lax` mode and throws `LinkResolutionException` in `Strict`.
 - `WithExtension` adds a problem extension member, written as a top-level field alongside the standard members. Reserved member names (`type`, `title`, `status`, `detail`, `instance`, `_links`, `_actions`) are rejected — set those through the dedicated properties and methods.
+
+When the host registers the problem-details pipeline (`builder.Services.AddProblemDetails(...)`), `HypermediaProblem` writes through `IProblemDetailsService`, so `CustomizeProblemDetails` and any custom `IProblemDetailsWriter` apply to it like to any framework-produced problem — the links and actions ride along as extension members. Without `AddProblemDetails` (or when the registered writer declines the request), the document is written directly, unchanged from previous behavior.
 
 A complete example:
 

@@ -45,6 +45,55 @@ public class CairnPolicyValidationTests
         await app.StartAsync();   // must not throw
     }
 
+    [Fact]
+    public async Task Validation_can_be_disabled_for_dynamic_policy_providers()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAuthorization();
+        builder.Services.AddCairn(o =>
+        {
+            o.ValidateAuthorizationPolicies = false;
+            o.AddLinks(new TypoGatedLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/pv/{id:int}", (int id) => TypedResults.Ok(new PolicyOrder(id))).WithName("PvGetOrder").WithLinks();
+        app.MapPost("/pv/{id:int}/cancel", (int id) => TypedResults.NoContent()).WithName("PvCancel");
+
+        await app.StartAsync();   // the unknown policy is the dynamic provider's business now — must not throw
+    }
+
+    [Fact]
+    public async Task A_policy_provider_that_throws_at_startup_does_not_fail_the_host()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAuthorization();
+
+        // A dynamic provider that materializes policies after boot: any lookup during startup throws.
+        builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider, BootThrowingPolicyProvider>();
+        builder.Services.AddCairn(o => o.AddLinks(new TypoGatedLinks()));
+
+        await using var app = builder.Build();
+        app.MapGet("/pv/{id:int}", (int id) => TypedResults.Ok(new PolicyOrder(id))).WithName("PvGetOrder").WithLinks();
+        app.MapPost("/pv/{id:int}/cancel", (int id) => TypedResults.NoContent()).WithName("PvCancel");
+
+        await app.StartAsync();   // the throwing lookup is inconclusive, not a missing policy — must not throw
+    }
+
+    private sealed class BootThrowingPolicyProvider : Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider
+    {
+        public Task<Microsoft.AspNetCore.Authorization.AuthorizationPolicy> GetDefaultPolicyAsync()
+            => Task.FromResult(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build());
+
+        public Task<Microsoft.AspNetCore.Authorization.AuthorizationPolicy?> GetFallbackPolicyAsync()
+            => Task.FromResult<Microsoft.AspNetCore.Authorization.AuthorizationPolicy?>(null);
+
+        public Task<Microsoft.AspNetCore.Authorization.AuthorizationPolicy?> GetPolicyAsync(string policyName)
+            => throw new InvalidOperationException("The policy store is not reachable during startup.");
+    }
+
     private sealed record PolicyOrder(int Id);
 
     private sealed class TypoGatedLinks : LinkConfig<PolicyOrder>

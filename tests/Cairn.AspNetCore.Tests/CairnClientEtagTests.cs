@@ -21,7 +21,8 @@ public class CairnClientEtagTests
         var order = (await client.GetAsync<EtagOrder>("/orders/42")).EnsureSuccess();
         Assert.Equal("\"v1\"", order.ETag);
 
-        var updated = await order.InvokeAsync("update", ifMatch: order.ETag);
+        // The client negotiates HAL-FORMS, where the response's sole template is keyed "default".
+        var updated = await order.InvokeAsync("default", ifMatch: order.ETag);
         Assert.True(updated.IsSuccess);
     }
 

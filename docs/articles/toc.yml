@@ -22,6 +22,8 @@
   href: url-policy.md
 - name: Conditional requests, OPTIONS &amp; deprecation
   href: conditional-requests.md
+- name: Caching
+  href: caching.md
 - name: Diagnostics &amp; observability
   href: diagnostics.md
 - name: Controllers (MVC)

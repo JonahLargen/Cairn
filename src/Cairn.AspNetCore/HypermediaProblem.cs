@@ -1,18 +1,21 @@
 using System.Text.Json;
 using Cairn.AspNetCore.Internal;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Cairn.AspNetCore;
 
 /// <summary>
 /// An RFC 9457 problem document that can carry hypermedia. Returned from an endpoint, it writes
 /// <c>application/problem+json</c> with the standard members plus any declared <c>_links</c> and <c>_actions</c>,
-/// so an error response can still tell the client what to do next.
+/// so an error response can still tell the client what to do next. When the host registered
+/// <c>AddProblemDetails()</c>, the document is written through <see cref="IProblemDetailsService"/> so
+/// <c>CustomizeProblemDetails</c> and custom writers apply.
 /// </summary>
 public sealed class HypermediaProblem : IResult
 {
-    private readonly List<(string Relation, string Href, string? Title)> _links = [];
-    private readonly List<(string Name, string Href, string Method)> _actions = [];
+    private readonly List<(string Relation, LinkTarget Target, string? Title)> _links = [];
+    private readonly List<(string Name, LinkTarget Target, string Method)> _actions = [];
     private readonly Dictionary<string, object?> _extensions = new(StringComparer.Ordinal);
 
     /// <summary>Creates a problem document with the given HTTP status code.</summary>
@@ -35,15 +38,34 @@ public sealed class HypermediaProblem : IResult
 
     /// <summary>Adds a link to the problem's <c>_links</c>.</summary>
     public HypermediaProblem WithLink(string relation, string href, string? title = null)
+        => WithLink(relation, LinkTarget.Uri(href), title);
+
+    /// <summary>
+    /// Adds a link to the problem's <c>_links</c> from a <see cref="LinkTarget"/> — a named route
+    /// (<see cref="LinkTarget.Route"/>), a route template, or an explicit URI — resolved by the host's URL
+    /// policy (<c>UrlStyle</c>, <c>PublicBaseUri</c>) like every other Cairn link.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="target"/> is null.</exception>
+    public HypermediaProblem WithLink(string relation, LinkTarget target, string? title = null)
     {
-        _links.Add((relation, href, title));
+        ArgumentNullException.ThrowIfNull(target);
+        _links.Add((relation, target, title));
         return this;
     }
 
     /// <summary>Adds an affordance to the problem's <c>_actions</c> (e.g. a <c>retry</c> the client can invoke).</summary>
     public HypermediaProblem WithAction(string name, string href, string method = "POST")
+        => WithAction(name, LinkTarget.Uri(href), method);
+
+    /// <summary>
+    /// Adds an affordance to the problem's <c>_actions</c> from a <see cref="LinkTarget"/>, resolved by the
+    /// host's URL policy like every other Cairn link.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="target"/> is null.</exception>
+    public HypermediaProblem WithAction(string name, LinkTarget target, string method = "POST")
     {
-        _actions.Add((name, href, method));
+        ArgumentNullException.ThrowIfNull(target);
+        _actions.Add((name, target, method));
         return this;
     }
 
@@ -69,8 +91,25 @@ public sealed class HypermediaProblem : IResult
     }
 
     /// <inheritdoc />
-    public Task ExecuteAsync(HttpContext httpContext)
+    public async Task ExecuteAsync(HttpContext httpContext)
     {
+        httpContext.Response.StatusCode = Status;
+
+        // When the host opted into the problem-details pipeline (AddProblemDetails), write through it so
+        // CustomizeProblemDetails and registered writers see this document like any framework-produced
+        // problem. The hypermedia sections ride along as extensions. A writer that declines the request
+        // (e.g. the default writer respects an Accept header without a JSON type) falls through to the
+        // manual emission below, which preserves this type's historical wire shape.
+        if (httpContext.RequestServices.GetService<IProblemDetailsService>() is { } problemDetails
+            && await problemDetails.TryWriteAsync(new ProblemDetailsContext
+            {
+                HttpContext = httpContext,
+                ProblemDetails = ToProblemDetails(httpContext),
+            }))
+        {
+            return;
+        }
+
         // Keys serialize verbatim: RFC 9457 members, extension names, and rels must never be renamed by the
         // host's DictionaryKeyPolicy.
         var body = new VerbatimKeyDictionary<object?>();
@@ -100,34 +139,98 @@ public sealed class HypermediaProblem : IResult
             body[key] = value;
         }
 
-        if (_links.Count > 0)
+        if (BuildLinks(httpContext) is { } links)
         {
-            body["_links"] = BuildLinks();
+            body["_links"] = links;
         }
 
-        if (_actions.Count > 0)
+        if (BuildActions(httpContext) is { } actions)
         {
-            body["_actions"] = BuildActions();
+            body["_actions"] = actions;
         }
-
-        httpContext.Response.StatusCode = Status;
 
         // Dictionaries serialize as JSON objects without triggering the Cairn modifier (which only runs for
         // object contracts), so the problem keeps its application/problem+json shape verbatim.
-        return httpContext.Response.WriteAsJsonAsync(body, (JsonSerializerOptions?)null, "application/problem+json");
+        await httpContext.Response.WriteAsJsonAsync(body, (JsonSerializerOptions?)null, "application/problem+json");
+    }
+
+    // The framework-facing form of this document, for the IProblemDetailsService pipeline. The dedicated
+    // members map onto ProblemDetails' own properties; declared extensions and the hypermedia sections become
+    // extension members (their keys serialize verbatim through the VerbatimKeyDictionary values).
+    private Microsoft.AspNetCore.Mvc.ProblemDetails ToProblemDetails(HttpContext httpContext)
+    {
+        var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails
+        {
+            Status = Status,
+            Type = Type,
+            Title = Title,
+            Detail = Detail,
+            Instance = Instance,
+        };
+
+        foreach (var (key, value) in _extensions)
+        {
+            problem.Extensions[key] = value;
+        }
+
+        if (BuildLinks(httpContext) is { } links)
+        {
+            problem.Extensions["_links"] = links;
+        }
+
+        if (BuildActions(httpContext) is { } actions)
+        {
+            problem.Extensions["_actions"] = actions;
+        }
+
+        return problem;
+    }
+
+    // Route-based targets resolve through the host's URL policy; an explicit URI is used as-is even when
+    // Cairn isn't registered. An unresolvable target follows the configured resolution mode: dropped in Lax
+    // (problem bodies should degrade, not fail), thrown in Strict.
+    private static string? ResolveHref(HttpContext httpContext, LinkTarget target, string relation)
+    {
+        var href = httpContext.RequestServices.GetService<ILinkUrlResolver>() is { } resolver
+            ? resolver.Resolve(target)
+            : (target as ExplicitLinkTarget)?.Href;
+
+        if (string.IsNullOrWhiteSpace(href))
+        {
+            if (httpContext.RequestServices.GetService<CairnOptions>() is { Mode: LinkResolutionMode.Strict })
+            {
+                throw new LinkResolutionException(
+                    $"Could not resolve a URL for problem link '{relation}'. " +
+                    "Ensure the endpoint is named (WithName / [Http*(Name=...)]) and all route values are supplied.");
+            }
+
+            return null;
+        }
+
+        return href;
     }
 
     // Mirrors the main formatter: one link per rel emits a HAL link object, several sharing a rel emit a HAL
     // link array in declaration order (rels compare case-insensitively per RFC 8288).
-    private VerbatimKeyDictionary<object?> BuildLinks()
+    private VerbatimKeyDictionary<object?>? BuildLinks(HttpContext httpContext)
     {
-        var links = new VerbatimKeyDictionary<object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (relation, href, title) in _links)
+        if (_links.Count == 0)
         {
-            var link = new VerbatimKeyDictionary<object?> { ["href"] = href };
-            if (title is not null)
+            return null;
+        }
+
+        var links = new VerbatimKeyDictionary<object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (relation, target, title) in _links)
+        {
+            if (ResolveHref(httpContext, target, relation) is not { } href)
             {
-                link["title"] = title;
+                continue;
+            }
+
+            var link = new VerbatimKeyDictionary<object?> { ["href"] = href };
+            if ((title ?? target.Title) is { } linkTitle)
+            {
+                link["title"] = linkTitle;
             }
 
             if (!links.TryGetValue(relation, out var existing))
@@ -144,18 +247,26 @@ public sealed class HypermediaProblem : IResult
             }
         }
 
-        return links;
+        return links.Count > 0 ? links : null;
     }
 
-    private VerbatimKeyDictionary<object?> BuildActions()
+    private VerbatimKeyDictionary<object?>? BuildActions(HttpContext httpContext)
     {
-        var actions = new VerbatimKeyDictionary<object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (name, href, method) in _actions)
+        if (_actions.Count == 0)
         {
-            actions[name] = new VerbatimKeyDictionary<object?> { ["href"] = href, ["method"] = method };
+            return null;
         }
 
-        return actions;
+        var actions = new VerbatimKeyDictionary<object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, target, method) in _actions)
+        {
+            if (ResolveHref(httpContext, target, name) is { } href)
+            {
+                actions[name] = new VerbatimKeyDictionary<object?> { ["href"] = href, ["method"] = method };
+            }
+        }
+
+        return actions.Count > 0 ? actions : null;
     }
 }
 

@@ -23,6 +23,7 @@ public sealed class CairnOptions
     private readonly Dictionary<string, string> _curies = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<IHypermediaFormatter> _formatters = [];
     private Uri? _publicBaseUri;
+    private bool _frozen;
 
     internal LinkConfigRegistry Registry { get; } = new();
 
@@ -63,6 +64,14 @@ public sealed class CairnOptions
     /// <summary>Whether a known hypermedia media type in the request's <c>Accept</c> header selects the format (default <see langword="true"/>).</summary>
     public bool NegotiateFormat { get; set; } = true;
 
+    /// <summary>
+    /// Whether the authorization policies referenced by link configurations are validated against the host's
+    /// <c>IAuthorizationPolicyProvider</c> at startup (default <see langword="true"/>). Disable this when the
+    /// host uses a dynamic policy provider that materializes policies only after boot (e.g. from a database or
+    /// per-tenant store), where a startup lookup would report registered-later policies as unknown.
+    /// </summary>
+    public bool ValidateAuthorizationPolicies { get; set; } = true;
+
     /// <summary>The query string parameter swapped by the default offset pagination links (default <c>page</c>).</summary>
     public string PageQueryParameter { get; set; } = "page";
 
@@ -90,9 +99,29 @@ public sealed class CairnOptions
     /// </summary>
     public Func<HttpContext, string, string>? TransformUrl { get; set; }
 
+    // Structural registrations feed caches built at (or shortly after) startup — JSON contracts carry the
+    // injected hypermedia properties only for types configured when the contract is first built, negotiation
+    // snapshots the formatter list, and startup validation reads the registry once. A registration that lands
+    // after the options singleton is resolved would take effect partially or not at all, so it fails loudly
+    // instead (the pre-freeze path is the ordinary AddCairn(configure) / Configure<CairnOptions> flow).
+    internal void Freeze() => _frozen = true;
+
+    private void ThrowIfFrozen(string operation)
+    {
+        if (_frozen)
+        {
+            throw new InvalidOperationException(
+                $"Cairn: {operation} was called after CairnOptions was resolved from the container. " +
+                "Configuration registered this late is silently ignored by caches built at startup (JSON contracts, format negotiation, policy validation), " +
+                "so it is rejected instead. Register all link configs, formatters, curies, and paging envelopes during AddCairn(...) or via Configure<CairnOptions> before the host starts.");
+        }
+    }
+
     /// <summary>Registers the link configuration for resources of type <typeparamref name="T"/>.</summary>
+    /// <exception cref="InvalidOperationException">Called after the options were resolved (configuration is frozen once the host starts).</exception>
     public CairnOptions AddLinks<T>(LinkConfig<T> config)
     {
+        ThrowIfFrozen(nameof(AddLinks));
         Registry.Add(config);
         return this;
     }
@@ -101,6 +130,7 @@ public sealed class CairnOptions
     /// <exception cref="ArgumentNullException"><paramref name="assembly"/> is null.</exception>
     public CairnOptions AddLinksFromAssembly(Assembly assembly)
     {
+        ThrowIfFrozen(nameof(AddLinksFromAssembly));
         ArgumentNullException.ThrowIfNull(assembly);
         foreach (var type in assembly.GetTypes())
         {
@@ -137,11 +167,27 @@ public sealed class CairnOptions
     /// <c>WithHypermediaFormat(formatter.MediaType)</c>.
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="formatter"/> is null.</exception>
-    /// <exception cref="ArgumentException">The formatter declares no media type, or one is already registered for it.</exception>
+    /// <exception cref="ArgumentException">The formatter declares no media type, an unparseable or wildcard media type, or one is already registered for it.</exception>
+    /// <exception cref="InvalidOperationException">Called after the options were resolved (configuration is frozen once the host starts).</exception>
     public CairnOptions AddFormatter(IHypermediaFormatter formatter)
     {
+        ThrowIfFrozen(nameof(AddFormatter));
         ArgumentNullException.ThrowIfNull(formatter);
         ArgumentException.ThrowIfNullOrWhiteSpace(formatter.MediaType, nameof(formatter));
+
+        // The media type is matched exactly during Accept negotiation and emitted as the response
+        // Content-Type, so it must be a concrete, parseable type/subtype pair. A malformed or wildcard value
+        // would silently never win negotiation (or produce an invalid Content-Type) — reject it up front.
+        if (!Microsoft.Net.Http.Headers.MediaTypeHeaderValue.TryParse(formatter.MediaType, out var parsed)
+            || parsed.MatchesAllTypes
+            || parsed.MatchesAllSubTypes
+            || parsed.Parameters.Count > 0)
+        {
+            throw new ArgumentException(
+                $"'{formatter.MediaType}' is not a usable hypermedia media type. Formatters must declare a concrete type/subtype pair without wildcards or parameters (e.g. \"application/vnd.acme+json\"): it is matched exactly during Accept negotiation and written as the response Content-Type.",
+                nameof(formatter));
+        }
+
         if (_formatters.Any(existing => string.Equals(existing.MediaType, formatter.MediaType, StringComparison.OrdinalIgnoreCase)))
         {
             throw new ArgumentException($"A hypermedia formatter for '{formatter.MediaType}' is already registered.", nameof(formatter));
@@ -161,6 +207,7 @@ public sealed class CairnOptions
     /// <exception cref="ArgumentException"><paramref name="prefix"/> or <paramref name="hrefTemplate"/> is null or whitespace, or <paramref name="hrefTemplate"/> does not contain <c>{rel}</c>.</exception>
     public CairnOptions AddCurie(string prefix, string hrefTemplate)
     {
+        ThrowIfFrozen(nameof(AddCurie));
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
         ArgumentException.ThrowIfNullOrWhiteSpace(hrefTemplate);
         if (!hrefTemplate.Contains("{rel}", StringComparison.Ordinal))
@@ -181,6 +228,7 @@ public sealed class CairnOptions
     /// <exception cref="ArgumentNullException"><paramref name="describe"/> is null.</exception>
     public CairnOptions AddPaging<T>(Func<T, PagedView> describe)
     {
+        ThrowIfFrozen(nameof(AddPaging));
         ArgumentNullException.ThrowIfNull(describe);
         _paging[typeof(T)] = value => new PagedViewAdapter(describe((T)value));
         return this;
@@ -193,6 +241,7 @@ public sealed class CairnOptions
     /// <exception cref="ArgumentNullException"><paramref name="describe"/> is null.</exception>
     public CairnOptions AddCursorPaging<T>(Func<T, CursorView> describe)
     {
+        ThrowIfFrozen(nameof(AddCursorPaging));
         ArgumentNullException.ThrowIfNull(describe);
         _cursorPaging[typeof(T)] = value => new CursorPagedViewAdapter(describe((T)value));
         return this;

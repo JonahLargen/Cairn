@@ -31,7 +31,7 @@ public class CairnHalFormsFieldTests
         using var client = app.GetTestClient();
 
         var template = JsonDocument.Parse(await client.GetStringAsync("/orders/7")).RootElement
-            .GetProperty("_templates").GetProperty("update");
+            .GetProperty("_templates").GetProperty("default");
 
         Assert.Equal("multipart/form-data", template.GetProperty("contentType").GetString());
 
@@ -73,7 +73,7 @@ public class CairnHalFormsFieldTests
         using var client = app.GetTestClient();
 
         var props = JsonDocument.Parse(await client.GetStringAsync("/orders/7")).RootElement
-            .GetProperty("_templates").GetProperty("update").GetProperty("properties")
+            .GetProperty("_templates").GetProperty("default").GetProperty("properties")
             .EnumerateArray().ToDictionary(p => p.GetProperty("name").GetString()!);
 
         // "datetime" is not a valid HAL-FORMS type; datetime-local is.

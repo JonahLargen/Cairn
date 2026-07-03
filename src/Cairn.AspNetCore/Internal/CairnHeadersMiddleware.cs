@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Net.Http.Headers;
 
 namespace Cairn.AspNetCore.Internal;
@@ -11,9 +12,50 @@ namespace Cairn.AspNetCore.Internal;
 /// endpoint is known regardless of where the middleware sits relative to routing, and so the metadata
 /// reaches every endpoint type (MVC controller actions as well as minimal-API handlers).
 /// </summary>
-internal sealed class CairnHeadersMiddleware(RequestDelegate next)
+internal sealed class CairnHeadersMiddleware(RequestDelegate next, EndpointDataSource endpoints)
 {
+    // Whether any endpoint carries deprecation metadata, computed once per endpoint-table generation. When
+    // none does (the overwhelmingly common case), the per-request OnStarting callback is pure overhead —
+    // skip registering it. Invalidated by the endpoint change token, so dynamically added endpoints are seen.
+    private volatile object? _anyDeprecated;
+
     public Task Invoke(HttpContext context)
+    {
+        if (AnyDeprecatedEndpoint())
+        {
+            RegisterHeaderCallback(context);
+        }
+
+        return next(context);
+    }
+
+    private bool AnyDeprecatedEndpoint()
+    {
+        if (_anyDeprecated is bool cached)
+        {
+            return cached;
+        }
+
+        // Capture the token guarding the endpoint list before scanning it, so a racing endpoint change can
+        // only clear this computation, never strand a stale one.
+        var token = endpoints.GetChangeToken();
+        token.RegisterChangeCallback(static state => ((CairnHeadersMiddleware)state!)._anyDeprecated = null, this);
+
+        var any = false;
+        foreach (var endpoint in endpoints.Endpoints)
+        {
+            if (endpoint.Metadata.GetMetadata<DeprecationMetadata>() is not null)
+            {
+                any = true;
+                break;
+            }
+        }
+
+        _anyDeprecated = any;
+        return any;
+    }
+
+    private static void RegisterHeaderCallback(HttpContext context)
     {
         context.Response.OnStarting(static state =>
         {
@@ -35,8 +77,6 @@ internal sealed class CairnHeadersMiddleware(RequestDelegate next)
 
             return Task.CompletedTask;
         }, context);
-
-        return next(context);
     }
 }
 

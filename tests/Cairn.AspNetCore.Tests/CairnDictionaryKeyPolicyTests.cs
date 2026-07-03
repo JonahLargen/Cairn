@@ -115,6 +115,10 @@ public class CairnDictionaryKeyPolicyTests
             builder.Self(o => LinkTarget.Uri($"/pol/{o.Id}"));
             builder.Link("acme:widget", o => LinkTarget.Uri($"/widgets/{o.Id}"));
             builder.Affordance("re-order", o => LinkTarget.Uri($"/pol/{o.Id}/re-order")).Post();
+
+            // A second affordance keeps "re-order" under its own template key (a sole template would be
+            // keyed "default", which is not what this test is about).
+            builder.Affordance("archive", o => LinkTarget.Uri($"/pol/{o.Id}/archive")).Post();
             builder.Embed("acme:child", o => o.Child);
         }
     }

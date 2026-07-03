@@ -39,9 +39,11 @@ public class CairnClientTests
 
         Assert.Equal(42, order.Value!.Id);
         Assert.True(order.HasLink("self"));
-        Assert.True(order.HasAffordance("cancel"));
 
-        var result = await order.InvokeAsync("cancel");
+        // The client negotiates HAL-FORMS, where the response's sole template is keyed "default".
+        Assert.True(order.HasAffordance("default"));
+
+        var result = await order.InvokeAsync("default");
         Assert.True(result.IsSuccess);
         Assert.True(cancelled);
 

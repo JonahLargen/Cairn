@@ -158,6 +158,8 @@ ClientResult<Order> updated = await order.InvokeAsync<Order>(
 
 `ClientResult` (the no-body result) exposes `IsSuccess`, `Status`, `Problem`, and `EnsureSuccess()`. Invoking an unknown affordance name throws `InvalidOperationException`; guard with `HasAffordance(name)`.
 
+Affordance names are the wire keys, so mind the HAL-FORMS `default` convention: a template marked [`AsDefault()`](affordances-and-forms.md#the-default-template-asdefault) — or a response's *sole* template — is keyed `"default"` rather than its declared name. Against a HAL-FORMS server (the client's preferred negotiated format), a single-action resource is invoked as `InvokeAsync("default")`.
+
 ### Describing inputs
 
 Under [HAL-FORMS](affordances-and-forms.md), an affordance describes the fields it accepts. `Fields(name)` returns the `IReadOnlyList<AffordanceField>` for an affordance (empty if none are described):

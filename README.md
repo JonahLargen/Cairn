@@ -263,6 +263,8 @@ Cairn is opt-in because hypermedia isn't free and isn't always the right call. I
 
 If your API is internal, its clients are generated from an OpenAPI spec, and its resources have no interesting state — plain JSON is fine, and Cairn will happily stay out of those endpoints. Opt in the ones where it helps.
 
+One structural caveat: **streaming responses (`IAsyncEnumerable<T>`) don't get links.** Cairn computes hypermedia before serialization and an async stream can't be enumerated twice, so streamed items serialize without `_links` (a one-time warning is logged). Materialize first (e.g. `ToListAsync()`) — or leave streaming endpoints out of Cairn.
+
 ## Packages
 
 | Package | Purpose | Frameworks |
