@@ -748,16 +748,14 @@ internal static class CairnLinkRecorder
         VerbatimKeyDictionary<HalLinkValue>? links = null;
         if (linkSet.Links.Count > 0)
         {
-            var grouped = new Dictionary<string, List<HalLink>>(StringComparer.OrdinalIgnoreCase);
+            // Nearly every relation carries a single link, so group lazily: the wire dictionary is built
+            // directly and a per-relation list only materializes when a rel actually repeats. This runs per
+            // linked resource — a page links every item — so the intermediate grouping dictionary would be
+            // pure churn in the common case.
+            links = new VerbatimKeyDictionary<HalLinkValue>(StringComparer.OrdinalIgnoreCase);
             foreach (var link in linkSet.Links)
             {
-                if (!grouped.TryGetValue(link.Relation.Value, out var list))
-                {
-                    list = [];
-                    grouped[link.Relation.Value] = list;
-                }
-
-                list.Add(new HalLink(link.Href)
+                var halLink = new HalLink(link.Href)
                 {
                     Name = link.Name,
                     Title = link.Title,
@@ -766,13 +764,21 @@ internal static class CairnLinkRecorder
                     Deprecation = link.Deprecation,
                     Hreflang = link.Hreflang,
                     Profile = link.Profile,
-                });
-            }
+                };
 
-            links = new VerbatimKeyDictionary<HalLinkValue>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (relation, list) in grouped)
-            {
-                links[relation] = new HalLinkValue(list);
+                // The dictionary keeps the first-declared key casing on overwrite, and appending preserves
+                // declaration order within the relation.
+                if (links.TryGetValue(link.Relation.Value, out var existing))
+                {
+                    var list = new List<HalLink>(existing.Links.Count + 1);
+                    list.AddRange(existing.Links);
+                    list.Add(halLink);
+                    links[link.Relation.Value] = new HalLinkValue(list);
+                }
+                else
+                {
+                    links[link.Relation.Value] = new HalLinkValue([halLink]);
+                }
             }
         }
 

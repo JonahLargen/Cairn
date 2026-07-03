@@ -278,7 +278,7 @@ If your API is internal, its clients are generated from an OpenAPI spec, and its
 
 ## Performance
 
-Hypermedia is computed per response, so the overhead is measurable — and measured. The [benchmarks](benchmarks/Cairn.Benchmarks) compare a 1,000-item page with and without Cairn end to end, and isolate the serializer-level cost of the injected properties:
+Hypermedia is computed per response, so the overhead is measurable — and measured. The [benchmarks](benchmarks/Cairn.Benchmarks) serve the same page (50 items as a representative size, 1,000 as a stress case) end to end five ways — no links, links hand-rolled in the handler, `WithLinks` with route-based and with explicit-URI configs, and `WithLinks` over unconfigured items — plus single-resource and serializer-only suites. The [benchmark README](benchmarks/Cairn.Benchmarks/README.md) explains how to read the results (marginal per-item cost, not ratios against a near-empty baseline) and which numbers are deliberate non-goals:
 
 ```bash
 dotnet run -c Release --project benchmarks/Cairn.Benchmarks

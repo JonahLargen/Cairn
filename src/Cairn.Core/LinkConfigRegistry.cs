@@ -99,7 +99,12 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
         // Acquire the current cache generation once; a concurrent Add swaps in a fresh generation, so any
         // stale (possibly negative) entry this call computes lands only in the abandoned snapshot.
         var resolved = Volatile.Read(ref _resolved);
-        return resolved.GetOrAdd(resourceType, Resolve);
+
+        // Hit first: converting the Resolve method group allocates a fresh delegate per call (instance
+        // method groups are never cached), and this runs once per linked resource on the hot path.
+        return resolved.TryGetValue(resourceType, out var config)
+            ? config
+            : resolved.GetOrAdd(resourceType, Resolve);
     }
 
     private ICompiledLinkConfig? Resolve(Type resourceType)
