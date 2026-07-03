@@ -83,6 +83,16 @@ public class CairnSilentFailureTests
         await client.GetStringAsync("/miss");   // second request must not warn again
 
         Assert.DoesNotContain("_links", body);
+
+        // The emit-miss warning is written by an OnCompleted callback that races the client's read of the
+        // body, so poll briefly for it. WarnOnce makes it idempotent — both requests race a single Mark — so
+        // once it appears its count is frozen at one and Assert.Single still catches a warn-once regression.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!logs.Messages.Any(m => m.Contains("MissOrder", StringComparison.Ordinal) && m.Contains("never emitted", StringComparison.Ordinal)) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+        }
+
         Assert.Single(logs.Messages, m => m.Contains("MissOrder", StringComparison.Ordinal) && m.Contains("never emitted", StringComparison.Ordinal));
     }
 
