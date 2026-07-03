@@ -37,7 +37,15 @@ jobs:
         run: dotnet build Cairn.slnx --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test Cairn.slnx --configuration Release --no-build --verbosity normal
+        run: dotnet test Cairn.slnx --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory coverage
+
+      # Feeds the README coverage badge. Tokenless upload works for public repos;
+      # set the CODECOV_TOKEN secret to avoid rate limiting.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage/**/coverage.cobertura.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       # Keep packaging healthy on every change; the produced preview packages
       # (X.Y.Z-preview.0.N via MinVer) are downloadable from the run for local testing.

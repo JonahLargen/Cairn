@@ -5,7 +5,7 @@
 **Opt-in HATEOAS for ASP.NET Core — hypermedia links and actions, added only where they help.**
 
 [![NuGet](https://img.shields.io/nuget/v/Cairn.AspNetCore.svg?logo=nuget&label=NuGet)](https://www.nuget.org/packages/Cairn.AspNetCore)
-[![Downloads](https://img.shields.io/nuget/dt/Cairn.AspNetCore.svg?label=Downloads)](https://www.nuget.org/packages/Cairn.AspNetCore)
+[![Coverage](https://img.shields.io/codecov/c/github/JonahLargen/Cairn?logo=codecov&label=Coverage)](https://app.codecov.io/gh/JonahLargen/Cairn)
 [![CI](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml/badge.svg)](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-jonahlargen.github.io%2FCairn-blue)](https://jonahlargen.github.io/Cairn)
 [![License: MIT](https://img.shields.io/github/license/JonahLargen/Cairn?label=license&color=green)](LICENSE)
