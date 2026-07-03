@@ -14,12 +14,16 @@ internal sealed class CairnLinkInjectionModifier
     private static readonly string[] BuiltInNames = ["_links", "_embedded", "_actions", "_templates"];
 
     private readonly IHttpContextAccessor _accessor;
+    private readonly CairnOptions _options;
+    private readonly ILinkConfigProvider _configs;
     private readonly Dictionary<IHypermediaFormatter, Dictionary<string, Func<HypermediaDocument, object?>>> _custom = [];
     private readonly List<string> _names = [.. BuiltInNames];
 
-    public CairnLinkInjectionModifier(IHttpContextAccessor accessor, CairnOptions options)
+    public CairnLinkInjectionModifier(IHttpContextAccessor accessor, CairnOptions options, ILinkConfigProvider configs)
     {
         _accessor = accessor;
+        _options = options;
+        _configs = configs;
 
         // The contract is built once per type and cached, so every property any registered formatter can emit
         // must be declared up front; each property's getter then projects only for the request's active format.
@@ -41,7 +45,7 @@ internal sealed class CairnLinkInjectionModifier
 
     public void Modify(JsonTypeInfo typeInfo)
     {
-        if (typeInfo.Kind != JsonTypeInfoKind.Object)
+        if (typeInfo.Kind != JsonTypeInfoKind.Object || !CanCarryHypermedia(typeInfo.Type))
         {
             return;
         }
@@ -51,6 +55,16 @@ internal sealed class CairnLinkInjectionModifier
             AddProperty(typeInfo, name);
         }
     }
+
+    // Only a type the compute stage can actually record hypermedia for gets the contract properties: one
+    // with a registered link config (its own or a base class's) or a pagination envelope. Injecting into
+    // every object contract would put four phantom properties on every schema a JsonTypeInfo-driven document
+    // generator (AddOpenApi) produces — request bodies and DTOs Cairn never touches included.
+    private bool CanCarryHypermedia(Type type)
+        => _configs.GetConfig(type) is not null
+            || typeof(IPagedResource).IsAssignableFrom(type)
+            || typeof(ICursorPagedResource).IsAssignableFrom(type)
+            || _options.IsPagingEnvelope(type);
 
     private void AddProperty(JsonTypeInfo typeInfo, string name)
     {
@@ -93,7 +107,7 @@ internal sealed class CairnLinkInjectionModifier
                 "_links" => payload.Links,
                 "_embedded" => payload.Embedded,
                 "_actions" when CairnLinkStore.GetFormat(http) == HypermediaFormat.Default => payload.Actions,
-                "_templates" when CairnLinkStore.GetFormat(http) == HypermediaFormat.HalForms => ToTemplates(payload.Actions),
+                "_templates" when CairnLinkStore.GetFormat(http) == HypermediaFormat.HalForms => ToTemplates(payload.Actions, typeInfo.Options),
                 _ => null,
             };
         };
@@ -102,7 +116,7 @@ internal sealed class CairnLinkInjectionModifier
         typeInfo.Properties.Add(property);
     }
 
-    private static IReadOnlyDictionary<string, HalFormsTemplate>? ToTemplates(IReadOnlyDictionary<string, HalAction>? actions)
+    private static IReadOnlyDictionary<string, HalFormsTemplate>? ToTemplates(IReadOnlyDictionary<string, HalAction>? actions, System.Text.Json.JsonSerializerOptions serializer)
     {
         if (actions is null)
         {
@@ -118,7 +132,7 @@ internal sealed class CairnLinkInjectionModifier
             {
                 Title = action.Title,
                 ContentType = action.ContentType ?? "application/json",
-                Properties = HalFormsSchema.For(action.Input),
+                Properties = HalFormsSchema.For(action.Input, serializer),
             };
         }
 

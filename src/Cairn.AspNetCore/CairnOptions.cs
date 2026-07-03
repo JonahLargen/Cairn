@@ -152,14 +152,24 @@ public sealed class CairnOptions
     }
 
     /// <summary>
-    /// Registers a CURIE: a documentation <paramref name="prefix"/> and a templated <paramref name="hrefTemplate"/>.
-    /// When a resource uses a custom relation with the prefix (e.g. <c>acme:widget</c>), Cairn surfaces the
-    /// matching curie in <c>_links.curies</c> so clients can resolve the relation's documentation.
+    /// Registers a CURIE: a documentation <paramref name="prefix"/> and a templated <paramref name="hrefTemplate"/>
+    /// that must contain the <c>{rel}</c> variable (curies are emitted with <c>templated: true</c>, and clients
+    /// expand the relation's suffix into it). When a resource uses a custom relation with the prefix (e.g.
+    /// <c>acme:widget</c>), Cairn surfaces the matching curie in <c>_links.curies</c> so clients can resolve
+    /// the relation's documentation.
     /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="prefix"/> or <paramref name="hrefTemplate"/> is null or whitespace, or <paramref name="hrefTemplate"/> does not contain <c>{rel}</c>.</exception>
     public CairnOptions AddCurie(string prefix, string hrefTemplate)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
         ArgumentException.ThrowIfNullOrWhiteSpace(hrefTemplate);
+        if (!hrefTemplate.Contains("{rel}", StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"The curie template for prefix '{prefix}' must contain the {{rel}} variable (e.g. \"https://docs.example.com/rels/{{rel}}\"); curies are advertised as templated links that clients expand the relation into.",
+                nameof(hrefTemplate));
+        }
+
         _curies[prefix] = hrefTemplate;
         return this;
     }
@@ -188,20 +198,46 @@ public sealed class CairnOptions
         return this;
     }
 
-    internal bool IsPagingEnvelope(Type type) => _paging.ContainsKey(type) || _cursorPaging.ContainsKey(type);
+    internal bool IsPagingEnvelope(Type type) => TryGetEnvelopeShape(type, out _);
 
+    // Envelope lookups honor inheritance like LinkConfigRegistry: a subclass of a registered envelope type is
+    // decorated with the same pagination links. The nearest registered ancestor wins, offset before cursor
+    // when both are registered for the same type (matching the recorder's evaluation order).
     internal bool TryGetEnvelopeShape(Type type, out bool cursor)
     {
-        cursor = _cursorPaging.ContainsKey(type);
-        return cursor || _paging.ContainsKey(type);
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            if (_paging.ContainsKey(current))
+            {
+                cursor = false;
+                return true;
+            }
+
+            if (_cursorPaging.ContainsKey(current))
+            {
+                cursor = true;
+                return true;
+            }
+        }
+
+        cursor = false;
+        return false;
     }
 
     internal bool TryGetPagedView(object value, out IPagedResource paged)
     {
-        if (_paging.TryGetValue(value.GetType(), out var factory))
+        for (var current = value.GetType(); current is not null; current = current.BaseType)
         {
-            paged = factory(value);
-            return true;
+            if (_paging.TryGetValue(current, out var factory))
+            {
+                paged = factory(value);
+                return true;
+            }
+
+            if (_cursorPaging.ContainsKey(current))
+            {
+                break;   // the nearest registration says this envelope is cursor-shaped
+            }
         }
 
         paged = null!;
@@ -210,10 +246,18 @@ public sealed class CairnOptions
 
     internal bool TryGetCursorView(object value, out ICursorPagedResource cursor)
     {
-        if (_cursorPaging.TryGetValue(value.GetType(), out var factory))
+        for (var current = value.GetType(); current is not null; current = current.BaseType)
         {
-            cursor = factory(value);
-            return true;
+            if (_cursorPaging.TryGetValue(current, out var factory))
+            {
+                cursor = factory(value);
+                return true;
+            }
+
+            if (_paging.ContainsKey(current))
+            {
+                break;   // the nearest registration says this envelope is offset-shaped
+            }
         }
 
         cursor = null!;

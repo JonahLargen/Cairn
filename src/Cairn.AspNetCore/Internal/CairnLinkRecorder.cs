@@ -1,8 +1,11 @@
 using System.Collections;
 using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 
 namespace Cairn.AspNetCore.Internal;
@@ -23,9 +26,11 @@ internal static class CairnLinkRecorder
         switch (Unwrap(result))
         {
             // TypedResults.Ok(...) and friends: record the carried value. The result instance is immutable,
-            // so a deferred sequence cannot be swapped for its buffer here; if its re-enumeration yields new
-            // instances, the emit-stage diagnostic reports the miss.
+            // so a deferred sequence cannot be swapped for its buffer here — computing links enumerates it
+            // once and serialization enumerates it again. Warn up front (an IQueryable runs its query twice,
+            // and fresh instances lose every link) instead of only diagnosing after the response.
             case IValueHttpResult { Value: { } value }:
+                WarnIfDeferredInImmutableResult(http, value);
                 await RecordValueAsync(http, value);
                 return result;
 
@@ -177,7 +182,7 @@ internal static class CairnLinkRecorder
         WarnIfValueType(scope, value);
 
         var embedded = await RecordEmbeddedAsync(http, linkSet, scope);
-        CairnLinkStore.Record(http, value, ToPayload(linkSet, embedded, scope.Options.Curies));
+        CairnLinkStore.Record(http, value, ToPayload(linkSet, embedded, scope));
         CountComputed(linkSet);
     }
 
@@ -212,14 +217,14 @@ internal static class CairnLinkRecorder
     {
         // The serializer enumerates the envelope's items again after this compute pass, so a deferred
         // sequence must be materialized (and written back onto the envelope) before either pass runs.
-        items = MaterializeEnvelopeItems(envelope, items);
+        items = MaterializeEnvelopeItems(envelope, items, scope);
 
         if (scope.Visited.Add(envelope))
         {
             var linkSet = await scope.Engine.BuildAsync(envelope, scope.Context, http.RequestAborted);
             WarnIfActionsBlocked(scope, envelope, linkSet);
             var embedded = await RecordEmbeddedAsync(http, linkSet, scope);
-            var configured = ToPayload(linkSet, embedded, scope.Options.Curies);
+            var configured = ToPayload(linkSet, embedded, scope);
 
             var links = new VerbatimKeyDictionary<HalLinkValue>(StringComparer.OrdinalIgnoreCase);
             if (configured.Links is not null)
@@ -315,11 +320,12 @@ internal static class CairnLinkRecorder
         response.Headers.Append(HeaderNames.Vary, "Accept");
     }
 
-    // Pick the highest-quality acceptable hypermedia type, honoring q-values (RFC 9110): a q=0 excludes a type,
-    // and a higher-q plain application/json or wildcard wins over hal/hal-forms. An explicit application/json
-    // ask negotiates the plain format even when DefaultFormat is hal — the client did not accept a hal media
-    // type. Registered custom formatters participate by exact media type. Only a winning wildcard (or no
-    // Accept, or one that can't be parsed) returns null to use the default.
+    // Pick the most acceptable hypermedia type per RFC 9110 §12.5.1: for every format the server can emit,
+    // the most specific matching Accept range determines its quality (exact type > application/*+json >
+    // application/* > */*), q=0 excludes it, and the highest-quality survivor wins. Quality ties break on
+    // specificity ("*/*, application/hal+json" asks for hal), then on server preference — the configured
+    // default first, so a bare wildcard expresses no preference. Returns null (use the default) when there is
+    // no Accept header, it can't be parsed, or no emittable format is acceptable.
     private static (HypermediaFormat, IHypermediaFormatter?)? NegotiateFromAccept(HttpRequest request, CairnOptions options)
     {
         if (request.Headers.Accept.Count == 0
@@ -328,57 +334,144 @@ internal static class CairnLinkRecorder
             return null;
         }
 
-        NegotiatedFormat? winner = null;
-        IHypermediaFormatter? custom = null;
+        (NegotiatedFormat? Builtin, IHypermediaFormatter? Custom)? winner = null;
         var bestQuality = 0.0;
+        var bestSpecificity = 0;
 
-        foreach (var media in accepted)
+        foreach (var (builtin, custom, mediaType) in Candidates(options))
         {
-            var quality = media.Quality ?? 1.0;
-            if (quality <= 0.0 || quality <= bestQuality)
+            var (quality, specificity) = BestMatch(accepted, mediaType);
+            if (specificity == 0 || quality <= 0.0)
             {
-                continue;
+                continue;   // no range matched, or the most specific match excluded it with q=0
             }
 
-            if (CustomFor(options, media.MediaType) is { } matched)
+            if (quality > bestQuality || (quality == bestQuality && specificity > bestSpecificity))
             {
+                winner = (builtin, custom);
                 bestQuality = quality;
-                custom = matched;
-                winner = null;
-            }
-            else if (FormatFor(media.MediaType) is { } format)
-            {
-                bestQuality = quality;
-                winner = format;
-                custom = null;
+                bestSpecificity = specificity;
             }
         }
 
-        if (custom is not null)
+        if (winner is not { } selected)
         {
-            return (HypermediaFormat.Default, custom);
+            return null;
         }
 
-        return winner switch
+        if (selected.Custom is not null)
+        {
+            return (HypermediaFormat.Default, selected.Custom);
+        }
+
+        return selected.Builtin switch
         {
             NegotiatedFormat.Hal => (HypermediaFormat.Hal, null),
             NegotiatedFormat.HalForms => (HypermediaFormat.HalForms, null),
-            NegotiatedFormat.PlainJson => (HypermediaFormat.Default, null),
-            _ => null,
+            _ => (HypermediaFormat.Default, null),
         };
     }
 
-    private static IHypermediaFormatter? CustomFor(CairnOptions options, Microsoft.Extensions.Primitives.StringSegment mediaType)
+    // Every format the server can emit, in tie-break order: the configured default first (a wildcard-only
+    // match expresses no preference, so the default should win it), then registered custom formatters, then
+    // the remaining built-ins.
+    private static IEnumerable<(NegotiatedFormat? Builtin, IHypermediaFormatter? Custom, string MediaType)> Candidates(CairnOptions options)
     {
+        var preferred = options.DefaultFormat switch
+        {
+            HypermediaFormat.Hal => NegotiatedFormat.Hal,
+            HypermediaFormat.HalForms => NegotiatedFormat.HalForms,
+            _ => NegotiatedFormat.PlainJson,
+        };
+
+        yield return (preferred, null, MediaTypeOf(preferred));
+
         foreach (var formatter in options.Formatters)
         {
-            if (mediaType.Equals(formatter.MediaType, StringComparison.OrdinalIgnoreCase))
+            yield return (null, formatter, formatter.MediaType);
+        }
+
+        foreach (var format in (NegotiatedFormat[])[NegotiatedFormat.Hal, NegotiatedFormat.PlainJson, NegotiatedFormat.HalForms])
+        {
+            if (format != preferred)
             {
-                return formatter;
+                yield return (format, null, MediaTypeOf(format));
+            }
+        }
+    }
+
+    private static string MediaTypeOf(NegotiatedFormat format) => format switch
+    {
+        NegotiatedFormat.Hal => "application/hal+json",
+        NegotiatedFormat.HalForms => "application/prs.hal-forms+json",
+        _ => "application/json",
+    };
+
+    // The most specific matching range determines the candidate's quality (RFC 9110 §12.5.1); among ranges of
+    // equal specificity the first one counts. Specificity 0 means no range matched at all.
+    private static (double Quality, int Specificity) BestMatch(IList<MediaTypeHeaderValue> accepted, string candidate)
+    {
+        var quality = 0.0;
+        var specificity = 0;
+
+        foreach (var media in accepted)
+        {
+            var rank = Specificity(media.MediaType, candidate);
+            if (rank > specificity)
+            {
+                specificity = rank;
+                quality = media.Quality ?? 1.0;
             }
         }
 
-        return null;
+        return (quality, specificity);
+    }
+
+    // 4: exact media type; 3: a suffix range like application/*+json (plain application/json is outside it);
+    // 2: a type range like application/*; 1: */*; 0: no match.
+    private static int Specificity(Microsoft.Extensions.Primitives.StringSegment rangeSegment, string candidate)
+    {
+        if (!rangeSegment.HasValue)
+        {
+            return 0;
+        }
+
+        var range = rangeSegment.Value;
+        if (string.Equals(range, candidate, StringComparison.OrdinalIgnoreCase))
+        {
+            return 4;
+        }
+
+        if (range == "*/*")
+        {
+            return 1;
+        }
+
+        // Beyond exact and */*, only "type/*" and "type/*+suffix" ranges can match, and only when the
+        // candidate has the same type (compare through the '/' so type lengths must agree).
+        var slash = range.IndexOf('/');
+        if (slash < 0
+            || slash + 1 >= range.Length
+            || range[slash + 1] != '*'
+            || candidate.Length <= slash
+            || candidate[slash] != '/'
+            || string.Compare(range, 0, candidate, 0, slash + 1, StringComparison.OrdinalIgnoreCase) != 0)
+        {
+            return 0;
+        }
+
+        if (range.Length == slash + 2)
+        {
+            return 2;   // type/*
+        }
+
+        // type/*+suffix: the candidate's subtype must carry the suffix (and be more than the bare suffix).
+        var suffix = range[(slash + 2)..];
+        return suffix.StartsWith('+')
+            && candidate.Length > slash + 1 + suffix.Length
+            && candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? 3
+            : 0;
     }
 
     private enum NegotiatedFormat
@@ -388,9 +481,6 @@ internal static class CairnLinkRecorder
 
         // Explicit application/json: the client asked for plain JSON, not merely "anything".
         PlainJson,
-
-        // A wildcard accepts every format, so it expresses no preference — the configured default applies.
-        AnyFormat,
     }
 
     private static NegotiatedFormat? FormatFor(Microsoft.Extensions.Primitives.StringSegment mediaType)
@@ -408,14 +498,6 @@ internal static class CairnLinkRecorder
         if (mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase))
         {
             return NegotiatedFormat.PlainJson;
-        }
-
-        // application/*+json matches the hal media types too, so it is a wildcard here.
-        if (mediaType.Equals("application/*+json", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Equals("application/*", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Equals("*/*", StringComparison.OrdinalIgnoreCase))
-        {
-            return NegotiatedFormat.AnyFormat;
         }
 
         return null;
@@ -523,6 +605,36 @@ internal static class CairnLinkRecorder
         }
     }
 
+    // A deferred sequence (LINQ query, IQueryable, iterator) inside an immutable result cannot be buffered
+    // into it: the compute pass enumerates it once and the serializer enumerates it again. That is a double
+    // query for an IQueryable, and when re-enumeration yields new instances every link is lost too. Warn
+    // while the request is still running — the post-response emit-miss diagnostic only fires for the cases
+    // that actually lose links.
+    private static void WarnIfDeferredInImmutableResult(HttpContext http, object value)
+    {
+        if (value is not IEnumerable enumerable
+            || value is string or IPagedResource or ICursorPagedResource
+            || IsMaterialized(enumerable))
+        {
+            return;
+        }
+
+        var services = http.RequestServices;
+        if (services.GetRequiredService<CairnOptions>().IsPagingEnvelope(value.GetType()))
+        {
+            return;   // an envelope's deferred items are buffered back through its items property instead
+        }
+
+        var elementType = ElementTypeOf(enumerable);
+        if (services.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore") is { } logger
+            && services.GetRequiredService<WarnOnce>().Mark("deferred-result", elementType))
+        {
+            logger.LogWarning(
+                "Cairn: the response is a deferred sequence of {ResourceType} inside an immutable result (e.g. TypedResults.Ok(query)). Computing hypermedia enumerates it once and serialization enumerates it again — an IQueryable runs its query twice — and if re-enumeration yields new instances the links are lost. Materialize it first (e.g. ToList()/ToListAsync()).",
+                elementType.Name);
+        }
+    }
+
     private static void WarnAsyncEnumerable(ILogger? logger, WarnOnce warnOnce, Type elementType)
     {
         if (logger is not null && warnOnce.Mark("async-enumerable", elementType))
@@ -580,15 +692,50 @@ internal static class CairnLinkRecorder
                     CairnTelemetry.HypermediaUnemitted.Add(1, new KeyValuePair<string, object?>("cairn.resource_type", type.Name));
                     if (warnOnce.Mark("unemitted", type))
                     {
-                        logger.LogWarning(
-                            "Cairn: hypermedia was computed for {ResourceType} but never emitted. Links are correlated by reference between compute and serialization; this usually means a deferred sequence (LINQ projection, IQueryable) produced different instances when serialized. Materialize the sequence (e.g. ToList()) before returning it.",
-                            type.Name);
+                        // A type whose JSON contract isn't an object contract (a custom JsonConverter handles
+                        // it) can never receive the injected properties — that's the real cause, not deferred
+                        // enumeration, so diagnose it as such.
+                        if (HasNonObjectContract(http, type))
+                        {
+                            logger.LogWarning(
+                                "Cairn: hypermedia was computed for {ResourceType} but cannot be emitted: the type serializes through a custom JsonConverter, so its JSON contract is not an object contract and Cairn's property injection never runs. Remove the converter from the resource type (or emit the hypermedia from the converter yourself).",
+                                type.Name);
+                        }
+                        else
+                        {
+                            logger.LogWarning(
+                                "Cairn: hypermedia was computed for {ResourceType} but never emitted. Links are correlated by reference between compute and serialization; this usually means a deferred sequence (LINQ projection, IQueryable) produced different instances when serialized. Materialize the sequence (e.g. ToList()) before returning it.",
+                                type.Name);
+                        }
                     }
                 }
             }
 
             return Task.CompletedTask;
         });
+    }
+
+    // Whether the serializer handles this type through something other than an object contract — i.e. a
+    // custom JsonConverter — in which case Cairn's contract-modifier injection never sees it. Checks both
+    // serializer option sets since either pipeline (minimal APIs, MVC) may have produced the response.
+    private static bool HasNonObjectContract(HttpContext http, Type type)
+    {
+        var services = http.RequestServices;
+        foreach (var serializer in (JsonSerializerOptions?[])
+        [
+            services.GetService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()?.Value.SerializerOptions,
+            services.GetService<IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>>()?.Value.JsonSerializerOptions,
+        ])
+        {
+            if (serializer is not null
+                && serializer.TryGetTypeInfo(type, out var contract)
+                && contract.Kind != JsonTypeInfoKind.Object)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Type? AsyncEnumerableElementType(object value)
@@ -655,9 +802,12 @@ internal static class CairnLinkRecorder
     // An envelope's deferred items (a LINQ query, IQueryable, iterator) would be enumerated here and again by
     // the serializer — running any underlying query twice and, if the second pass yields new instances, losing
     // every item link. Buffer the sequence once and write the buffer back onto the envelope property that
-    // produced it, so the compute and emit stages share the same instances. When no writable property exposes
-    // the sequence, it is left as-is and the emit-miss diagnostic reports the correlation break.
-    private static IEnumerable MaterializeEnvelopeItems(object envelope, IEnumerable items)
+    // produced it, so the compute and emit stages share the same instances. Only a true set accessor is used:
+    // an init-only property is a declared immutability contract that reflection must not break (and a shared
+    // envelope instance must not be rewritten behind it). When no settable property exposes the sequence, the
+    // items are left as-is; that risks the double enumeration and correlation break, so warn now rather than
+    // relying only on the post-response emit-miss diagnostic.
+    private static IEnumerable MaterializeEnvelopeItems(object envelope, IEnumerable items, RecordScope scope)
     {
         if (items is string || IsMaterialized(items))
         {
@@ -667,7 +817,8 @@ internal static class CairnLinkRecorder
         var bufferType = typeof(List<>).MakeGenericType(ElementTypeOf(items));
         foreach (var property in envelope.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (property.SetMethod is null
+            if (property.SetMethod is not { } setter
+                || IsInitOnly(setter)
                 || property.GetIndexParameters().Length != 0
                 || !property.PropertyType.IsAssignableFrom(bufferType))
             {
@@ -694,8 +845,19 @@ internal static class CairnLinkRecorder
             return buffer;
         }
 
+        if (scope.Logger is { } logger && scope.WarnOnce.Mark("deferred-envelope", envelope.GetType()))
+        {
+            logger.LogWarning(
+                "Cairn: envelope {ResourceType} exposes its items as a deferred sequence with no settable property to buffer them back into (the property is init-only, computed, or non-public). The sequence is enumerated once to compute links and again to serialize, and if re-enumeration yields new instances the item links are lost. Materialize the items (e.g. ToList()) before constructing the envelope.",
+                envelope.GetType().Name);
+        }
+
         return items;
     }
+
+    // An init accessor compiles as a setter whose return parameter carries the IsExternalInit modreq.
+    private static bool IsInitOnly(MethodInfo setter)
+        => setter.ReturnParameter.GetRequiredCustomModifiers().Contains(typeof(System.Runtime.CompilerServices.IsExternalInit));
 
     // Per-route .WithPageLinks() wins over the global PageLink, which wins over the default query-swap.
     private static Func<int, string> ResolvePageUrl(HttpContext http, CairnOptions options)
@@ -743,7 +905,7 @@ internal static class CairnLinkRecorder
     // Links are grouped by relation: a single link for a rel emits as a HAL link object, several as a HAL link
     // array. Rels compare case-insensitively (RFC 8288), keeping the first-declared casing for emission, and
     // insertion order (the declaration order) is preserved within a relation.
-    private static ResourceHypermedia ToPayload(LinkSet linkSet, IReadOnlyDictionary<string, object>? embedded, IReadOnlyDictionary<string, string> curies)
+    private static ResourceHypermedia ToPayload(LinkSet linkSet, IReadOnlyDictionary<string, object>? embedded, RecordScope scope)
     {
         VerbatimKeyDictionary<HalLinkValue>? links = null;
         if (linkSet.Links.Count > 0)
@@ -792,19 +954,22 @@ internal static class CairnLinkRecorder
             }
         }
 
-        links = AddCuries(links, actions, embedded, curies);
+        links = AddCuries(links, actions, embedded, scope);
         return new ResourceHypermedia(links, actions, embedded);
     }
 
     // Surface a curies array for every registered prefix actually used by a rel-keyed section — _links,
     // affordances (_actions/_templates), or _embedded — so a curie'd relation anywhere in the document has
-    // its documentation link resolvable. The array always lives in _links per HAL.
+    // its documentation link resolvable. The array always lives in _links per HAL. A HAL response never
+    // emits affordances, so a prefix used only by an affordance name would advertise a curie no relation in
+    // the document carries — skip the affordance section there.
     private static VerbatimKeyDictionary<HalLinkValue>? AddCuries(
         VerbatimKeyDictionary<HalLinkValue>? links,
         IReadOnlyDictionary<string, HalAction>? actions,
         IReadOnlyDictionary<string, object>? embedded,
-        IReadOnlyDictionary<string, string> curies)
+        RecordScope scope)
     {
+        var curies = scope.Options.Curies;
         if (curies.Count == 0)
         {
             return links;
@@ -813,7 +978,11 @@ internal static class CairnLinkRecorder
         var used = new List<HalLink>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         CollectCuries(links?.Keys, curies, used, seen);
-        CollectCuries(actions?.Keys, curies, used, seen);
+        if (scope.Format != HypermediaFormat.Hal)
+        {
+            CollectCuries(actions?.Keys, curies, used, seen);
+        }
+
         CollectCuries(embedded?.Keys, curies, used, seen);
 
         if (used.Count == 0)

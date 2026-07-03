@@ -132,17 +132,18 @@ The affordance above renders (HAL-FORMS) as:
 
 ### Property derivation
 
-Each public, readable, non-indexer instance property of the input type becomes one template property. The property `name` is the property's name converted to camelCase. The remaining attributes are mapped from `System.ComponentModel` and `System.ComponentModel.DataAnnotations` annotations; nullable wrappers are unwrapped before type detection.
+Each serializable instance property of the input type becomes one template property. The property `name` is the property's **wire name under the host's JSON contract** — `[JsonPropertyName]` and the serializer's `PropertyNamingPolicy` (camelCase by default, snake_case if that's what the app binds) — so a generic client can submit exactly the fields the endpoint reads. The remaining attributes are mapped from `System.ComponentModel` and `System.ComponentModel.DataAnnotations` annotations; nullable wrappers are unwrapped before type detection.
 
 | Source | HAL-FORMS field | Notes |
 | --- | --- | --- |
 | `[Required]` | `required: true` | omitted when absent |
-| `[Display(Name = ...)]` | `prompt` | from `Display.GetName()` |
+| `[Display(Name = ...)]` | `prompt` | from `Display.GetName()`; localized prompts (`ResourceType`) resolve per request culture |
 | `[Display(Prompt = ...)]` | `placeholder` | from `Display.GetPrompt()` |
 | `[Editable(false)]` or `[ReadOnly(true)]` | `readOnly: true` | |
-| enum-typed property | `options.inline` | one entry per enum name; `prompt` and `value` are both the name |
+| enum-typed property | `options.inline` | one entry per member; `prompt` is the member name, `value` is the wire form the binder accepts — numeric by default, the exact serialized string when a `JsonStringEnumConverter` applies (declared on the enum or added to the serializer options) |
 | `[Range(min, max)]` | `min` / `max` | bounds converted to numbers |
 | `[StringLength]` or `[MaxLength]` | `maxLength` | `StringLength.MaximumLength` preferred, else `MaxLength.Length` |
+| `[StringLength(MinimumLength = ...)]` or `[MinLength]` | `minLength` | omitted when zero |
 | `[RegularExpression(pattern)]` | `regex` | the pattern |
 | `[EmailAddress]` | `type: "email"` | takes precedence over the inferred type |
 
@@ -153,14 +154,14 @@ When no `[EmailAddress]` attribute is present, `type` is inferred from the unwra
 | CLR type | `type` |
 | --- | --- |
 | `string` | `text` |
-| `bool` | `checkbox` |
+| `bool` | (no `type` — described by a two-value `options.inline` list; `checkbox` is not a valid HAL-FORMS type) |
 | `DateOnly` | `date` |
-| `DateTime`, `DateTimeOffset` | `datetime` |
+| `DateTime`, `DateTimeOffset` | `datetime-local` |
 | `TimeOnly` | `time` |
 | `int`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `decimal`, `double`, `float` | `number` |
 | any other type | (no `type` emitted) |
 
-Properties and their derived schema are cached per input type, so the annotations on a given type are read once.
+Properties and their derived schema are cached per input type and serializer contract — and per UI culture when any prompt is localizable — so the annotations on a given type are read once.
 
 ## The default template: `AsDefault()`
 

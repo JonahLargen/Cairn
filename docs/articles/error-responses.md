@@ -48,7 +48,7 @@ public HypermediaProblem WithExtension(string name, object? value)
 
 - `WithLink` adds an entry to the problem's `_links`. Each entry has an `href`, plus a `title` when supplied. Repeated calls for the same relation emit a HAL link array under that relation (a single link stays an object), and relations differing only in case group into one entry under the first-declared casing, per RFC 8288 — the same rules as the [main formatter](formats.md). Keys are emitted verbatim, unaffected by any JSON dictionary-key policy.
 - `WithAction` adds an affordance to the problem's `_actions` — for example a `retry` the client can invoke. `method` defaults to `POST`.
-- `WithExtension` adds a problem extension member, written as a top-level field alongside the standard members.
+- `WithExtension` adds a problem extension member, written as a top-level field alongside the standard members. Reserved member names (`type`, `title`, `status`, `detail`, `instance`, `_links`, `_actions`) are rejected — set those through the dedicated properties and methods.
 
 A complete example:
 

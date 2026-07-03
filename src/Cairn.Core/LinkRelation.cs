@@ -22,6 +22,20 @@ public readonly record struct LinkRelation
     /// <summary>The relation token or URI.</summary>
     public string Value { get; }
 
+    // The constructor rejects null/whitespace, but `default(LinkRelation)` bypasses it and carries a null
+    // Value — a hole the compiler's nullability analysis cannot see. Consumers call this at their entry
+    // points so the mistake surfaces as a clear configuration error instead of a NullReferenceException (or
+    // a null dictionary key) in the middle of serialization.
+    internal void ThrowIfDefault(string paramName)
+    {
+        if (Value is null)
+        {
+            throw new ArgumentException(
+                "The link relation is default(LinkRelation), which carries no value. Construct relations from a non-empty string (e.g. IanaLinkRelations.Self or \"self\").",
+                paramName);
+        }
+    }
+
     /// <summary>Creates a relation from a token or URI.</summary>
     public static LinkRelation FromString(string value) => new(value);
 
@@ -35,5 +49,5 @@ public readonly record struct LinkRelation
     public override int GetHashCode() => Value is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
 
     /// <inheritdoc />
-    public override string ToString() => Value;
+    public override string ToString() => Value ?? string.Empty;
 }

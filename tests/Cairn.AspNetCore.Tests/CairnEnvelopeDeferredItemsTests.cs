@@ -88,7 +88,78 @@ public class CairnEnvelopeDeferredItemsTests
         Assert.Equal(1, Volatile.Read(ref projections));
     }
 
+    [Fact]
+    public async Task An_init_only_envelope_is_never_mutated_and_warns_about_its_deferred_items()
+    {
+        var logs = new CapturingLoggerProvider();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Logging.AddProvider(logs);
+        builder.Services.AddCairn(o => o.AddLinks(new DeferredItemLinks()));
+
+        InitOnlyPage? envelope = null;
+        var deferred = new[] { 1, 2 }.Select(id => new DeferredItem(id));
+
+        await using var app = builder.Build();
+        app.MapGet("/dio", () => TypedResults.Ok(envelope = new InitOnlyPage { Items = deferred })).WithLinks();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var root = JsonDocument.Parse(await client.GetStringAsync("/dio")).RootElement;
+
+        // The response still works and carries the pagination links...
+        Assert.Equal(2, root.GetProperty("items").GetArrayLength());
+        Assert.True(root.GetProperty("_links").TryGetProperty("self", out _));
+
+        // ...but the init-only property was NOT rewritten through reflection: the declared immutability
+        // contract holds, and the deferred-items warning explains what that costs.
+        Assert.Same(deferred, envelope!.Items);
+        Assert.Contains(logs.Messages, m => m.Contains("no settable property", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_deferred_sequence_inside_an_immutable_result_warns_while_the_request_runs()
+    {
+        var logs = new CapturingLoggerProvider();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Logging.AddProvider(logs);
+        builder.Services.AddCairn(o => o.AddLinks(new DeferredItemLinks()));
+
+        await using var app = builder.Build();
+        app.MapGet("/dr", () => TypedResults.Ok(new[] { 1, 2 }.Select(id => new DeferredItem(id)))).WithLinks();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var root = JsonDocument.Parse(await client.GetStringAsync("/dr")).RootElement;
+
+        Assert.Equal(2, root.GetArrayLength());
+
+        // The eager diagnostic names the real problem (the sequence cannot be buffered into the immutable
+        // result) instead of leaving only the post-response emit-miss trail.
+        Assert.Contains(logs.Messages, m => m.Contains("immutable result", StringComparison.Ordinal));
+    }
+
     private sealed record DeferredItem(int Id);
+
+    // An immutable envelope: the items property only has an init accessor, so the recorder must not write
+    // a buffer back through it.
+    private sealed class InitOnlyPage : IPagedResource
+    {
+        public required IEnumerable<DeferredItem> Items { get; init; }
+
+        public int Page => 1;
+
+        public int PageSize => 10;
+
+        public int TotalCount => 2;
+
+        public int TotalPages => 1;
+
+        IEnumerable IPagedResource.Items => Items;
+    }
 
     // A mutable envelope, as an app would write one over a repository query.
     private sealed class DeferredPage : IPagedResource

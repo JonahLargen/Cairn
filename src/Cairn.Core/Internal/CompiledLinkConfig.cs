@@ -1,10 +1,17 @@
 namespace Cairn.Internal;
 
+/// <summary>A compiled config that can report the authorization policy names its declarations reference.</summary>
+internal interface IPolicyReportingConfig
+{
+    /// <summary>The distinct policy names referenced by links and affordances (the default-policy sentinel excluded).</summary>
+    IReadOnlyCollection<string> Policies { get; }
+}
+
 /// <summary>
 /// A <see cref="LinkConfig{T}"/> compiled once into its specs, able to build a <see cref="LinkSet"/>
 /// for an instance supplied as <see cref="object"/> (enabling runtime-type dispatch).
 /// </summary>
-internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
+internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReportingConfig
 {
     private readonly LinkBuilder<T> _builder;
 
@@ -49,6 +56,33 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig
             }
 
             claimant = spec;
+        }
+    }
+
+    // Every policy is known once the config is compiled, so a typo can be caught at startup instead of as a
+    // request-time failure when the link is first built.
+    public IReadOnlyCollection<string> Policies
+    {
+        get
+        {
+            HashSet<string>? policies = null;
+            foreach (var spec in _builder.LinkSpecs)
+            {
+                if (spec.Policy is { Length: > 0 } policy)
+                {
+                    (policies ??= new(StringComparer.Ordinal)).Add(policy);
+                }
+            }
+
+            foreach (var spec in _builder.AffordanceSpecs)
+            {
+                if (spec.Policy is { Length: > 0 } policy)
+                {
+                    (policies ??= new(StringComparer.Ordinal)).Add(policy);
+                }
+            }
+
+            return policies ?? (IReadOnlyCollection<string>)Array.Empty<string>();
         }
     }
 

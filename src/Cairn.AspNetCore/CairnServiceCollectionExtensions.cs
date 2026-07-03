@@ -44,6 +44,10 @@ public static class CairnServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>, CairnJsonOptionsSetup>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<Microsoft.AspNetCore.Mvc.JsonOptions>, CairnJsonOptionsSetup>());
 
+        // Every policy a link config references is known at registration time — validate them while the host
+        // starts instead of surfacing a typo as a request-time 500.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService, AuthorizationPolicyStartupValidator>());
+
         return services;
     }
 }

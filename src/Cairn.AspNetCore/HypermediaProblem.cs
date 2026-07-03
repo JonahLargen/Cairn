@@ -47,9 +47,23 @@ public sealed class HypermediaProblem : IResult
         return this;
     }
 
+    // The RFC 9457 members are written from their dedicated properties, and the hypermedia sections from
+    // WithLink/WithAction; an extension under any of these names would silently clobber them on the wire
+    // (e.g. WithExtension("status", "draft") replacing the numeric status member).
+    private static readonly string[] ReservedMembers = ["type", "title", "status", "detail", "instance", "_links", "_actions"];
+
     /// <summary>Adds a problem extension member.</summary>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null or empty, or a reserved member name (<c>type</c>, <c>title</c>, <c>status</c>, <c>detail</c>, <c>instance</c>, <c>_links</c>, <c>_actions</c>) — set those via the dedicated properties and methods instead.</exception>
     public HypermediaProblem WithExtension(string name, object? value)
     {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        if (Array.IndexOf(ReservedMembers, name) >= 0)
+        {
+            throw new ArgumentException(
+                $"'{name}' is a reserved problem member and cannot be set as an extension; use the dedicated property or method ({nameof(Status)}, {nameof(Title)}, {nameof(WithLink)}, ...) instead.",
+                nameof(name));
+        }
+
         _extensions[name] = value;
         return this;
     }

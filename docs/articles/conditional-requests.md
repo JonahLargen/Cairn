@@ -18,19 +18,19 @@ A conditional `GET` that short-circuits to 304 is a *healthy* outcome: Cairn rec
 
 ## Preconditions on writes: `CairnPreconditions.Evaluate`
 
-For updates, evaluate the request's `If-Match` against the resource's current tag before applying the change:
+For updates, evaluate the request's conditional headers against the resource's current tag before applying the change:
 
 ```csharp
 app.MapPut("/orders/{id:int}", (int id, OrderDto dto, HttpRequest req, IOrderRepo repo) =>
-    CairnPreconditions.Evaluate(req, repo.Get(id).Version, requireIfMatch: true)
+    CairnPreconditions.Evaluate(req, repo.Get(id)?.Version, requireIfMatch: true)
         ?? Results.NoContent());
 ```
 
-`Evaluate` returns:
+Pass `null` for the tag when the resource has no current representation (it doesn't exist yet). `Evaluate` checks both write preconditions per RFC 9110 §13:
 
-- `null` when `If-Match` strongly matches the current tag (weak tags never match a write precondition) — proceed with the update.
-- **412 Precondition Failed** (as `application/problem+json`) when it doesn't match — the client's copy is stale.
-- `null` when the header is absent, unless `requireIfMatch: true`, in which case **428 Precondition Required** forces clients to send one.
+- **`If-Match`** — `null` when a listed tag strongly matches the current one (weak tags never match a write precondition), or `*` and the resource exists; otherwise **412 Precondition Failed** (as `application/problem+json`) — the client's copy is stale, or the resource is gone.
+- **`If-None-Match`** — **412** when a listed tag weakly matches, or `*` and the resource exists. This is what makes `PUT ... If-None-Match: *` the standard create-only request: it succeeds only when nothing is there to overwrite.
+- With no conditional header at all, `null` — unless `requireIfMatch: true`, in which case **428 Precondition Required** forces clients to send one. A create guarded by `If-None-Match: *` satisfies the requirement.
 
 ## Answering OPTIONS: `UseCairnOptionsHandler`
 
@@ -47,6 +47,8 @@ OPTIONS /orders/1
 
 `HEAD` is included whenever `GET` is, `OPTIONS` always is, and methods are listed in conventional order. An endpoint your app maps for `OPTIONS` itself (or an any-method endpoint) wins over the middleware, and unmatched paths fall through to your 404. Unlike the deprecation headers below, this middleware is not auto-registered — add the `UseCairnOptionsHandler()` call yourself.
 
+CORS preflights (OPTIONS requests carrying `Access-Control-Request-Method`) are always passed through untouched, so `UseCors` can answer them with the `Access-Control-*` headers browsers require — the relative order of the two middlewares doesn't matter for preflights. Note that the handler answers without any authorization check (no endpoint is matched, so endpoint authorization never runs); if advertising a path's methods to anonymous callers is a concern, map OPTIONS explicitly on those routes instead.
+
 ## Deprecating endpoints: `WithDeprecation`
 
 ```csharp
@@ -59,7 +61,7 @@ app.MapGet("/old-orders", () => TypedResults.Ok(legacy.List()))
 
 emits the standard deprecation headers on every response from the endpoint:
 
-- `Deprecation` — RFC 9745; the structured-field date `@<unix-seconds>` when `deprecatedAt` is given, else the literal `true`.
+- `Deprecation` — RFC 9745; the structured-field date `@<unix-seconds>`. Prefer supplying `deprecatedAt` — when omitted, the registration time (app startup) is used, which changes on every deployment. (The literal `true` existed only in the draft and is invalid under the final RFC.)
 - `Sunset` — RFC 8594 HTTP date, when `sunset` is given.
 - `Link: <url>; rel="deprecation"` — when `link` is given.
 

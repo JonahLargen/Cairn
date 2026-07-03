@@ -46,8 +46,9 @@ public class CairnDeprecationHeaderTests
     }
 
     [Fact]
-    public async Task WithDeprecation_without_arguments_emits_only_the_boolean_deprecation_header()
+    public async Task WithDeprecation_without_arguments_emits_a_dated_deprecation_header()
     {
+        var before = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddCairn();
@@ -60,7 +61,12 @@ public class CairnDeprecationHeaderTests
 
         using var response = await client.GetAsync("/older");
 
-        Assert.Equal("true", Assert.Single(response.Headers.GetValues("Deprecation")));
+        // RFC 9745 defines no boolean form (that died with the draft); with no date supplied the header
+        // falls back to the registration time as a structured-field Date.
+        var deprecation = Assert.Single(response.Headers.GetValues("Deprecation"));
+        Assert.StartsWith("@", deprecation);
+        var seconds = long.Parse(deprecation[1..], System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange(seconds, before, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         Assert.False(response.Headers.Contains("Sunset"));
         Assert.False(response.Headers.Contains("Link"));
     }

@@ -5,4 +5,9 @@
     <Description>Core hypermedia model for Cairn — an opt-in, low-friction HATEOAS library for .NET. Transport-agnostic links, link relations, and affordances. No ASP.NET dependency.</Description>
   </PropertyGroup>
 
+  <!-- Cairn.AspNetCore's startup validation enumerates the compiled configs' policy names. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cairn.AspNetCore" />
+  </ItemGroup>
+
 </Project>

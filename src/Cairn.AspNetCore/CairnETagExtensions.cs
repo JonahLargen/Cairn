@@ -69,7 +69,29 @@ public static class CairnETagExtensions
     }
 
     internal static EntityTagHeaderValue Normalize(string raw)
-        => EntityTagHeaderValue.TryParse(raw, out var parsed) ? parsed : new EntityTagHeaderValue($"\"{raw}\"");
+        => EntityTagHeaderValue.TryParse(raw, out var parsed) ? parsed : new EntityTagHeaderValue(Quote(raw));
+
+    // An entity tag only allows etagc characters (RFC 9110 §8.8.3: 0x21, 0x23-0x7E); a selector value carrying
+    // a quote, control character, or non-ASCII text would make the EntityTagHeaderValue constructor throw a
+    // FormatException at request time. Percent-encode the offending bytes instead ('%' too, so distinct raw
+    // values stay distinct) — the tag is an opaque validator, so any stable, header-safe spelling is correct.
+    private static string Quote(string raw)
+    {
+        var builder = new System.Text.StringBuilder(raw.Length + 2).Append('"');
+        foreach (var b in System.Text.Encoding.UTF8.GetBytes(raw))
+        {
+            if (b != (byte)'%' && b is 0x21 or (>= 0x23 and <= 0x7E))
+            {
+                builder.Append((char)b);
+            }
+            else
+            {
+                builder.Append('%').Append(b.ToString("X2", System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+
+        return builder.Append('"').ToString();
+    }
 
     private static bool IfNoneMatchMatches(HttpRequest request, EntityTagHeaderValue current)
     {

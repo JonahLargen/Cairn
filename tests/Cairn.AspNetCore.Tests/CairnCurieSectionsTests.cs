@@ -63,6 +63,45 @@ public class CairnCurieSectionsTests
         Assert.Equal("acme", curies[0].GetProperty("name").GetString());
     }
 
+    [Fact]
+    public void AddCurie_requires_the_rel_variable_in_the_template()
+    {
+        var options = new CairnOptions();
+
+        // A curie is advertised templated:true; without {rel} clients would expand nothing into it.
+        var failure = Assert.Throws<ArgumentException>(() => options.AddCurie("acme", "https://docs.example.com/rels"));
+        Assert.Contains("{rel}", failure.Message, StringComparison.Ordinal);
+
+        options.AddCurie("acme", "https://docs.example.com/rels/{rel}");   // and the valid form still registers
+    }
+
+    [Fact]
+    public async Task A_hal_response_omits_curies_used_only_by_affordance_names()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.AddCurie("acme", "https://docs.example.com/rels/{rel}");
+            o.AddLinks(new AffordanceCurieLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/ca/{id:int}", (int id) => TypedResults.Ok(new CurieSectionOrder(id))).WithName("CaGetOrder").WithLinks();
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/hal+json");
+
+        var root = JsonDocument.Parse(await client.GetStringAsync("/ca/7")).RootElement;
+
+        // HAL emits no affordances, so the acme prefix appears nowhere in the document — advertising its
+        // curie would point at a relation the document doesn't carry.
+        Assert.False(root.TryGetProperty("_actions", out _));
+        Assert.False(root.GetProperty("_links").TryGetProperty("curies", out _));
+        Assert.True(root.GetProperty("_links").TryGetProperty("self", out _));
+    }
+
     private sealed record CurieSectionOrder(int Id)
     {
         public CurieSectionChild Child { get; } = new(Id);

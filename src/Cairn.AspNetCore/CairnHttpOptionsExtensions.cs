@@ -12,6 +12,15 @@ public static class CairnHttpOptionsExtensions
     /// the app mapping OPTIONS by hand. An OPTIONS endpoint the app maps itself still wins; unknown paths fall
     /// through (404). Add it once, after routing (with minimal hosting, anywhere in the pipeline).
     /// </summary>
+    /// <remarks>
+    /// CORS preflights (OPTIONS requests carrying <c>Access-Control-Request-Method</c>) are always passed
+    /// through untouched so <c>UseCors</c> can answer them with the <c>Access-Control-*</c> headers browsers
+    /// require; the relative ordering of the two middlewares therefore doesn't matter for preflights. Note
+    /// that the handler answers without any authorization check — no endpoint is matched, so endpoint
+    /// authorization never runs, wherever the handler sits in the pipeline. If advertising a path's methods
+    /// to anonymous callers is a concern, map OPTIONS explicitly on the routes that need protection (an
+    /// app-mapped OPTIONS endpoint always wins) instead of using this handler for them.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="app"/> is <see langword="null"/>.</exception>
     public static IApplicationBuilder UseCairnOptionsHandler(this IApplicationBuilder app)
     {

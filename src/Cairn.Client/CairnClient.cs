@@ -237,6 +237,12 @@ public sealed class CairnClient
                 (errors ??= []).Add($"'{field.Name}' is required.");
             }
 
+            // An empty optional value is "not provided" (mirroring HTML minlength); Required covers the rest.
+            if (field.MinLength is { } minLength && text.Length > 0 && text.Length < minLength)
+            {
+                (errors ??= []).Add($"'{field.Name}' must be at least {minLength} characters.");
+            }
+
             if (field.MaxLength is { } maxLength && text.Length > maxLength)
             {
                 (errors ??= []).Add($"'{field.Name}' must be at most {maxLength} characters.");
