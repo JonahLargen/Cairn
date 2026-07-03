@@ -16,13 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # MinVer derives the version from tag history, so the full history is required.
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           # The .NET 10 SDK builds every target; the 8.0/9.0 runtimes are needed to run the
           # multi-targeted test projects on their lower TFMs.
@@ -47,7 +47,7 @@ jobs:
       # API key — no stored secret to rotate. Requires a trusted publishing policy on
       # nuget.org pointing at this repo + workflow file (see RELEASING.md).
       - name: NuGet login (OIDC → temp API key)
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         id: login
         with:
           user: ${{ secrets.NUGET_USER }}

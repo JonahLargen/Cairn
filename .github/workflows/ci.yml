@@ -15,13 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # MinVer derives the version from tag history, so the full history is required.
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           # The .NET 10 SDK builds every target; the 8.0/9.0 runtimes are needed to run the
           # multi-targeted test projects on their lower TFMs.
@@ -37,7 +37,15 @@ jobs:
         run: dotnet build Cairn.slnx --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test Cairn.slnx --configuration Release --no-build --verbosity normal
+        run: dotnet test Cairn.slnx --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory coverage
+
+      # Feeds the README coverage badge. Tokenless upload works for public repos;
+      # set the CODECOV_TOKEN secret to avoid rate limiting.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@5975040f7f7d40edaff8d784b576fd65ae95c073 # v5.5.5
+        with:
+          files: coverage/**/coverage.cobertura.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       # Keep packaging healthy on every change; the produced preview packages
       # (X.Y.Z-preview.0.N via MinVer) are downloadable from the run for local testing.
@@ -45,7 +53,7 @@ jobs:
         run: dotnet pack Cairn.slnx --configuration Release --no-build --output artifacts
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nuget-packages
           path: artifacts/*nupkg
@@ -55,14 +63,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # DocFX's metadata step builds the projects, which runs MinVer; MinVer warns on a shallow
           # clone and warnings are errors repo-wide, so the docs build needs full tag history too.
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: '10.0.x'
 
