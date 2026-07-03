@@ -110,6 +110,8 @@ Following a templated `Link` without variables throws `NotSupportedException`. Y
 
 Template expansion implements RFC 6570 levels 1–4 (`{var}`, `{+var}`, `{#var}`, `{.var}`, `{/var}`, `{;var}`, `{?a,b}`, `{&var}`, the prefix modifier `{var:n}`, and explode `{list*}` over lists and maps), with careful encoding: reserved expansion percent-encodes a bare `%` that isn't a valid escape, and the prefix modifier counts code points, so it never splits a surrogate pair.
 
+A malformed template fails fast with a `FormatException` rather than silently mis-expanding: applying a prefix modifier to a composite (list or map) value — for example `{list:3}` — is a processing error under RFC 6570 §2.4.1, and the op-reserve operators reserved for future extensions (`=`, `,`, `!`, `@`, `|`, per §2.2) cannot be processed. Both throw when the template is expanded (following a templated link).
+
 ## Collections
 
 `GetCollectionAsync<TItem>` reads a collection where each item is a navigable resource, returning a `CollectionResult<TItem>`. `itemsProperty` names the array property on an envelope (default `items`); a bare JSON array is read directly.
@@ -206,12 +208,12 @@ if (again.IsNotModified)
 }
 ```
 
-A 304 is a success, not a failure: `IsSuccess` is `true`, `Problem` is `null`, and `EnsureSuccess()` yields a bodiless resource (`Value` is `null`) whose `ETag` is preserved. The same holds for a 304 answered to an invoked affordance or a collection request. `GetCollectionAsync` takes the same `ifNoneMatch`, and a `CollectionResource<TItem>` exposes its `ETag` to feed back:
+A 304 is a success, not a failure: `IsSuccess` is `true`, `Problem` is `null`, and `EnsureSuccess()` yields a bodiless resource (`Value` is `null`) whose `ETag` is preserved. The same holds for a 304 answered to an invoked affordance or a collection request. `GetCollectionAsync` has a conditional-GET overload taking the items property and `ifNoneMatch` alongside it, and a `CollectionResource<TItem>` exposes its `ETag` to feed back:
 
 ```csharp
 CollectionResource<Order> orders = (await client.GetCollectionAsync<Order>("/orders")).EnsureSuccess();
 
-CollectionResult<Order> again = await client.GetCollectionAsync<Order>("/orders", ifNoneMatch: orders.ETag);
+CollectionResult<Order> again = await client.GetCollectionAsync<Order>("/orders", "items", orders.ETag);
 if (again.IsNotModified)
 {
     // Unchanged — keep the previously cached page.

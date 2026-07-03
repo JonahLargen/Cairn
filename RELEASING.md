@@ -18,11 +18,24 @@ Versioning and publishing are fully tag-driven. There is no version number in th
 
 3. The Release workflow then, automatically:
    - builds and runs the full test suite as a gate;
-   - packs every shippable project at exactly `0.6.0` (MinVer reads the tag);
+   - packs every shippable project at exactly `0.6.0` (MinVer reads the tag), validating each against the
+     previous release's package (see below);
    - pushes the `.nupkg` + `.snupkg` packages to NuGet.org;
    - creates the GitHub release with auto-generated notes and the packages attached.
+4. **Move the compatibility baseline forward.** After the packages are live, set
+   `PackageValidationBaselineVersion` in `src/Directory.Build.props` to the version you just shipped, so
+   the next cycle's builds validate against it. Commit it as the first change of the new cycle.
 
-That's it — no csproj edits, no manual GitHub release, no separate "bump version" commit.
+Aside from that one tracked edit (the baseline bump), a release is just a tag — no version numbers in
+csproj, no manual GitHub release, no separate "bump version" commit.
+
+### Binary compatibility
+
+`EnablePackageValidation` (in `src/Directory.Build.props`) makes every `dotnet pack` compare the packed
+assemblies against `PackageValidationBaselineVersion` (the last released version) downloaded from NuGet.org.
+A removed or re-signatured public member fails the pack instead of shipping a `MissingMethodException` to
+consumers. When you intend a breaking change, that is a major-version decision — bump the version deliberately
+rather than working around the check.
 
 ### Pre-releases
 

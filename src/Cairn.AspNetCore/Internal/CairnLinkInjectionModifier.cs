@@ -57,14 +57,29 @@ internal sealed class CairnLinkInjectionModifier
     }
 
     // Only a type the compute stage can actually record hypermedia for gets the contract properties: one
-    // with a registered link config (its own or a base class's) or a pagination envelope. Injecting into
-    // every object contract would put four phantom properties on every schema a JsonTypeInfo-driven document
-    // generator (AddOpenApi) produces — request bodies and DTOs Cairn never touches included.
+    // with a registered link config (its own or a base class's), a pagination envelope, or a polymorphic base
+    // of a configured type (see HasConfiguredSubtype). Injecting into every object contract would put four
+    // phantom properties on every schema a JsonTypeInfo-driven document generator (AddOpenApi) produces —
+    // request bodies and DTOs Cairn never touches included.
     private bool CanCarryHypermedia(Type type)
         => _configs.GetConfig(type) is not null
             || typeof(IPagedResource).IsAssignableFrom(type)
             || typeof(ICursorPagedResource).IsAssignableFrom(type)
-            || _options.IsPagingEnvelope(type);
+            || _options.IsPagingEnvelope(type)
+            || HasConfiguredSubtype(type);
+
+    // A non-sealed type is a polymorphic base: an instance of a configured subtype can be serialized through
+    // its declared-type contract, so that contract must carry the injected properties even though the base
+    // itself has no config. Without this, a List<Animal> of configured Dog items serializes through the Animal
+    // contract and emits no links — the compute stage records against the runtime Dog, keyed by the instance,
+    // but the declared-type contract the serializer actually uses never asked for the properties. The
+    // OpenAPI/Swagger schema transformers strip the resulting placeholders from the base type's own schema
+    // (which documents no hypermedia of its own). A custom ILinkConfigProvider that is not the built-in
+    // registry cannot be reverse-queried, so this path is simply skipped for it.
+    private bool HasConfiguredSubtype(Type type)
+        => type is { IsClass: true, IsSealed: false }
+            && _configs is LinkConfigRegistry registry
+            && registry.HasConfiguredSubtype(type);
 
     private void AddProperty(JsonTypeInfo typeInfo, string name)
     {

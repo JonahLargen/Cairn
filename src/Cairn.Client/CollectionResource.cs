@@ -28,7 +28,7 @@ public sealed class CollectionResource<TItem>
     /// <summary>The items, each with its own value, links, and affordances.</summary>
     public IReadOnlyList<Resource<TItem>> Items { get; }
 
-    /// <summary>The response's <c>ETag</c>, if any — pass it as <c>ifNoneMatch</c> to a later <see cref="CairnClient.GetCollectionAsync{TItem}"/> for a conditional read.</summary>
+    /// <summary>The response's <c>ETag</c>, if any — pass it as <c>ifNoneMatch</c> to a later <see cref="CairnClient.GetCollectionAsync{TItem}(string, string, string, System.Threading.CancellationToken)"/> for a conditional read.</summary>
     public string? ETag { get; }
 
     /// <summary>The collection's links (e.g. <c>next</c>/<c>prev</c>), keyed by relation. Use <see cref="LinksFor"/> for a relation with several links.</summary>

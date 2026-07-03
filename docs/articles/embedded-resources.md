@@ -127,7 +127,7 @@ builder.Link("alternate", o => LinkTarget.Route("orders.csv", new { id = o.Id })
 
 ## CURIEs
 
-A CURIE (compact URI) names a documentation prefix and a templated href so custom relations stay short while remaining resolvable to their documentation. Register one with `AddCurie(string prefix, string hrefTemplate)` — the template must contain the `{rel}` variable (curies are advertised `templated: true`, and clients expand the relation's suffix into it):
+A CURIE (compact URI) names a documentation prefix and a templated href so custom relations stay short while remaining resolvable to their documentation. Register one with `AddCurie(string prefix, string hrefTemplate)` — the template must contain the `{rel}` variable (curies are advertised `templated: true`, and clients expand the relation's suffix into it). An `hrefTemplate` missing `{rel}` fails fast with an `ArgumentException` at registration, so the always-`templated: true` advertisement can never be a lie:
 
 ```csharp
 builder.Services.AddCairn(options =>

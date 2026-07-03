@@ -692,13 +692,22 @@ internal static class CairnLinkRecorder
                     CairnTelemetry.HypermediaUnemitted.Add(1, new KeyValuePair<string, object?>("cairn.resource_type", type.Name));
                     if (warnOnce.Mark("unemitted", type))
                     {
-                        // A type whose JSON contract isn't an object contract (a custom JsonConverter handles
-                        // it) can never receive the injected properties — that's the real cause, not deferred
-                        // enumeration, so diagnose it as such.
+                        // Name the actual cause. A non-object contract (a custom JsonConverter handles the type)
+                        // can never receive the injected properties; an object contract with none of the
+                        // injected properties means the contract was built before the type was recognized as
+                        // hypermedia-capable; otherwise the contract could emit but the recorded instance never
+                        // reached serialization (deferred re-enumeration).
                         if (HasNonObjectContract(http, type))
                         {
                             logger.LogWarning(
                                 "Cairn: hypermedia was computed for {ResourceType} but cannot be emitted: the type serializes through a custom JsonConverter, so its JSON contract is not an object contract and Cairn's property injection never runs. Remove the converter from the resource type (or emit the hypermedia from the converter yourself).",
+                                type.Name);
+                        }
+                        else if (ContractMissingHypermedia(http, type))
+                        {
+                            logger.LogWarning(
+                                "Cairn: hypermedia was computed for {ResourceType} but never emitted: its serializer contract carries none of Cairn's injected hypermedia properties, so the emit stage had nothing to write into. The JSON contract was built and cached before a link config covering {ResourceType} (its own or a subtype's) was registered — register every link config during AddCairn, before the first request is served.",
+                                type.Name,
                                 type.Name);
                         }
                         else
@@ -720,12 +729,7 @@ internal static class CairnLinkRecorder
     // serializer option sets since either pipeline (minimal APIs, MVC) may have produced the response.
     private static bool HasNonObjectContract(HttpContext http, Type type)
     {
-        var services = http.RequestServices;
-        foreach (var serializer in (JsonSerializerOptions?[])
-        [
-            services.GetService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()?.Value.SerializerOptions,
-            services.GetService<IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>>()?.Value.JsonSerializerOptions,
-        ])
+        foreach (var serializer in SerializerOptionSets(http))
         {
             if (serializer is not null
                 && serializer.TryGetTypeInfo(type, out var contract)
@@ -736,6 +740,42 @@ internal static class CairnLinkRecorder
         }
 
         return false;
+    }
+
+    // Whether the serializer built an object contract for this type that carries none of Cairn's injected
+    // hypermedia properties (keyed on the always-present "_links"). That means the contract was finalized
+    // before the type was recognized as hypermedia-capable — typically a link config registered after the
+    // type was first serialized — so the emit stage had no property to write the recorded links into.
+    private static bool ContractMissingHypermedia(HttpContext http, Type type)
+    {
+        foreach (var serializer in SerializerOptionSets(http))
+        {
+            if (serializer is null || !serializer.TryGetTypeInfo(type, out var contract) || contract.Kind != JsonTypeInfoKind.Object)
+            {
+                continue;
+            }
+
+            foreach (var property in contract.Properties)
+            {
+                if (string.Equals(property.Name, "_links", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    // Both serializer option sets that could have produced the response: minimal APIs (and WriteAsJsonAsync)
+    // read Http.Json options; MVC controllers read Mvc.Json options. Either may be absent.
+    private static IEnumerable<JsonSerializerOptions?> SerializerOptionSets(HttpContext http)
+    {
+        var services = http.RequestServices;
+        yield return services.GetService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()?.Value.SerializerOptions;
+        yield return services.GetService<IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>>()?.Value.JsonSerializerOptions;
     }
 
     private static Type? AsyncEnumerableElementType(object value)

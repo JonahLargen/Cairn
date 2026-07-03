@@ -23,6 +23,13 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- Compare every packed assembly against the last released package so an accidental
+         binary-breaking change (a removed or re-signatured public member) fails the pack instead of
+         shipping a MissingMethodException. Bump the baseline to the just-published version after each
+         release (see RELEASING.md). -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>0.6.6</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <ItemGroup>
