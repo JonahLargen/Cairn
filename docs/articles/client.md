@@ -139,6 +139,40 @@ A second overload, `FollowAsync(relation, variables, itemsProperty = "items")`, 
 
 `CollectionResult<TItem>` exposes `IsSuccess`, `Status`, `IsNotModified`, `Collection`, `Problem`, and `EnsureSuccess()`. See [Pagination](pagination.md) for the server side that emits `next`/`prev`/`first`/`last`.
 
+### Walking every page
+
+`FollowAsync` is a single hop. `EnumerateItemsAsync` walks the whole `next` chain for you, exposing every item across every page as one `IAsyncEnumerable<Resource<TItem>>` — each page is fetched lazily, only as the enumeration reaches it:
+
+```csharp
+CollectionResource<Order> orders = (await client.GetCollectionAsync<Order>("/orders")).EnsureSuccess();
+
+await foreach (Resource<Order> item in orders.EnumerateItemsAsync())
+{
+    Order value = item.RequireValue();   // every order, across every page
+}
+```
+
+It yields the page you call it on, then follows `next` to the following page and yields its items, and so on until a page carries no `next` link — walking the collection to exhaustion. Each yielded element is a full `Resource<Order>`, so its own links and affordances are navigable.
+
+Four optional parameters shape the walk:
+
+- `relation` — the pagination relation to follow (default `next`).
+- `itemsProperty` — the array property naming the items on each page's envelope (default `items`); it applies to every page, so a chain of custom-envelope pages reads uniformly.
+- `maxItems` — a cap on the total number of items yielded; enumeration stops once this many have been produced, even mid-page.
+- `maxPages` — a cap on the total number of pages read, **counting the page you call it on**; `maxPages: 1` yields only that page and never follows `next`.
+
+```csharp
+// Bound the walk: at most 500 items, and never more than 10 pages.
+await foreach (Resource<Order> item in orders.EnumerateItemsAsync(maxItems: 500, maxPages: 10))
+{
+    // ...
+}
+```
+
+With neither cap set the walk trusts the server to end the chain. Set `maxPages` or `maxItems` to bound a walk against an untrusted or misbehaving server — for example one whose `next` cycles back on itself. The caps are exact: a walk that ends on a page boundary spends no extra request fetching a page it would immediately discard.
+
+A templated `next` is walked with no variables (its optional expressions collapse per RFC 6570), matching single-hop `FollowAsync`. Validation is eager — a null `relation`/`itemsProperty` throws `ArgumentNullException`, and a `maxItems`/`maxPages` below `1` throws `ArgumentOutOfRangeException`, on the call rather than on the first `MoveNextAsync`. A page fetch that returns an HTTP error status throws `CairnClientException` from the enumeration, after the pages before it have been yielded. Cancellation flows in through `await foreach (... .WithCancellation(token))` and is observed while fetching each following page.
+
 ## Invoking affordances
 
 Affordances are the available actions a resource advertises (their HTTP method, target, and — under HAL-FORMS — input fields). Invoke one by name on the resource.
