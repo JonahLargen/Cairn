@@ -67,10 +67,21 @@ public class CairnSwashbuckleTests
         }
 
         // Enum-typed fields carry an options.inline list of {prompt, value} choices.
-        var option = field.GetProperty("options").GetProperty("properties")
-            .GetProperty("inline").GetProperty("items").GetProperty("properties");
+        var options = field.GetProperty("options").GetProperty("properties");
+        var option = options.GetProperty("inline").GetProperty("items").GetProperty("properties");
         Assert.True(option.TryGetProperty("prompt", out _));
         Assert.True(option.TryGetProperty("value", out _));
+
+        // Options by reference: an options.link with an href (and optional templated/type), plus the
+        // prompt/value field selectors for the fetched list.
+        var link = options.GetProperty("link").GetProperty("properties");
+        foreach (var member in new[] { "href", "templated", "type" })
+        {
+            Assert.True(link.TryGetProperty(member, out _), $"options.link schema missing '{member}'");
+        }
+
+        Assert.True(options.TryGetProperty("promptField", out _));
+        Assert.True(options.TryGetProperty("valueField", out _));
     }
 
     [Fact]

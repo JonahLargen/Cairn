@@ -27,5 +27,6 @@ namespace Cairn.AspNetCore.Internal;
 [JsonSerializable(typeof(HalFormsTemplate))]
 [JsonSerializable(typeof(HalFormsProperty))]
 [JsonSerializable(typeof(HalFormsOptions))]
+[JsonSerializable(typeof(HalFormsOptionsLink))]
 [JsonSerializable(typeof(HalFormsOption))]
 internal sealed partial class CairnJsonContext : JsonSerializerContext;

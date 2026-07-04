@@ -142,7 +142,7 @@ internal static class HalFormsSchema
             Min = ToDouble(range?.Minimum),
             Max = ToDouble(range?.Maximum),
             Value = DefaultValueOf(property, underlying, serializer),
-            Options = BuildOptions(underlying, serializer),
+            Options = BuildOptions(property, underlying, serializer),
         };
     }
 
@@ -196,11 +196,27 @@ internal static class HalFormsSchema
     // round-trip through the host's binder, so each member is serialized through the host's options: numeric
     // under the default converter, or the exact wire string when the enum serializes as strings — whether the
     // converter is declared on the enum type or added to the serializer options, naming policy and all.
-    private static HalFormsOptions? BuildOptions(Type underlying, JsonSerializerOptions serializer)
+    // A property that declares its options come from a remote resource ([HalFormsOptionsLink]) overrides the
+    // inline derivation: HAL-FORMS options carry either an inline list or a link, never both.
+    private static HalFormsOptions? BuildOptions(PropertyInfo property, Type underlying, JsonSerializerOptions serializer)
     {
+        if (property.GetCustomAttribute<HalFormsOptionsLinkAttribute>() is { } reference)
+        {
+            return new HalFormsOptions
+            {
+                Link = new HalFormsOptionsLink(reference.Href)
+                {
+                    Templated = reference.Templated ? true : null,
+                    Type = reference.Type,
+                },
+                PromptField = reference.PromptField,
+                ValueField = reference.ValueField,
+            };
+        }
+
         if (underlying == typeof(bool))
         {
-            return new HalFormsOptions([new HalFormsOption("True", "true"), new HalFormsOption("False", "false")]);
+            return new HalFormsOptions { Inline = [new HalFormsOption("True", "true"), new HalFormsOption("False", "false")] };
         }
 
         if (!underlying.IsEnum)
@@ -219,7 +235,7 @@ internal static class HalFormsSchema
             options.Add(new HalFormsOption(names[i], WireValueOf(Enum.ToObject(underlying, values.GetValue(i)!), underlying, serializer)));
         }
 
-        return options.Count > 0 ? new HalFormsOptions(options) : null;
+        return options.Count > 0 ? new HalFormsOptions { Inline = options } : null;
     }
 
     private static string WireValueOf(object value, Type enumType, JsonSerializerOptions serializer)

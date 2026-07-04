@@ -350,6 +350,20 @@ internal static class HypermediaJsonSchemas
                             },
                         },
                     },
+                    // Options by reference: a link the client dereferences for the value list, in place of inline.
+                    ["link"] = new OpenApiSchema
+                    {
+                        Type = JsonSchemaType.Object,
+                        Required = new HashSet<string>(StringComparer.Ordinal) { "href" },
+                        Properties = new Dictionary<string, IOpenApiSchema>
+                        {
+                            ["href"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                            ["templated"] = new OpenApiSchema { Type = JsonSchemaType.Boolean },
+                            ["type"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                        },
+                    },
+                    ["promptField"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                    ["valueField"] = new OpenApiSchema { Type = JsonSchemaType.String },
                 },
             },
         },
