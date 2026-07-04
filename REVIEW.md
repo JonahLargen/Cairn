@@ -1,12 +1,19 @@
 # Cairn — Action List
 
 Originally reviewed at `main` = `aba3217` (released `v0.6.6` = `3b9e051`).
-**Status re-checked at `main` = `e5fac86` (PR #98)** — the tree is ~30 PRs past the
+**Status re-checked at `main` = `9b07b56` (PR #100)** — the tree is ~33 PRs past the
 original review. Each item is marked **done** / **partial** / **rejected**. Fix
 waves landed in PRs #70 (release blockers, polymorphic links), #71 (server
 hardening/caching/HAL-FORMS), #72 (client/analyzer/generator/testing), #92
-(trimming/AOT), and **#98 (this review's own code-review findings)**, plus
-supply-chain PRs #73/#93/#95 and coverage PRs #94/#97/#98.
+(trimming/AOT), **#98 (this review's own code-review findings)**, and **#99/#101
+(the two leftover nits)**, plus supply-chain PRs #73/#93/#95 and coverage PRs
+#94/#97/#98. **Everything on this list is now done or a deliberate rejection —
+only the Features / Ecosystem / v2 roadmap remains open.**
+
+> Also shipped since the review, *not* from this list: **#100** added client-opt-in
+> hypermedia via `HypermediaFormat.None` (a plain `application/json` caller gets the
+> bare resource; links come only when negotiated) plus an `application/vnd.cairn+json`
+> media type for the flat shape and a `WithHypermediaFormat(...)` per-endpoint override.
 
 ## Before the next release
 
@@ -133,12 +140,10 @@ supply-chain PRs #73/#93/#95 and coverage PRs #94/#97/#98.
 - [x] **Done** — `concurrency` group added to `ci.yml:14-16`
   (`cancel-in-progress: true`).
 - [x] **Done** — Strong naming skipped; decision recorded in `CONTRIBUTING.md:60-72`.
-- [ ] **Partial** (still open after #98) — Analyzers-ship-only-inside-Cairn.AspNetCore
-  is documented (`CONTRIBUTING.md:50-52`, `docs/articles/packages.md:29`), but the
-  pack items are still not guarded.
-  - [ ] Add `Condition="Exists(...)"` to the `Cairn.Analyzers.dll` /
-    `Cairn.CodeFixes.dll` / `Cairn.SourceGenerators.dll` `<None Include>` pack items
-    (`src/Cairn.AspNetCore/Cairn.AspNetCore.csproj:24-26`).
+- [x] **Done** — Analyzers ship only inside Cairn.AspNetCore (documented in
+  `CONTRIBUTING.md:50-52`, `docs/articles/packages.md:29`) and the three
+  `<None Include>` pack items are now guarded with `Condition="Exists(...)"`
+  (`src/Cairn.AspNetCore/Cairn.AspNetCore.csproj:24-26`). (#99)
 - [x] **Done** — Trim/AOT analyzers enabled (`IsAotCompatible=true` for net8.0+,
   `src/Directory.Build.props:42-44`), reflection paths annotated
   (`DynamicallyAccessedMembers`, `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]`),
@@ -195,11 +200,12 @@ value-add backlog. (`V5` of the AOT work is the one exception, marked in v2.)*
 - [x] **Done** — Trimming/AOT posture declared and annotated for Cairn.Core and
   Cairn.Client (`IsAotCompatible=true` + attributes, `docs/articles/aot.md`). (#92)
 
-## New findings (code review at #97) — resolved in #98
+## New findings (code review at #97) — all resolved
 
 The code-review pass at #97 surfaced 16 net-new issues (7 `[Med]`, the rest
-`[Low]`/nit). **PR #98 fixed all of them except one nit**, and added ~940 lines of
-regression tests plus a blocking 95%-patch-coverage gate. Kept here as a record.
+`[Low]`/nit). **PR #98 fixed all of them except one nit** (~940 lines of regression
+tests plus a blocking 95%-patch-coverage gate); **#101 then closed that last nit**.
+Kept here as a record — every box below is checked.
 
 ### Server
 
@@ -218,10 +224,11 @@ regression tests plus a blocking 95%-patch-coverage gate. Kept here as a record.
   (`CairnLinkRecorder.cs`). (#98)
 - [x] **Done** — `HypermediaProblem` resolves the URL resolver + mode once per
   document, and a 412 from `CairnPreconditions` echoes the current `ETag`. (#98)
-- [ ] **[Nit] — still open** — `MaterializeEnvelopeItems` still writes the buffered
-  list back onto the envelope via `property.SetValue` (`CairnLinkRecorder.cs:964`),
-  which mutates a cached/shared envelope instance across requests. Not addressed by
-  #98; low impact (only bites apps that return a singleton envelope).
+- [x] **Done** — The envelope is no longer mutated: the buffered items sequence is
+  registered in a per-request side table (`CairnLinkStore.RecordMaterialized`) and
+  substituted at serialization via a getter-wrapping contract modifier instead of
+  `property.SetValue`. Bonus: init-only/get-only envelopes now keep their item links,
+  and the deferred-items warning narrowed to genuinely un-interceptable properties. (#101)
 
 ### Client
 
@@ -255,27 +262,25 @@ regression tests plus a blocking 95%-patch-coverage gate. Kept here as a record.
 
 ## Suggested next steps
 
-The pre-release list and the code-review appendix are both effectively **cleared** —
-PR #98 landed every correctness finding with tests. Two tiny cleanups remain before a
-tag, then it's roadmap work.
+The pre-release list, the code-review appendix, **and** both leftover nits are now
+fully **cleared** (#98 landed every correctness finding with tests; #99/#101 closed
+the two nits). There is no known correctness debt left. What remains is purely the
+roadmap.
 
-1. **Mop up the last two nits** (one small PR, or fold into the next change):
-   - the **Partial** packaging item — add `Condition="Exists(...)"` to the three
-     analyzer pack items (`Cairn.AspNetCore.csproj:24-26`);
-   - the envelope `SetValue` write-back nit (`CairnLinkRecorder.cs:964`) — skip the
-     write-back or document that envelopes must be request-scoped.
-   Neither blocks release.
-2. **Cut v1.0.0.** There is no known correctness debt left: the package is
-   AOT-annotated, coverage-gated at 95% (line + branch + now a blocking patch gate),
-   supply-chain hardened, and docs are complete. This is the recommended next move.
-3. **Pick 2–3 post-v1 features** by leverage: `IAsyncEnumerable` pagination iterator
+1. **Cut v1.0.0 — this is the move.** Nothing blocks a tag: the package is
+   AOT-annotated, coverage-gated at 95% (line + branch + a blocking patch gate),
+   supply-chain hardened, and docs are complete. If you want a shakedown first, the
+   only pre-tag call worth making is whether to flip `DefaultFormat` to the new
+   `HypermediaFormat.None` (opt-in links, #100) as the v1 default — a behavior choice,
+   not a bug.
+2. **Pick 2–3 post-v1 features** by leverage: `IAsyncEnumerable` pagination iterator
    (F1) and `Location`/`ETag` on `ClientResult` (F5) are the most-requested client
    ergonomics; the RFC 8288 `Link` header (F7) is cheap and standards-aligned; the
    OpenAPI `operation.Deprecated`/ETag metadata (F8) improves contract fidelity.
-4. **Plan the v2 breaking window as one major bump.** V1–V4 (`ILinkAuthorizer` +
+3. **Plan the v2 breaking window as one major bump.** V1–V4 (`ILinkAuthorizer` +
    resource, async `ILinkUrlResolver`, formatter reshaping, default `UrlStyle` →
    `PathRelative`) are all breaking and interlock with features F2/F4 — do them
    together so there's a single migration.
-5. **Ecosystem is adoption-driven, not correctness-driven.** If growth is the goal,
+4. **Ecosystem is adoption-driven, not correctness-driven.** If growth is the goal,
    HAL Explorer middleware (E1) + a `dotnet new cairn-api` template (E2) are the
    highest-impact; Siren (E3) and `Cairn.Mcp` (E8) are differentiators but larger bets.
