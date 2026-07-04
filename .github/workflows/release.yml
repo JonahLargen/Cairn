@@ -17,6 +17,9 @@ jobs:
     permissions:
       contents: write # create the GitHub release
       id-token: write # GitHub OIDC token for NuGet.org Trusted Publishing
+    outputs:
+      # SHA-256 digests of every release asset, consumed by the provenance job below.
+      hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -45,6 +48,13 @@ jobs:
 
       - name: Pack
         run: dotnet pack Cairn.slnx --configuration Release --no-build --output artifacts
+
+      # Record the digests of the exact bytes we are about to publish; the provenance job
+      # signs these so consumers can verify an asset is the untampered output of this run.
+      - name: Compute artifact hashes
+        id: hash
+        working-directory: artifacts
+        run: echo "hashes=$(sha256sum -- *.nupkg *.snupkg | base64 -w0)" >> "$GITHUB_OUTPUT"
 
       # Trusted Publishing: exchange this run's OIDC token for a short-lived (1h) NuGet.org
       # API key — no stored secret to rotate. Requires a trusted publishing policy on
@@ -83,3 +93,23 @@ jobs:
             --verify-tag \
             --generate-notes \
             $prerelease
+
+  # SLSA build provenance (OpenSSF Scorecard Signed-Releases): a signed in-toto attestation
+  # stating that this repo's Release workflow, at this commit, produced assets with the
+  # digests recorded above. Generated in an isolated reusable workflow so the signing
+  # identity cannot be influenced by our build steps, then attached to the GitHub release
+  # as multiple.intoto.jsonl. Verify with slsa-verifier (see RELEASING.md).
+  provenance:
+    name: Generate SLSA provenance
+    needs: release
+    permissions:
+      actions: read # read the workflow run to build the provenance claims
+      id-token: write # sign the attestation via Sigstore keyless signing
+      contents: write # attach the provenance file to the GitHub release
+    # SLSA generators must be referenced by tag, not commit SHA — the generator verifies its
+    # own tag at runtime (and Scorecard's Pinned-Dependencies check exempts it accordingly).
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.release.outputs.hashes }}
+      upload-assets: true
+      upload-tag-name: ${{ github.ref_name }}
