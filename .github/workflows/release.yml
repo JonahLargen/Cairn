@@ -16,10 +16,8 @@ jobs:
     # (OpenSSF Scorecard Token-Permissions: least privilege at top level).
     permissions:
       contents: write # create the GitHub release
-      id-token: write # GitHub OIDC token for NuGet.org Trusted Publishing
-    outputs:
-      # SHA-256 digests of every release asset, consumed by the provenance job below.
-      hashes: ${{ steps.hash.outputs.hashes }}
+      id-token: write # GitHub OIDC token for NuGet.org Trusted Publishing + Sigstore keyless signing
+      attestations: write # store the build provenance attestation
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -49,12 +47,31 @@ jobs:
       - name: Pack
         run: dotnet pack Cairn.slnx --configuration Release --no-build --output artifacts
 
-      # Record the digests of the exact bytes we are about to publish; the provenance job
-      # signs these so consumers can verify an asset is the untampered output of this run.
-      - name: Compute artifact hashes
-        id: hash
-        working-directory: artifacts
-        run: echo "hashes=$(sha256sum -- *.nupkg *.snupkg | base64 -w0)" >> "$GITHUB_OUTPUT"
+      # SLSA build provenance (OpenSSF Scorecard Signed-Releases): a signed in-toto attestation
+      # stating that this repo's Release workflow, at this commit, built the exact package bytes
+      # below. Signing is keyless (Sigstore, via this run's OIDC identity) and the attestation is
+      # stored in GitHub's attestation store — verify with `gh attestation verify` (see RELEASING.md).
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          # Storage records are an organization-repo feature (and need artifact-metadata: write);
+          # disable explicitly rather than rely on the default-on behavior skipping gracefully.
+          create-storage-record: false
+
+      # Also attach the provenance to the release for offline verification:
+      # multiple.intoto.jsonl is the DSSE-wrapped in-toto statement itself;
+      # multiple.sigstore.json is the full Sigstore bundle `gh attestation verify --bundle` accepts.
+      - name: Stage provenance release assets
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          # -e fails the step if the bundle has no dsseEnvelope, instead of shipping "null".
+          jq -ce '.dsseEnvelope' "$BUNDLE_PATH" > artifacts/multiple.intoto.jsonl
+          cp "$BUNDLE_PATH" artifacts/multiple.sigstore.json
 
       # Trusted Publishing: exchange this run's OIDC token for a short-lived (1h) NuGet.org
       # API key — no stored secret to rotate. Requires a trusted publishing policy on
@@ -88,28 +105,9 @@ jobs:
             *-*) prerelease="--prerelease" ;;
           esac
           gh release create "$tag" artifacts/*.nupkg artifacts/*.snupkg \
+            artifacts/multiple.intoto.jsonl artifacts/multiple.sigstore.json \
             --repo "$GITHUB_REPOSITORY" \
             --title "$tag" \
             --verify-tag \
             --generate-notes \
             $prerelease
-
-  # SLSA build provenance (OpenSSF Scorecard Signed-Releases): a signed in-toto attestation
-  # stating that this repo's Release workflow, at this commit, produced assets with the
-  # digests recorded above. Generated in an isolated reusable workflow so the signing
-  # identity cannot be influenced by our build steps, then attached to the GitHub release
-  # as multiple.intoto.jsonl. Verify with slsa-verifier (see RELEASING.md).
-  provenance:
-    name: Generate SLSA provenance
-    needs: release
-    permissions:
-      actions: read # read the workflow run to build the provenance claims
-      id-token: write # sign the attestation via Sigstore keyless signing
-      contents: write # attach the provenance file to the GitHub release
-    # SLSA generators must be referenced by tag, not commit SHA — the generator verifies its
-    # own tag at runtime (and Scorecard's Pinned-Dependencies check exempts it accordingly).
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
-    with:
-      base64-subjects: ${{ needs.release.outputs.hashes }}
-      upload-assets: true
-      upload-tag-name: ${{ github.ref_name }}

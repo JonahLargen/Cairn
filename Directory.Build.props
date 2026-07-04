@@ -2,6 +2,12 @@
 
   <!-- Settings shared by every project in the repository. -->
   <PropertyGroup>
+    <!-- Central Package Management is on for the whole repo. The switch is declared here (not only
+         in Directory.Packages.props, which redeclares it) because OpenSSF Scorecard's
+         Pinned-Dependencies check reads the first Directory.*.props file in tree order — this one —
+         to decide whether NuGet restores are centrally managed. The exact [x.y.z] version pins
+         themselves live in Directory.Packages.props. -->
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
