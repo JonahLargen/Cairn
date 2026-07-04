@@ -16,6 +16,8 @@ The delegate receives the endpoint's value (result unions and `TypedResults.Ok(.
 
 A conditional `GET` that short-circuits to 304 is a *healthy* outcome: Cairn recognizes it and does not count the response's computed hypermedia as [never emitted](diagnostics.md).
 
+`WithETag` also leaves endpoint metadata the [OpenAPI integrations](openapi.md) pick up, documenting an `ETag` response header on each success response and a `304 Not Modified` response — so a generated client knows to send `If-None-Match` and handle the 304.
+
 ## Preconditions on writes: `CairnPreconditions.Evaluate`
 
 For updates, evaluate the request's conditional headers against the resource's current tag before applying the change:
@@ -66,6 +68,8 @@ emits the standard deprecation headers on every response from the endpoint:
 - `Link: <url>; rel="deprecation"` — when `link` is given.
 
 `WithDeprecation` declares endpoint metadata rather than an endpoint filter; the headers are emitted by a middleware `AddCairn` auto-registers at the front of the pipeline. That is what lets it work on MVC controller endpoints too — `app.MapControllers().WithDeprecation(...)` deprecates the whole group. Because the middleware comes from `AddCairn`, calling `WithDeprecation` without `AddCairn` would be a silent no-op — Cairn logs a once-per-host warning if it detects that.
+
+The same metadata drives the [OpenAPI integrations](openapi.md): a `WithDeprecation` endpoint is marked `deprecated: true` in the document, so client generators and Swagger UI flag it — no header inspection required.
 
 ## Related
 
