@@ -30,10 +30,11 @@ public class UriTemplateBranchTests
     }
 
     [Theory]
-    [InlineData("zz")]   // not a number at all
-    [InlineData("")]     // ":" with no length
-    [InlineData("0")]    // zero is outside the 1–9999 range
-    [InlineData("01")]   // a leading zero is not a valid max-length
+    [InlineData("zz")]      // not a number at all
+    [InlineData("")]        // ":" with no length
+    [InlineData("0")]       // zero is outside the 1–9999 range
+    [InlineData("01")]      // a leading zero is not a valid max-length
+    [InlineData("12345")]   // more than four digits exceeds the 1–9999 range
     public async Task A_malformed_prefix_modifier_is_a_processing_error(string modifier)
     {
         var (client, _) = NewRecordingClient();

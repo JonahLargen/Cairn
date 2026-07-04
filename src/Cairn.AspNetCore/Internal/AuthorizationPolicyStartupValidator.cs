@@ -11,7 +11,7 @@ namespace Cairn.AspNetCore.Internal;
 /// registered. Every policy name is known once the configs are compiled, so a typo should surface as a clear
 /// startup error — not as a 500 on the first request that happens to build the gated link.
 /// </summary>
-internal sealed class AuthorizationPolicyStartupValidator(IServiceProvider services, CairnOptions options) : IHostedService
+internal sealed class AuthorizationPolicyStartupValidator(IServiceProvider services, CairnOptions options, ILoggerFactory loggerFactory) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -82,7 +82,7 @@ internal sealed class AuthorizationPolicyStartupValidator(IServiceProvider servi
             }
             catch (Exception ex)
             {
-                scoped.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore").LogWarning(
+                loggerFactory.CreateLogger("Cairn.AspNetCore").LogWarning(
                     ex,
                     "Cairn: startup validation of authorization policy '{Policy}' was skipped because IAuthorizationPolicyProvider.GetPolicyAsync threw. " +
                     "If the provider resolves policies dynamically after boot, disable this check with CairnOptions.ValidateAuthorizationPolicies = false.",

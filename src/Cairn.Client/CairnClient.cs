@@ -317,8 +317,10 @@ public sealed class CairnClient
 
             // HAL-FORMS step (HTML5 step semantics): the value must be an integral number of steps from the
             // base — the field's min, or 0. Compared with a small relative tolerance so binary floating-point
-            // rounding (0.1 + 0.2) does not flag an otherwise-valid value.
-            if (field.Step is { } step && step > 0 && double.IsFinite(number))
+            // rounding (0.1 + 0.2) does not flag an otherwise-valid value. A non-finite value (from a "NaN" /
+            // "Infinity" string) yields a NaN comparison that is never > the tolerance, so it raises no step
+            // error without a separate finiteness guard.
+            if (field.Step is { } step && step > 0)
             {
                 var steps = (number - (field.Min ?? 0)) / step;
                 if (Math.Abs(steps - Math.Round(steps)) > 1e-9 * Math.Max(1, Math.Abs(steps)))

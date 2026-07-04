@@ -35,7 +35,8 @@ public sealed class RouteNameCodeFixProvider : CodeFixProvider
                 continue;
             }
 
-            if (FindLiteral(root, diagnostic.Location.SourceSpan) is not { } literal)
+            // root is non-null for a C# code-fix document (see FindLiteral).
+            if (FindLiteral(root!, diagnostic.Location.SourceSpan) is not { } literal)
             {
                 continue;
             }
@@ -49,13 +50,11 @@ public sealed class RouteNameCodeFixProvider : CodeFixProvider
         }
     }
 
-    private static LiteralExpressionSyntax? FindLiteral(SyntaxNode? root, Microsoft.CodeAnalysis.Text.TextSpan span)
+    private static LiteralExpressionSyntax? FindLiteral(SyntaxNode root, Microsoft.CodeAnalysis.Text.TextSpan span)
     {
-        var node = root?.FindNode(span, getInnermostNodeForTie: true);
-        if (node is null)
-        {
-            return null;
-        }
+        // A C# code fix always runs on a document with a syntax root, and the diagnostic span is always within
+        // that tree, so FindNode returns a node (the root at worst) — never null.
+        var node = root.FindNode(span, getInnermostNodeForTie: true);
 
         // The common case: the diagnostic points straight at the string literal argument.
         if (node is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))

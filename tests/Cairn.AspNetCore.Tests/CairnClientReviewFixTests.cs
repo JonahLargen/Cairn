@@ -87,6 +87,42 @@ public class CairnClientReviewFixTests
     }
 
     [Fact]
+    public async Task A_zero_or_absent_step_imposes_no_step_check()
+    {
+        var (client, _) = NewRecordingClient();
+
+        // A non-positive step is ignored (no granularity constraint), so any value passes the step rule.
+        var zero = await client.SubmitAsync(Update, [new AffordanceField("qty") { Step = 0 }], new { qty = 7 });
+        Assert.True(zero.IsSuccess);
+    }
+
+    [Fact]
+    public async Task A_step_mismatch_without_a_min_reports_from_zero_alongside_other_errors()
+    {
+        var (client, _) = NewRecordingClient();
+
+        // No Min, so the step base is 0 and the message omits "starting from"; the Max violation also fires,
+        // so the step error appends to an already-started error list rather than starting a fresh one.
+        var field = new AffordanceField("qty") { Max = 10, Step = 3 };
+        var error = await Assert.ThrowsAsync<ArgumentException>(
+            () => client.SubmitAsync(Update, [field], new { qty = 11 }));
+
+        Assert.Contains("at most 10", error.Message);
+        Assert.Contains("must be a multiple of 3.", error.Message);
+    }
+
+    [Fact]
+    public async Task A_whitespace_only_etag_is_treated_as_absent()
+    {
+        var handler = new StubHandler("{}", response => response.Headers.TryAddWithoutValidation("ETag", "   "));
+        var client = new CairnClient(new HttpClient(handler) { BaseAddress = new Uri("http://localhost") });
+
+        // A header that is present but blank carries no validator, so the surfaced ETag is null.
+        var resource = (await client.GetAsync<System.Text.Json.JsonElement>("/things/1")).EnsureSuccess();
+        Assert.Null(resource.ETag);
+    }
+
+    [Fact]
     public async Task An_action_with_an_empty_method_is_read_as_get()
     {
         const string body = """

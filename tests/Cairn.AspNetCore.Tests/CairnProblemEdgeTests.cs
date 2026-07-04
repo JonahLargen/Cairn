@@ -107,6 +107,31 @@ public class CairnProblemEdgeTests
         Assert.Equal(3, mirrors.GetArrayLength());
     }
 
+    [Fact]
+    public async Task Problem_links_resolve_from_explicit_uris_without_cairn_registered()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        // No AddCairn: there is no ILinkUrlResolver and no CairnOptions.
+
+        await using var app = builder.Build();
+        app.MapGet("/bare", () => CairnResults.Problem(409, title: "Conflict")
+            .WithLink("about", "https://errors.example/about")     // an explicit URI is used as-is
+            .WithLink("home", LinkTarget.Route("NoSuchRoute"))     // a route target can't resolve without Cairn
+            .WithAction("retry", "https://errors.example/retry")); // an explicit action likewise resolves
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var root = JsonDocument.Parse(await (await client.GetAsync("/bare")).Content.ReadAsStringAsync()).RootElement;
+
+        // Explicit URIs survive; the route target has no resolver, so it degrades away (Lax is the default
+        // even with no CairnOptions registered).
+        var links = root.GetProperty("_links");
+        Assert.Equal("https://errors.example/about", links.GetProperty("about").GetProperty("href").GetString());
+        Assert.False(links.TryGetProperty("home", out _));
+        Assert.Equal("https://errors.example/retry", root.GetProperty("_actions").GetProperty("retry").GetProperty("href").GetString());
+    }
+
     private static async Task<WebApplication> StartAsync(Action<WebApplication> endpoints)
     {
         var builder = WebApplication.CreateBuilder();

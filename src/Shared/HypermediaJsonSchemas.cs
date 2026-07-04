@@ -169,14 +169,11 @@ internal static class HypermediaJsonSchemas
     // configured type but never opted in projects no links, so it negotiates no HAL media types.
     private static bool OptedIntoLinks(ApiDescription description)
     {
-        if (description.ActionDescriptor?.EndpointMetadata is not { } metadata)
+        // ActionDescriptor and its EndpointMetadata are non-null for every ApiExplorer description, and
+        // endpoint metadata never contains null entries, so no defensive guards are needed here.
+        foreach (var item in description.ActionDescriptor.EndpointMetadata)
         {
-            return false;
-        }
-
-        foreach (var item in metadata)
-        {
-            if (item is not null && ImplementsLinksMarker(item.GetType()))
+            if (ImplementsLinksMarker(item.GetType()))
             {
                 return true;
             }
