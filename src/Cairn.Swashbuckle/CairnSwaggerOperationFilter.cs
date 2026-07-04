@@ -6,16 +6,23 @@ using Swashbuckle.AspNetCore.SwaggerGen;
 namespace Cairn.Swashbuckle;
 
 /// <summary>
-/// Adds the hypermedia media types an opted-in endpoint can negotiate (<c>application/hal+json</c> and
-/// <c>application/prs.hal-forms+json</c>) to each response that carries a Cairn-linked type, reusing the
-/// <c>application/json</c> entry's schema. Takes the service provider rather than
+/// Documents an opted-in endpoint's hypermedia on its operation: the per-format schemas of the media types it
+/// can negotiate (<c>application/hal+json</c> and <c>application/prs.hal-forms+json</c>) on each response that
+/// carries a Cairn-linked type, an <c>ETag</c> header and <c>304</c> response when it uses <c>WithETag</c>, and
+/// <c>deprecated: true</c> when it uses <c>WithDeprecation</c>. Takes the service provider rather than
 /// <see cref="ILinkConfigProvider"/> directly so generation degrades to a no-op — instead of failing DI
-/// activation — when Cairn itself is not registered (<c>AddCairn</c> was not called).
+/// activation — when Cairn itself is not registered (<c>AddCairn</c> was not called). The ETag and deprecation
+/// markers do not depend on the link provider.
 /// </summary>
 internal sealed class CairnSwaggerOperationFilter(IServiceProvider services) : IOperationFilter
 {
     public void Apply(OpenApiOperation operation, OperationFilterContext context)
     {
+        // Deprecation and ETag are endpoint conventions (WithDeprecation/WithETag) independent of the link
+        // configuration, so they are documented whether or not AddCairn registered the link provider.
+        HypermediaJsonSchemas.MarkDeprecated(context.ApiDescription, operation);
+        HypermediaJsonSchemas.DocumentETag(context.ApiDescription, operation);
+
         if (services.GetService<ILinkConfigProvider>() is { } provider)
         {
             HypermediaJsonSchemas.AddNegotiatedMediaTypes(context.ApiDescription, operation, provider, services.GetService<IPaginationEnvelopeProvider>());

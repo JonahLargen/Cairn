@@ -21,6 +21,28 @@ public interface ILinkConfigProvider
 }
 
 /// <summary>
+/// Describes an embedded-resource relation a link configuration declares, so document generators
+/// (Cairn.OpenApi, Cairn.Swashbuckle) can type the <c>_embedded</c> schema with the child resource type
+/// rather than an untyped object.
+/// </summary>
+/// <param name="Relation">The relation the child resource is embedded under.</param>
+/// <param name="ResourceType">The CLR type of the embedded child resource (the <c>TChild</c> of <c>Embed</c>/<c>EmbedMany</c>).</param>
+/// <param name="Single">Whether the relation embeds a single resource (an object) rather than a collection (an array).</param>
+public sealed record EmbeddedResourceSchema(LinkRelation Relation, Type ResourceType, bool Single);
+
+/// <summary>
+/// A compiled config that can report the embedded-resource relations it declares. Document generators query
+/// this (over <see cref="ICompiledLinkConfig"/>) to type the <c>_embedded</c> schema; the runtime wire never
+/// needs it. Kept separate from <see cref="ICompiledLinkConfig"/> so consumers that only build links are
+/// unaffected.
+/// </summary>
+public interface IEmbeddedResourceReportingConfig
+{
+    /// <summary>The embedded-resource relations declared by the configuration, in declaration order.</summary>
+    IReadOnlyList<EmbeddedResourceSchema> EmbeddedResources { get; }
+}
+
+/// <summary>
 /// An in-memory registry of link configurations keyed by resource type. Lookup honors inheritance: a
 /// resource type with no config of its own uses the config of its nearest registered base class (so a
 /// <c>LinkConfig&lt;OrderDto&gt;</c> also covers <c>RushOrderDto : OrderDto</c>). Interfaces are not

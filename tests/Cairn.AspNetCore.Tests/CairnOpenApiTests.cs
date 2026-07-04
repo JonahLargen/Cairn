@@ -7,6 +7,7 @@ using Cairn.AspNetCore;
 using Cairn.OpenApi;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -16,14 +17,17 @@ namespace Cairn.AspNetCore.Tests;
 public class CairnOpenApiTests
 {
     [Fact]
-    public async Task Document_includes_links_and_actions_on_linked_types()
+    public async Task Document_includes_the_format_neutral_core_on_linked_types()
     {
         using var document = await GetDocumentAsync();
         var properties = SchemaProperties(document, "DocOrder");
 
+        // The shared component carries only the format-neutral core — _links and _embedded, the two sections
+        // every wire format emits. The format-specific _actions/_templates are documented per media type.
         Assert.True(properties.TryGetProperty("_links", out var links));
-        Assert.True(properties.TryGetProperty("_actions", out _));
         Assert.True(properties.TryGetProperty("_embedded", out _));
+        Assert.False(properties.TryGetProperty("_actions", out _), "_actions belongs on the default-JSON media type, not the component");
+        Assert.False(properties.TryGetProperty("_templates", out _), "_templates belongs on the HAL-FORMS media type, not the component");
         Assert.Equal("object", links.GetProperty("type").GetString());
 
         // The link object documents the full set of link members Cairn can emit.
@@ -32,6 +36,20 @@ public class CairnOpenApiTests
         {
             Assert.True(linkObject.TryGetProperty(member, out _), $"link schema missing '{member}'");
         }
+    }
+
+    [Fact]
+    public async Task Default_json_response_documents_the_actions_shape()
+    {
+        using var document = await GetDocumentAsync();
+
+        // The default JSON response extends the component with the _actions section via allOf.
+        var actions = AddedSection(MediaSchema(document, "/orders/{id}", "200", "application/json"), "_actions");
+        Assert.Equal("object", actions.GetProperty("type").GetString());
+        var action = actions.GetProperty("additionalProperties").GetProperty("properties");
+        Assert.True(action.TryGetProperty("href", out _));
+        Assert.True(action.TryGetProperty("method", out _));
+        Assert.True(action.TryGetProperty("title", out _));
     }
 
     [Fact]
@@ -52,9 +70,9 @@ public class CairnOpenApiTests
     public async Task Templates_schema_documents_the_hal_forms_shape()
     {
         using var document = await GetDocumentAsync();
-        var templates = SchemaProperties(document, "DocOrder").GetProperty("_templates");
+        var templates = AddedSection(MediaSchema(document, "/orders/{id}", "200", "application/prs.hal-forms+json"), "_templates");
 
-        // _templates is a map of template name -> HAL-FORMS template.
+        // _templates is a map of template name -> HAL-FORMS template, on the HAL-FORMS media type.
         Assert.Equal("object", templates.GetProperty("type").GetString());
         var template = templates.GetProperty("additionalProperties").GetProperty("properties");
         foreach (var member in new[] { "method", "target", "title", "contentType", "properties" })
@@ -77,7 +95,29 @@ public class CairnOpenApiTests
     }
 
     [Fact]
-    public async Task Linked_responses_document_the_negotiable_hal_media_types()
+    public async Task Embedded_schema_is_typed_with_the_declared_child_resource()
+    {
+        using var document = await GetDocumentAsync();
+        var embedded = SchemaProperties(document, "DocParent").GetProperty("_embedded");
+
+        // Embed("child", ...) types the relation with the child resource's own schema; EmbedMany("watchers", ...)
+        // types it as an array of that schema. Both reference the child component the child's schema produces.
+        Assert.Equal("object", embedded.GetProperty("type").GetString());
+        var relations = embedded.GetProperty("properties");
+        Assert.Equal("#/components/schemas/DocChild", relations.GetProperty("child").GetProperty("$ref").GetString());
+
+        var watchers = relations.GetProperty("watchers");
+        Assert.Equal("array", watchers.GetProperty("type").GetString());
+        Assert.Equal("#/components/schemas/DocChild", watchers.GetProperty("items").GetProperty("$ref").GetString());
+
+        // A configured type with no declared embeds keeps the untyped _embedded object.
+        var orderEmbedded = SchemaProperties(document, "DocOrder").GetProperty("_embedded");
+        Assert.True(orderEmbedded.TryGetProperty("additionalProperties", out _));
+        Assert.False(orderEmbedded.TryGetProperty("properties", out _));
+    }
+
+    [Fact]
+    public async Task Linked_responses_document_a_per_format_schema_per_media_type()
     {
         using var document = await GetDocumentAsync();
         var content = document.RootElement
@@ -88,9 +128,17 @@ public class CairnOpenApiTests
         Assert.True(content.TryGetProperty("application/hal+json", out var hal));
         Assert.True(content.TryGetProperty("application/prs.hal-forms+json", out var halForms));
 
-        // The negotiated media types reuse the application/json schema.
-        Assert.Equal(json.GetProperty("schema").GetRawText(), hal.GetProperty("schema").GetRawText());
-        Assert.Equal(json.GetProperty("schema").GetRawText(), halForms.GetProperty("schema").GetRawText());
+        // Each format documents what it emits: default JSON adds _actions, HAL-FORMS adds _templates, and HAL
+        // is the bare component (only the _links/_embedded core). All three reference the same component.
+        Assert.True(HasAddedSection(json.GetProperty("schema"), "_actions"));
+        Assert.False(HasAddedSection(json.GetProperty("schema"), "_templates"));
+        Assert.True(HasAddedSection(halForms.GetProperty("schema"), "_templates"));
+        Assert.False(HasAddedSection(halForms.GetProperty("schema"), "_actions"));
+
+        // HAL emits neither affordances nor templates — it is the component reference verbatim.
+        Assert.Equal("#/components/schemas/DocOrder", hal.GetProperty("schema").GetProperty("$ref").GetString());
+        Assert.Equal("#/components/schemas/DocOrder", ComponentRef(json.GetProperty("schema")));
+        Assert.Equal("#/components/schemas/DocOrder", ComponentRef(halForms.GetProperty("schema")));
     }
 
     [Fact]
@@ -231,11 +279,51 @@ public class CairnOpenApiTests
         var links = properties.GetProperty("_links");
         Assert.False(links.TryGetProperty("additionalProperties", out var additional) && additional.TryGetProperty("anyOf", out _));
 
-        // The non-colliding hypermedia properties are still documented.
-        Assert.True(properties.TryGetProperty("_actions", out var actions));
-        Assert.True(actions.GetProperty("additionalProperties").GetProperty("properties").TryGetProperty("href", out _));
+        // The non-colliding core property is still documented on the component.
         Assert.True(properties.TryGetProperty("_embedded", out _));
-        Assert.True(properties.TryGetProperty("_templates", out _));
+
+        // The format-specific sections are documented on the negotiated media types, not the component.
+        var actions = AddedSection(MediaSchema(document, "/clash", "200", "application/json"), "_actions");
+        Assert.True(actions.GetProperty("additionalProperties").GetProperty("properties").TryGetProperty("href", out _));
+        Assert.True(HasAddedSection(MediaSchema(document, "/clash", "200", "application/prs.hal-forms+json"), "_templates"));
+    }
+
+    [Fact]
+    public async Task Deprecated_endpoint_is_marked_deprecated_in_the_document()
+    {
+        using var document = await GetDocumentAsync();
+
+        // WithDeprecation sets deprecated: true; an endpoint without it carries no (or false) flag.
+        Assert.True(Operation(document, "/deprecated/{id}").GetProperty("deprecated").GetBoolean());
+        var plain = Operation(document, "/plain");
+        Assert.False(plain.TryGetProperty("deprecated", out var flag) && flag.GetBoolean());
+    }
+
+    [Fact]
+    public async Task Etag_endpoint_documents_the_etag_header_and_304_response()
+    {
+        using var document = await GetDocumentAsync();
+        var responses = Operation(document, "/etag/{id}").GetProperty("responses");
+
+        // WithETag documents an ETag header on the 2xx response and a 304 Not Modified response.
+        var etag = responses.GetProperty("200").GetProperty("headers").GetProperty("ETag");
+        Assert.Equal("string", etag.GetProperty("schema").GetProperty("type").GetString());
+        Assert.True(responses.TryGetProperty("304", out _));
+
+        // An endpoint without WithETag documents neither.
+        var plain = Operation(document, "/plain").GetProperty("responses");
+        Assert.False(plain.GetProperty("200").TryGetProperty("headers", out var headers) && headers.TryGetProperty("ETag", out _));
+        Assert.False(plain.TryGetProperty("304", out _));
+    }
+
+    [Fact]
+    public async Task HypermediaProblem_in_a_result_union_documents_the_problem_json_response()
+    {
+        using var document = await GetDocumentAsync();
+        var responses = Operation(document, "/problem/{id}").GetProperty("responses");
+
+        // HypermediaProblem's IEndpointMetadataProvider contributes an application/problem+json response.
+        Assert.True(responses.GetProperty("500").GetProperty("content").TryGetProperty("application/problem+json", out _));
     }
 
     [Fact]
@@ -265,6 +353,8 @@ public class CairnOpenApiTests
         builder.Services.AddCairn(o => o
             .AddLinks(new DocOrderLinks())
             .AddLinks(new DocClashOrderLinks())
+            .AddLinks(new DocParentLinks())
+            .AddLinks(new DocChildLinks())
             .AddPaging<DocCustomPage>(p => new PagedView(p.Records, p.PageNo, p.Size, p.Total))
             .AddCursorPaging<DocCustomFeed>(f => new CursorView(f.Entries, f.After, f.Before)));
         builder.Services.AddOpenApi(o => o.AddCairnHypermedia());
@@ -279,17 +369,27 @@ public class CairnOpenApiTests
         app.MapGet("/orders/cursor", () => TypedResults.Ok(new CursorPage<DocOrder>([new(1)], Next: "n"))).WithLinks();
         app.MapGet("/orders/adapted-paged", () => TypedResults.Ok(new DocCustomPage([new(1)], 1, 10, 25))).WithLinks();
         app.MapGet("/orders/adapted-cursor", () => TypedResults.Ok(new DocCustomFeed([new(1)], "a", null))).WithLinks();
+        app.MapGet("/parent/{id:int}", (int id) => TypedResults.Ok(new DocParent(id, new DocChild(1), [new(2)]))).WithLinks();
         app.MapGet("/clash", () => TypedResults.Ok(new DocClashOrder(1, new Dictionary<string, string>()))).WithLinks();
         app.MapGet("/plain", () => TypedResults.Ok(new DocPlainNote("hi")));
         // A configured type returned by an endpoint that never opted in via WithLinks(): it projects no
         // hypermedia at runtime, so the document must not advertise the negotiable HAL media types.
         app.MapGet("/orders/unlinked", () => TypedResults.Ok(new DocOrder(9)));
+        // WithETag/WithDeprecation are endpoint conventions independent of links, documented on the operation.
+        app.MapGet("/etag/{id:int}", (int id) => TypedResults.Ok(new DocPlainNote($"n{id}"))).WithETag((DocPlainNote n) => n.Text);
+        app.MapGet("/deprecated/{id:int}", (int id) => TypedResults.Ok(new DocPlainNote($"n{id}"))).WithDeprecation();
+        // A HypermediaProblem in the result union documents the application/problem+json response.
+        app.MapGet("/problem/{id:int}", Results<Ok<DocOrder>, HypermediaProblem> (int id)
+            => id > 0 ? TypedResults.Ok(new DocOrder(id)) : new HypermediaProblem(404)).WithName("DocProblem");
 
         await app.StartAsync();
         using var client = app.GetTestClient();
 
         return JsonDocument.Parse(await client.GetStringAsync("/openapi/v1.json"));
     }
+
+    private static JsonElement Operation(JsonDocument document, string path)
+        => document.RootElement.GetProperty("paths").GetProperty(path).GetProperty("get");
 
     private static JsonElement SchemaProperties(JsonDocument document, string schema)
         => document.RootElement
@@ -306,7 +406,32 @@ public class CairnOpenApiTests
     private static JsonElement LinkObjectOf(JsonElement links)
         => links.GetProperty("additionalProperties").GetProperty("anyOf")[0].GetProperty("properties");
 
+    // The schema on a response media type (GET endpoints).
+    private static JsonElement MediaSchema(JsonDocument document, string path, string status, string mediaType)
+        => document.RootElement.GetProperty("paths").GetProperty(path).GetProperty("get")
+            .GetProperty("responses").GetProperty(status).GetProperty("content").GetProperty(mediaType).GetProperty("schema");
+
+    // A per-format schema extends the component via allOf[{$ref component}, {properties: {section}}]; returns
+    // the added section's schema (e.g. _actions or _templates).
+    private static JsonElement AddedSection(JsonElement schema, string section)
+        => schema.GetProperty("allOf")[1].GetProperty("properties").GetProperty(section);
+
+    private static bool HasAddedSection(JsonElement schema, string section)
+        => schema.TryGetProperty("allOf", out var allOf)
+            && allOf[1].GetProperty("properties").TryGetProperty(section, out _);
+
+    // The component $ref a per-format allOf schema (or a bare $ref) references.
+    private static string ComponentRef(JsonElement schema)
+        => schema.TryGetProperty("allOf", out var allOf)
+            ? allOf[0].GetProperty("$ref").GetString()!
+            : schema.GetProperty("$ref").GetString()!;
+
     private sealed record DocOrder(int Id);
+
+    // A configured parent that embeds a single child and a collection of children, for the typed _embedded shape.
+    private sealed record DocParent(int Id, DocChild Child, IReadOnlyList<DocChild> Watchers);
+
+    private sealed record DocChild(int Id);
 
     private sealed record DocPlainNote(string Text);
 
@@ -322,6 +447,22 @@ public class CairnOpenApiTests
     {
         public override void Configure(ILinkBuilder<DocOrder> builder)
             => builder.Self(order => LinkTarget.Route("DocOrderById", new { id = order.Id }));
+    }
+
+    private sealed class DocParentLinks : LinkConfig<DocParent>
+    {
+        public override void Configure(ILinkBuilder<DocParent> builder)
+        {
+            builder.Self(p => LinkTarget.Uri($"/parent/{p.Id}"));
+            builder.Embed("child", p => p.Child);
+            builder.EmbedMany("watchers", p => p.Watchers);
+        }
+    }
+
+    private sealed class DocChildLinks : LinkConfig<DocChild>
+    {
+        public override void Configure(ILinkBuilder<DocChild> builder)
+            => builder.Self(c => LinkTarget.Uri($"/child/{c.Id}"));
     }
 
     private sealed class DocClashOrderLinks : LinkConfig<DocClashOrder>
