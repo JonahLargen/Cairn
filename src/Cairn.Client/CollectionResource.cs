@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace Cairn.Client;
 
@@ -76,6 +77,89 @@ public sealed class CollectionResource<TItem>
         => Links.TryGetValue(relation, out var link)
             ? _client.FollowCollectionAsync<TItem>(link, variables, itemsProperty, cancellationToken)
             : throw new InvalidOperationException($"The collection has no '{relation}' link.");
+
+    /// <summary>
+    /// Streams every item across pages as an asynchronous sequence: yields this page's items, then follows the
+    /// <paramref name="relation"/> link (default <c>next</c>) to the following page and yields its items, and so
+    /// on until a page carries no such link — walking the collection to exhaustion. Each page is fetched lazily,
+    /// only as the enumeration reaches it.
+    /// </summary>
+    /// <param name="relation">The pagination relation to walk (default <c>next</c>).</param>
+    /// <param name="itemsProperty">The array property naming the items on each page's envelope (default <c>items</c>); a bare JSON array is read directly.</param>
+    /// <param name="maxItems">An optional cap on the total number of items yielded; enumeration stops once this many have been produced, even mid-page. <see langword="null"/> (the default) walks without an item cap.</param>
+    /// <param name="maxPages">An optional cap on the total number of pages read, counting the page this is called on; <c>1</c> yields only this page and never follows the link. <see langword="null"/> (the default) walks without a page cap.</param>
+    /// <param name="cancellationToken">A token observed while fetching each following page.</param>
+    /// <remarks>
+    /// A templated pagination link is followed with no variables, so its optional expressions collapse per
+    /// RFC 6570 (matching <see cref="FollowAsync(string, string, CancellationToken)"/>). With neither cap set the
+    /// walk trusts the server to end the chain; set <paramref name="maxPages"/> or <paramref name="maxItems"/> to
+    /// bound a walk against an untrusted or misbehaving server (for example one whose <c>next</c> cycles). A page
+    /// fetch that returns an HTTP error status throws <see cref="CairnClientException"/> from the enumeration —
+    /// the failing page has no items to yield and no link to continue from.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="relation"/> or <paramref name="itemsProperty"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxItems"/> or <paramref name="maxPages"/> is less than 1.</exception>
+    public IAsyncEnumerable<Resource<TItem>> EnumerateItemsAsync(
+        string relation = "next",
+        string itemsProperty = "items",
+        int? maxItems = null,
+        int? maxPages = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Validate eagerly: an iterator method defers its whole body to the first MoveNextAsync, so a caller that
+        // passes a bad argument must be told when it calls, not when it starts enumerating.
+        ArgumentNullException.ThrowIfNull(relation);
+        ArgumentNullException.ThrowIfNull(itemsProperty);
+        if (maxItems is { } itemCap)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(itemCap, nameof(maxItems));
+        }
+
+        if (maxPages is { } pageCap)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageCap, nameof(maxPages));
+        }
+
+        return IterateAsync(relation, itemsProperty, maxItems, maxPages, cancellationToken);
+    }
+
+    private async IAsyncEnumerable<Resource<TItem>> IterateAsync(
+        string relation,
+        string itemsProperty,
+        int? maxItems,
+        int? maxPages,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var page = this;
+        var yielded = 0;
+        var pagesRead = 1;   // the page this was called on is already in hand.
+
+        while (true)
+        {
+            foreach (var item in page.Items)
+            {
+                if (maxItems is { } cap && yielded >= cap)
+                {
+                    yield break;
+                }
+
+                yield return item;
+                yielded++;
+            }
+
+            // Stop before fetching another page when the item cap is exactly met, the page cap is reached, or the
+            // current page exposes no link to follow — so a walk that ends on a page boundary spends no extra request.
+            if ((maxItems is { } itemCap && yielded >= itemCap)
+                || (maxPages is { } pageCap && pagesRead >= pageCap)
+                || !page.HasLink(relation))
+            {
+                yield break;
+            }
+
+            page = (await page.FollowAsync(relation, itemsProperty, cancellationToken).ConfigureAwait(false)).EnsureSuccess();
+            pagesRead++;
+        }
+    }
 
     /// <summary>Invokes a collection-level affordance, optionally with a request body and an <c>ifMatch</c> ETag.</summary>
     /// <exception cref="InvalidOperationException">The collection has no affordance with that name.</exception>
