@@ -112,7 +112,17 @@ public interface ILinkSpec<T>
     /// </summary>
     /// <param name="policy">The policy name, or the empty string for the host's default policy.</param>
     /// <param name="resource">Selects the object the policy is evaluated against.</param>
-    ILinkSpec<T> RequireAuthorization(string policy, Func<T, object?> resource);
+    /// <remarks>
+    /// A default method (rather than an abstract one, which would break existing implementers) expressed over
+    /// <see cref="When(Func{T, LinkContext, ValueTask{bool}})"/> and the authorizer's resource seam. The built-in
+    /// spec overrides it so the policy name is also visible to startup validation.
+    /// </remarks>
+    [ExcludeFromCodeCoverage(Justification = "Non-breaking default for external ILinkSpec<T> implementers; every built-in spec overrides it, so this body is unreachable from the library's own types.")]
+    ILinkSpec<T> RequireAuthorization(string policy, Func<T, object?> resource)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        return When((item, context) => context.Authorizer.AuthorizeAsync(resource(item), policy, context.CancellationToken));
+    }
 
     /// <summary>Includes the link only when the caller satisfies the default authorization policy (an authenticated user, by default).</summary>
     ILinkSpec<T> RequireAuthorization();
@@ -182,7 +192,17 @@ public interface IAffordanceSpec<T>
     /// </summary>
     /// <param name="policy">The policy name, or the empty string for the host's default policy.</param>
     /// <param name="resource">Selects the object the policy is evaluated against.</param>
-    IAffordanceSpec<T> RequireAuthorization(string policy, Func<T, object?> resource);
+    /// <remarks>
+    /// A default method (rather than an abstract one, which would break existing implementers) expressed over
+    /// <see cref="When(Func{T, LinkContext, ValueTask{bool}})"/> and the authorizer's resource seam. The built-in
+    /// spec overrides it so the policy name is also visible to startup validation.
+    /// </remarks>
+    [ExcludeFromCodeCoverage(Justification = "Non-breaking default for external IAffordanceSpec<T> implementers; every built-in spec overrides it, so this body is unreachable from the library's own types.")]
+    IAffordanceSpec<T> RequireAuthorization(string policy, Func<T, object?> resource)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        return When((item, context) => context.Authorizer.AuthorizeAsync(resource(item), policy, context.CancellationToken));
+    }
 
     /// <summary>Includes the affordance only when the caller satisfies the default authorization policy (an authenticated user, by default).</summary>
     IAffordanceSpec<T> RequireAuthorization();
