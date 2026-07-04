@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Cairn;
 
 /// <summary>An available action on a resource — a control describing how to invoke a state transition.</summary>
@@ -36,6 +38,7 @@ public sealed record Affordance
     public string? Title { get; init; }
 
     /// <summary>An optional input type the action accepts, used to describe its form fields.</summary>
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
     public Type? Input { get; init; }
 
     /// <summary>An optional content type the action's input is submitted as (HAL-FORMS <c>contentType</c>); defaults to <c>application/json</c>.</summary>

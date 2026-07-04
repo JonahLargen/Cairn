@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
@@ -57,16 +58,19 @@ internal sealed class HalLinkValueJsonConverter : JsonConverter<HalLinkValue>
 
     public override void Write(Utf8JsonWriter writer, HalLinkValue value, JsonSerializerOptions options)
     {
+        // Resolve HalLink's contract from the options' resolver chain (CairnJsonContext supplies it under a
+        // source-gen-only resolver) so emission never needs reflection-based contracts.
+        var linkInfo = options.GetTypeInfo(typeof(HalLink));
         if (!value.AlwaysArray && value.Links.Count == 1)
         {
-            JsonSerializer.Serialize(writer, value.Links[0], options);
+            JsonSerializer.Serialize(writer, value.Links[0], linkInfo);
             return;
         }
 
         writer.WriteStartArray();
         foreach (var link in value.Links)
         {
-            JsonSerializer.Serialize(writer, link, options);
+            JsonSerializer.Serialize(writer, link, linkInfo);
         }
 
         writer.WriteEndArray();
@@ -82,6 +86,9 @@ internal sealed record HalAction(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
+    // Carries Affordance.Input's DynamicallyAccessedMembers(PublicProperties) guarantee without restating
+    // it: the JSON source generator emits accessors for annotated properties that themselves trip the
+    // trim analyzer (IL2111/IL2062). Consumers re-assert the annotation where the type flows onward.
     [JsonIgnore]
     public Type? Input { get; init; }
 
@@ -181,6 +188,8 @@ internal sealed record ResourceHypermedia(
     /// <summary>The formatter-facing view of this hypermedia, built once per resource on first use.</summary>
     public HypermediaDocument ToDocument() => _document ??= Build();
 
+    [UnconditionalSuppressMessage("Trimming", "IL2072:UnrecognizedReflectionPattern",
+        Justification = "HalAction.Input is only ever assigned from Affordance.Input, which requires PublicProperties; the annotation cannot live on HalAction.Input itself because System.Text.Json's source generator emits accessors for the property that would then warn (IL2111/IL2062).")]
     private HypermediaDocument Build()
     {
         List<Link> links = [];

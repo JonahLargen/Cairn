@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using Microsoft.AspNetCore.Http;
@@ -22,6 +23,8 @@ internal sealed class LinkGeneratorUrlResolver(
         _ => null,
     };
 
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+        Justification = "Generated Routes.* targets supply route values as Dictionary<string, object?>, which LinkGenerator copies into a RouteValueDictionary without reflection. Anonymous-object route values in hand-written configs do reflect over the object's properties and are documented (docs/articles/aot.md) as requiring dictionaries in trimmed applications.")]
     private string? ResolveRoute(RouteLinkTarget route)
     {
         var http = accessor.HttpContext;
@@ -41,6 +44,8 @@ internal sealed class LinkGeneratorUrlResolver(
     // Renders the named route's pattern as an RFC 6570 URI template: supplied route values are bound into the
     // path (extras become literal query parameters, matching LinkGenerator), and the remaining route parameters
     // stay as {placeholder} variables for the client to expand.
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+        Justification = "Generated Routes.* targets supply route values as Dictionary<string, object?>, which RouteValueDictionary copies without reflection. Anonymous-object route values in hand-written configs do reflect over the object's properties and are documented (docs/articles/aot.md) as requiring dictionaries in trimmed applications.")]
     private string? ResolveRouteTemplate(RouteTemplateLinkTarget target)
     {
         var http = accessor.HttpContext;

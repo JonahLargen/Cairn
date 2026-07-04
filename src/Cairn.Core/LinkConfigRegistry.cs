@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Cairn.Internal;
 
@@ -48,6 +49,7 @@ public sealed class LinkConfigRegistry : ILinkConfigProvider
     /// <summary>Registers a <see cref="LinkConfig{T}"/> instance whose resource type is known only at runtime (e.g. from assembly scanning).</summary>
     /// <exception cref="ArgumentNullException"><paramref name="config"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="config"/> does not derive from <see cref="LinkConfig{T}"/>.</exception>
+    [RequiresDynamicCode("Compiles the config through MakeGenericType over its runtime resource type. Use Add<T>(LinkConfig<T>) in Native AOT applications.")]
     public LinkConfigRegistry Add(object config)
     {
         ArgumentNullException.ThrowIfNull(config);

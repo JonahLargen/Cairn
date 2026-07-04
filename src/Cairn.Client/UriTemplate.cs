@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 
@@ -12,14 +13,25 @@ namespace Cairn.Client;
 /// </summary>
 internal static class UriTemplate
 {
+    private static readonly IReadOnlyDictionary<string, object?> NoVariables = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+    /// <summary>Expands with no variables: every unresolved expression collapses per RFC 6570.</summary>
+    public static string Expand(string template) => ExpandCore(template, NoVariables);
+
+    /// <summary>Expands from a string-keyed dictionary, which supplies variables without reflection.</summary>
+    public static string Expand(string template, IReadOnlyDictionary<string, object?>? variables)
+        => ExpandCore(template, variables ?? NoVariables);
+
+    [RequiresUnreferencedCode("Expanding template variables from an arbitrary object reflects over its public properties, which trimming may remove. Pass an IReadOnlyDictionary<string, object?> instead.")]
     public static string Expand(string template, object? variables)
+        => ExpandCore(template, ToVariables(variables));
+
+    private static string ExpandCore(string template, IReadOnlyDictionary<string, object?> vars)
     {
         if (template.IndexOf('{') < 0)
         {
             return template;
         }
-
-        var vars = ToVariables(variables);
         var result = new StringBuilder(template.Length);
         var index = 0;
 
@@ -346,6 +358,8 @@ internal static class UriTemplate
         _ => VariableKind.Scalar,
     };
 
+    [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
+        Justification = "Only identifies IEnumerable<KeyValuePair<string, *>> implementations to classify a value as map-like; these BCL interfaces are preserved on dictionary types the application itself constructs and enumerates. A miss classifies the value as a list — the same treatment an unrecognized custom type gets.")]
     private static bool IsGenericPairSequence(IEnumerable value)
     {
         foreach (var iface in value.GetType().GetInterfaces())
@@ -363,6 +377,8 @@ internal static class UriTemplate
         return false;
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
+        Justification = "Reads KeyValuePair<,>.Key/Value on pair sequences without non-generic IDictionary (e.g. FrozenDictionary); those framework properties are preserved on instantiations the application creates and enumerates. IDictionary and IReadOnlyDictionary<string, object?> inputs never reach this path.")]
     private static IEnumerable<(string Key, object? Value)> Pairs(object map)
     {
         if (map is IDictionary legacy)
@@ -409,6 +425,7 @@ internal static class UriTemplate
         _ => value.ToString(),
     };
 
+    [RequiresUnreferencedCode("Reflects over the variables object's public properties when it is not a dictionary or a string-keyed pair sequence.")]
     private static IReadOnlyDictionary<string, object?> ToVariables(object? variables)
     {
         var dictionary = new Dictionary<string, object?>(StringComparer.Ordinal);
