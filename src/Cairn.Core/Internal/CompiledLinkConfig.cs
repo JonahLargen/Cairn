@@ -11,9 +11,10 @@ internal interface IPolicyReportingConfig
 /// A <see cref="LinkConfig{T}"/> compiled once into its specs, able to build a <see cref="LinkSet"/>
 /// for an instance supplied as <see cref="object"/> (enabling runtime-type dispatch).
 /// </summary>
-internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReportingConfig
+internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReportingConfig, IEmbeddedResourceReportingConfig
 {
     private readonly LinkBuilder<T> _builder;
+    private IReadOnlyList<EmbeddedResourceSchema>? _embeddedResources;
 
     private CompiledLinkConfig(LinkBuilder<T> builder) => _builder = builder;
 
@@ -83,6 +84,33 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReport
             }
 
             return policies ?? (IReadOnlyCollection<string>)Array.Empty<string>();
+        }
+    }
+
+    // The declared embeds are fixed once the config is compiled; project them once (lazily) into the public
+    // descriptor document generators read to type the _embedded schema.
+    public IReadOnlyList<EmbeddedResourceSchema> EmbeddedResources
+    {
+        get
+        {
+            if (_embeddedResources is not null)
+            {
+                return _embeddedResources;
+            }
+
+            if (_builder.EmbedSpecs.Count == 0)
+            {
+                return _embeddedResources = Array.Empty<EmbeddedResourceSchema>();
+            }
+
+            var embeds = new EmbeddedResourceSchema[_builder.EmbedSpecs.Count];
+            for (var i = 0; i < embeds.Length; i++)
+            {
+                var spec = _builder.EmbedSpecs[i];
+                embeds[i] = new EmbeddedResourceSchema(spec.Relation, spec.ChildType, spec.Single);
+            }
+
+            return _embeddedResources = embeds;
         }
     }
 

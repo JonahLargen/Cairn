@@ -189,6 +189,9 @@ internal sealed class EmbedSpec<T>
 
     public required bool Single { get; init; }
 
+    /// <summary>The declared child resource type (<c>TChild</c>), so document generators can type the <c>_embedded</c> schema.</summary>
+    public required Type ChildType { get; init; }
+
     public required Func<T, IReadOnlyList<object>> Resolve { get; init; }
 }
 
@@ -270,7 +273,7 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
     {
         relation.ThrowIfDefault(nameof(relation));
         ArgumentNullException.ThrowIfNull(resource);
-        EmbedSpecs.Add(new EmbedSpec<T> { Relation = relation, Single = true, Resolve = t => resource(t) is { } child ? new object[] { child } : [] });
+        EmbedSpecs.Add(new EmbedSpec<T> { Relation = relation, Single = true, ChildType = typeof(TChild), Resolve = t => resource(t) is { } child ? new object[] { child } : [] });
     }
 
     public void EmbedMany<TChild>(LinkRelation relation, Func<T, IEnumerable<TChild>?> resources)
@@ -281,6 +284,7 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
         {
             Relation = relation,
             Single = false,
+            ChildType = typeof(TChild),
             Resolve = t =>
             {
                 if (resources(t) is not { } items)
