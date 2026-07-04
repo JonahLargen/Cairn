@@ -58,6 +58,9 @@ jobs:
           subject-path: |
             artifacts/*.nupkg
             artifacts/*.snupkg
+          # Storage records are an organization-repo feature (and need artifact-metadata: write);
+          # disable explicitly rather than rely on the default-on behavior skipping gracefully.
+          create-storage-record: false
 
       # Also attach the provenance to the release for offline verification:
       # multiple.intoto.jsonl is the DSSE-wrapped in-toto statement itself;
@@ -66,7 +69,8 @@ jobs:
         env:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
         run: |
-          jq -c '.dsseEnvelope' "$BUNDLE_PATH" > artifacts/multiple.intoto.jsonl
+          # -e fails the step if the bundle has no dsseEnvelope, instead of shipping "null".
+          jq -ce '.dsseEnvelope' "$BUNDLE_PATH" > artifacts/multiple.intoto.jsonl
           cp "$BUNDLE_PATH" artifacts/multiple.sigstore.json
 
       # Trusted Publishing: exchange this run's OIDC token for a short-lived (1h) NuGet.org
