@@ -26,6 +26,18 @@ public class DefaultTemplateCollisionTests
     }
 
     [Fact]
+    public void An_affordance_named_default_followed_by_AsDefault_throws_at_registration()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => new LinkConfigRegistry().Add(new NamedDefaultThenAsDefaultLinks()));
+
+        // The first claimant holds the key by its literal name (no AsDefault marker in the message); the
+        // second claims it via AsDefault.
+        Assert.Contains("'default'", exception.Message);
+        Assert.Contains("'approve' (AsDefault)", exception.Message);
+    }
+
+    [Fact]
     public void Mutually_exclusive_conditional_AsDefault_affordances_register_fine()
     {
         // "approve is the default action when pending, reopen when closed": at most one emits per response,
@@ -147,5 +159,14 @@ public class DefaultTemplateCollisionTests
     {
         public override void Configure(ILinkBuilder<CollisionOrder> builder)
             => builder.Affordance("default", order => LinkTarget.Uri($"/orders/{order.Id}"));
+    }
+
+    private sealed class NamedDefaultThenAsDefaultLinks : LinkConfig<CollisionOrder>
+    {
+        public override void Configure(ILinkBuilder<CollisionOrder> builder)
+        {
+            builder.Affordance("default", order => LinkTarget.Uri($"/orders/{order.Id}"));
+            builder.Affordance("approve", order => LinkTarget.Uri($"/orders/{order.Id}/approve")).AsDefault();
+        }
     }
 }
