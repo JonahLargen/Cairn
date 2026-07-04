@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -235,6 +236,7 @@ internal static class CairnLinkStore
     private const string ItemsKey = "Cairn.LinkStore";
     private const string FormatKey = "Cairn.Format";
     private const string FormatterKey = "Cairn.Formatter";
+    private const string MaterializedKey = "Cairn.Materialized";
 
     public static void SetFormat(HttpContext http, HypermediaFormat format) => http.Items[FormatKey] = format;
 
@@ -281,6 +283,37 @@ internal static class CairnLinkStore
         => Store(http)?.ContainsKey(instance) == true;
 
     public static bool HasEntries(HttpContext http) => Store(http) is { Count: > 0 };
+
+    /// <summary>
+    /// Registers <paramref name="buffer"/> as the once-enumerated materialization of the deferred
+    /// <paramref name="sequence"/> an envelope exposes as its items. The emit stage substitutes it for the
+    /// sequence at serialization (see <see cref="CairnLinkInjectionModifier"/>) so the query runs once and the
+    /// item links stay correlated — without the compute stage mutating the (possibly shared) envelope. Keyed by
+    /// reference, per request.
+    /// </summary>
+    public static void RecordMaterialized(HttpContext http, object sequence, IEnumerable buffer)
+    {
+        if (http.Items[MaterializedKey] is not Dictionary<object, IEnumerable> map)
+        {
+            map = new Dictionary<object, IEnumerable>(ReferenceEqualityComparer.Instance);
+            http.Items[MaterializedKey] = map;
+        }
+
+        map[sequence] = buffer;
+    }
+
+    /// <summary>The buffer registered for a deferred <paramref name="sequence"/>, if one was materialized this request.</summary>
+    public static bool TryGetMaterialized(HttpContext http, object sequence, [NotNullWhen(true)] out IEnumerable? buffer)
+    {
+        if (http.Items[MaterializedKey] is Dictionary<object, IEnumerable> map && map.TryGetValue(sequence, out var found))
+        {
+            buffer = found;
+            return true;
+        }
+
+        buffer = null;
+        return false;
+    }
 
     /// <summary>
     /// The distinct types whose recorded hypermedia was never looked up by the emit stage — the reference

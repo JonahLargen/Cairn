@@ -230,8 +230,8 @@ internal static class CairnLinkRecorder
     private static async ValueTask RecordEnvelopeAsync(HttpContext http, object envelope, IEnumerable items, Func<IReadOnlyDictionary<string, HalLink>> buildLinks, RecordScope scope)
     {
         // The serializer enumerates the envelope's items again after this compute pass, so a deferred
-        // sequence must be materialized (and written back onto the envelope) before either pass runs.
-        items = MaterializeEnvelopeItems(envelope, items, scope);
+        // sequence must be buffered once and registered for substitution at serialization before either pass runs.
+        items = MaterializeEnvelopeItems(http, envelope, items, scope);
 
         if (scope.Visited.Add(envelope))
         {
@@ -694,7 +694,7 @@ internal static class CairnLinkRecorder
         var services = http.RequestServices;
         if (services.GetRequiredService<CairnOptions>().IsPagingEnvelope(value.GetType()))
         {
-            return;   // an envelope's deferred items are buffered back through its items property instead
+            return;   // an envelope's deferred items are buffered and substituted at serialization instead
         }
 
         var elementType = ElementTypeOf(enumerable);
@@ -954,15 +954,17 @@ internal static class CairnLinkRecorder
 
     // An envelope's deferred items (a LINQ query, IQueryable, iterator) would be enumerated here and again by
     // the serializer — running any underlying query twice and, if the second pass yields new instances, losing
-    // every item link. Buffer the sequence once and write the buffer back onto the envelope property that
-    // produced it, so the compute and emit stages share the same instances. Only a true set accessor is used:
-    // an init-only property is a declared immutability contract that reflection must not break (and a shared
-    // envelope instance must not be rewritten behind it). When no settable property exposes the sequence, the
-    // items are left as-is; that risks the double enumeration and correlation break, so warn now rather than
-    // relying only on the post-response emit-miss diagnostic.
+    // every item link. Buffer the sequence once, then register the buffer against the deferred instance so the
+    // emit stage substitutes it when the serializer reads the items property (see CairnLinkInjectionModifier);
+    // the compute and emit stages thus share the same buffered instances without the envelope ever being
+    // mutated — no setter is required, and a shared or init-only envelope is never rewritten behind its back.
+    // The items property is located by identity (its getter still returns the sequence we buffered), so any
+    // readable public property qualifies. When none exposes the sequence — the items are recomputed fresh on
+    // each access, or are non-public — the buffer can't be substituted, so the items are left deferred and we
+    // warn now rather than relying only on the post-response emit-miss diagnostic.
     [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
-        Justification = "Searches the envelope's public properties for the one exposing the deferred items so the buffer can be written back. A property removed by trimming simply isn't found, taking the same logged fallback as an envelope with no settable items property.")]
-    private static IEnumerable MaterializeEnvelopeItems(object envelope, IEnumerable items, RecordScope scope)
+        Justification = "Searches the envelope's public properties for the one exposing the deferred items so its buffer can be substituted at serialization. A property removed by trimming simply isn't found, taking the same logged fallback as an envelope with no readable items property.")]
+    private static IEnumerable MaterializeEnvelopeItems(HttpContext http, object envelope, IEnumerable items, RecordScope scope)
     {
         if (items is string || IsMaterialized(items))
         {
@@ -974,8 +976,7 @@ internal static class CairnLinkRecorder
         {
             foreach (var property in envelope.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
-                if (property.SetMethod is not { } setter
-                    || IsInitOnly(setter)
+                if (property.GetMethod is not { IsPublic: true }
                     || property.GetIndexParameters().Length != 0
                     || !property.PropertyType.IsAssignableFrom(bufferType))
                 {
@@ -1003,7 +1004,10 @@ internal static class CairnLinkRecorder
                     buffer.Add(item);
                 }
 
-                property.SetValue(envelope, buffer);
+                // Register the buffer for substitution at serialization instead of writing it onto the envelope:
+                // the emit-stage getter (CairnLinkInjectionModifier) returns it whenever this property still
+                // yields the sequence we buffered, so the property keeps returning the buffered instances.
+                CairnLinkStore.RecordMaterialized(http, items, buffer);
                 return buffer;
             }
         }
@@ -1011,16 +1015,12 @@ internal static class CairnLinkRecorder
         if (scope.Logger is { } logger && scope.WarnOnce.Mark("deferred-envelope", envelope.GetType()))
         {
             logger.LogWarning(
-                "Cairn: envelope {ResourceType} exposes its items as a deferred sequence with no settable property to buffer them back into (the property is init-only, computed, or non-public). The sequence is enumerated once to compute links and again to serialize, and if re-enumeration yields new instances the item links are lost. Materialize the items (e.g. ToList()) before constructing the envelope.",
+                "Cairn: envelope {ResourceType} exposes its items as a deferred sequence through no stable readable property (the items are recomputed on each access, or the property is non-public), so the buffered sequence cannot be substituted at serialization. The sequence is enumerated once to compute links and again to serialize, and if re-enumeration yields new instances the item links are lost. Materialize the items (e.g. ToList()) before constructing the envelope.",
                 envelope.GetType().Name);
         }
 
         return items;
     }
-
-    // An init accessor compiles as a setter whose return parameter carries the IsExternalInit modreq.
-    private static bool IsInitOnly(MethodInfo setter)
-        => setter.ReturnParameter.GetRequiredCustomModifiers().Contains(typeof(System.Runtime.CompilerServices.IsExternalInit));
 
     // Per-route .WithPageLinks() wins over the global PageLink, which wins over the default query-swap.
     private static Func<int, string> ResolvePageUrl(HttpContext http, CairnOptions options)

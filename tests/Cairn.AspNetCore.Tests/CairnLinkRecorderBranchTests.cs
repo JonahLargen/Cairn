@@ -283,7 +283,7 @@ public class CairnLinkRecorderBranchTests
     }
 
     [Fact]
-    public async Task An_envelope_with_no_settable_items_property_warns_once_about_deferred_items()
+    public async Task An_envelope_that_recomputes_its_items_each_access_warns_once_about_deferred_items()
     {
         var logs = new CapturingLoggerProvider();
         var builder = WebApplication.CreateBuilder();
@@ -292,16 +292,17 @@ public class CairnLinkRecorderBranchTests
         builder.Services.AddCairn();
 
         await using var app = builder.Build();
-        app.MapGet("/init-env", () => TypedResults.Ok(new InitOnlyItemsPage())).WithLinks();
+        app.MapGet("/recomputed-env", () => TypedResults.Ok(new RecomputedItemsPage())).WithLinks();
 
         await app.StartAsync();
         using var client = app.GetTestClient();
 
-        await client.GetAsync("/init-env");
-        await client.GetAsync("/init-env");
+        await client.GetAsync("/recomputed-env");
+        await client.GetAsync("/recomputed-env");
 
-        // The items property is init-only, so the deferred sequence cannot be buffered back into it.
-        Assert.Single(logs.Messages, m => m.Contains("no settable property", StringComparison.Ordinal));
+        // The items property recomputes a fresh sequence on every access, so the recorder can capture no stable
+        // instance to substitute at serialization — the buffer can't be shared and the warning fires (once).
+        Assert.Single(logs.Messages, m => m.Contains("no stable readable property", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -548,10 +549,13 @@ public class CairnLinkRecorderBranchTests
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
-    // An offset envelope whose deferred items sit behind an init-only property, so they cannot be buffered back.
-    private sealed class InitOnlyItemsPage : IPagedResource
+    // An offset envelope whose items property recomputes a fresh deferred sequence on every access: the recorder
+    // never sees a stable instance to buffer for substitution, so it warns and leaves the items deferred.
+    private sealed class RecomputedItemsPage : IPagedResource
     {
-        public IEnumerable Items { get; init; } = Enumerable.Range(1, 2).Select(i => new RecBranchOrder(i));
+        private readonly RecBranchOrder[] _source = [new(1), new(2)];
+
+        public IEnumerable Items => _source.Select(o => o);
 
         public int Page => 1;
 
