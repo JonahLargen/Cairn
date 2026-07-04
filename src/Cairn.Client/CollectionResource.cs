@@ -64,13 +64,14 @@ public sealed class CollectionResource<TItem>
         }
 
         return Links.TryGetValue(relation, out var link)
-            ? _client.FollowCollectionAsync<TItem>(link, variables: null, itemsProperty, cancellationToken)
+            ? _client.FollowCollectionAsync<TItem>(link, itemsProperty, cancellationToken)
             : throw new InvalidOperationException($"The collection has no '{relation}' link.");
     }
 
     /// <summary>Follows a collection link, expanding it as an RFC 6570 URI template with <paramref name="variables"/> (e.g. <c>new { page = 2 }</c>).</summary>
     /// <exception cref="InvalidOperationException">The collection has no link with that relation.</exception>
     /// <exception cref="ArgumentException">The link is not templated but <paramref name="variables"/> were supplied.</exception>
+    [RequiresUnreferencedCode(CairnClient.TemplateVariablesRequiresUnreferencedCode)]
     public Task<CollectionResult<TItem>> FollowAsync(string relation, object? variables, string itemsProperty = "items", CancellationToken cancellationToken = default)
         => Links.TryGetValue(relation, out var link)
             ? _client.FollowCollectionAsync<TItem>(link, variables, itemsProperty, cancellationToken)

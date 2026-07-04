@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Cairn.AspNetCore.Internal;
 using Microsoft.AspNetCore.Http;
@@ -91,6 +92,10 @@ public sealed class HypermediaProblem : IResult
     }
 
     /// <inheritdoc />
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+        Justification = "The fallback body is a VerbatimKeyDictionary<object?>, whose contract (and those of Cairn's other wire types and scalars) is source-generated in CairnJsonContext and combined into the host's options by CairnJsonOptionsSetup. Extension values of application types resolve through the host's own resolver chain, which a trimmed/AOT host configures with source generation.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "Same as IL2026: contracts come from CairnJsonContext or the host's source-generated resolver chain, so no runtime code generation is required.")]
     public async Task ExecuteAsync(HttpContext httpContext)
     {
         httpContext.Response.StatusCode = Status;

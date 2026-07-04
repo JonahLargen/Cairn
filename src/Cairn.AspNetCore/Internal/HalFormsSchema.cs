@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Reflection;
@@ -33,7 +34,7 @@ internal static class HalFormsSchema
 
     private static readonly IReadOnlyList<HalFormsProperty> Empty = [];
 
-    public static IReadOnlyList<HalFormsProperty> For(Type? input, JsonSerializerOptions serializer)
+    public static IReadOnlyList<HalFormsProperty> For([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type? input, JsonSerializerOptions serializer)
     {
         if (input is null)
         {
@@ -60,7 +61,7 @@ internal static class HalFormsSchema
         return cache.GetOrAdd((input, localizable ? CultureInfo.CurrentUICulture.Name : string.Empty), properties);
     }
 
-    private static IReadOnlyList<HalFormsProperty> Build(Type input, JsonSerializerOptions serializer, out bool localizable)
+    private static IReadOnlyList<HalFormsProperty> Build([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type input, JsonSerializerOptions serializer, out bool localizable)
     {
         var properties = new List<HalFormsProperty>();
 
@@ -81,7 +82,7 @@ internal static class HalFormsSchema
     // names. Cairn's own injected contract properties have no member behind them and are skipped; fields stay
     // out, as before. Falls back to reflection plus the options' naming policy when the resolver cannot
     // produce an object contract for the type (e.g. a source-gen-only resolver that doesn't know it).
-    private static IEnumerable<(PropertyInfo Property, string Name)> ContractProperties(Type input, JsonSerializerOptions serializer)
+    private static IEnumerable<(PropertyInfo Property, string Name)> ContractProperties([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type input, JsonSerializerOptions serializer)
     {
         JsonTypeInfo? contract = null;
         try
@@ -191,12 +192,15 @@ internal static class HalFormsSchema
             return null;
         }
 
+        // GetValuesAsUnderlyingType + ToObject instead of GetValues: the latter needs runtime code to
+        // create the enum array under Native AOT. Both return values in the same (unsigned magnitude) order
+        // as GetNames.
         var names = Enum.GetNames(underlying);
-        var values = Enum.GetValues(underlying);
+        var values = Enum.GetValuesAsUnderlyingType(underlying);
         var options = new List<HalFormsOption>(names.Length);
         for (var i = 0; i < names.Length; i++)
         {
-            options.Add(new HalFormsOption(names[i], WireValueOf(values.GetValue(i)!, underlying, serializer)));
+            options.Add(new HalFormsOption(names[i], WireValueOf(Enum.ToObject(underlying, values.GetValue(i)!), underlying, serializer)));
         }
 
         return options.Count > 0 ? new HalFormsOptions(options) : null;
@@ -206,7 +210,10 @@ internal static class HalFormsSchema
     {
         try
         {
-            using var document = JsonDocument.Parse(JsonSerializer.Serialize(value, enumType, serializer));
+            // Serializing through the resolved contract honors the host's enum converters without the
+            // reflection-based Serialize(object, Type, options) overload; a missing contract (source-gen-only
+            // host without this enum) throws and falls back to the declared name below.
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(value, serializer.GetTypeInfo(enumType)));
             var root = document.RootElement;
             if (root.ValueKind == JsonValueKind.String && root.GetString() is { } text)
             {

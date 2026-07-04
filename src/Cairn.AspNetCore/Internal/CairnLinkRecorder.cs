@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
@@ -99,7 +100,7 @@ internal static class CairnLinkRecorder
             && !options.IsPagingEnvelope(value.GetType())
             && !IsMaterialized(enumerable))
         {
-            value = BufferSequence(enumerable);
+            value = BufferOrKeep(enumerable);
         }
 
         await RecordAsync(http, value, scope, warnIfUnconfigured: true);
@@ -807,6 +808,8 @@ internal static class CairnLinkRecorder
         yield return services.GetService<IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>>()?.Value.JsonSerializerOptions;
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
+        Justification = "Detects IAsyncEnumerable<T> to warn that async streams cannot carry hypermedia. The interface is preserved on any type the app itself consumes as an async stream; a miss just skips the warning for a value that could not be streamed anyway.")]
     private static Type? AsyncEnumerableElementType(object value)
     {
         foreach (var iface in value.GetType().GetInterfaces())
@@ -822,6 +825,8 @@ internal static class CairnLinkRecorder
 
     // Materialized collections (arrays, lists, sets, ...) expose a count; a deferred sequence (LINQ query,
     // IQueryable, iterator) does not.
+    [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
+        Justification = "Detects ICollection<T>/IReadOnlyCollection<T> to tell materialized collections from deferred sequences. These BCL interfaces are preserved on collection types the app itself uses; a miss treats the value as deferred, causing at most a redundant buffering pass.")]
     private static bool IsMaterialized(IEnumerable value)
     {
         if (value is ICollection)
@@ -843,10 +848,24 @@ internal static class CairnLinkRecorder
     }
 
     // Enumerate the deferred sequence exactly once into a List<T> (preserving the element type so the
-    // serialization contract is unchanged) that both the recorder and the serializer share.
-    private static IEnumerable BufferSequence(IEnumerable source)
+    // serialization contract is unchanged) that both the recorder and the serializer share. Returns the
+    // source unchanged when the List<T> instantiation is unavailable (Native AOT with an uninstantiated
+    // value-type element), leaving the sequence deferred — the documented degradation.
+    [ExcludeFromCodeCoverage(Justification = "The catch arm requires a Native AOT runtime missing the List<T> instantiation; it cannot execute on the JIT test host.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "List<T> over reference-type elements uses shared generic code that always exists under Native AOT; a missing value-type instantiation throws NotSupportedException, which degrades to keeping the sequence deferred.")]
+    private static IEnumerable BufferOrKeep(IEnumerable source)
     {
-        var buffer = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(ElementTypeOf(source)))!;
+        IList buffer;
+        try
+        {
+            buffer = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(ElementTypeOf(source)))!;
+        }
+        catch (NotSupportedException)
+        {
+            return source;
+        }
+
         foreach (var item in source)
         {
             buffer.Add(item);
@@ -855,6 +874,29 @@ internal static class CairnLinkRecorder
         return buffer;
     }
 
+    // The List<T> buffer type for the sequence's element type, or null when the instantiation is
+    // unavailable under Native AOT (the caller falls back to its logged warning). The return annotation
+    // lets the caller instantiate the buffer without re-running MakeGenericType.
+    [ExcludeFromCodeCoverage(Justification = "The catch arm requires a Native AOT runtime missing the List<T> instantiation; it cannot execute on the JIT test host.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "A missing List<T> instantiation under Native AOT throws NotSupportedException, which the caller turns into the documented logged fallback.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2073:UnrecognizedReflectionPattern",
+        Justification = "Every List<T> instantiation has a public parameterless constructor.")]
+    [return: DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
+    private static Type? TryMakeBufferType(IEnumerable items)
+    {
+        try
+        {
+            return typeof(List<>).MakeGenericType(ElementTypeOf(items));
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
+        Justification = "Finds IEnumerable<T> to preserve the buffered list's element type. The interface is preserved on sequence types the app itself enumerates; a miss falls back to object elements, which serialize by their runtime contracts.")]
     private static Type ElementTypeOf(IEnumerable source)
     {
         foreach (var iface in source.GetType().GetInterfaces())
@@ -876,6 +918,8 @@ internal static class CairnLinkRecorder
     // envelope instance must not be rewritten behind it). When no settable property exposes the sequence, the
     // items are left as-is; that risks the double enumeration and correlation break, so warn now rather than
     // relying only on the post-response emit-miss diagnostic.
+    [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
+        Justification = "Searches the envelope's public properties for the one exposing the deferred items so the buffer can be written back. A property removed by trimming simply isn't found, taking the same logged fallback as an envelope with no settable items property.")]
     private static IEnumerable MaterializeEnvelopeItems(object envelope, IEnumerable items, RecordScope scope)
     {
         if (items is string || IsMaterialized(items))
@@ -883,35 +927,43 @@ internal static class CairnLinkRecorder
             return items;
         }
 
-        var bufferType = typeof(List<>).MakeGenericType(ElementTypeOf(items));
-        foreach (var property in envelope.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        // A null buffer type (Native AOT without the List<T> instantiation) falls through to the warning.
+        if (TryMakeBufferType(items) is { } bufferType)
         {
-            if (property.SetMethod is not { } setter
-                || IsInitOnly(setter)
-                || property.GetIndexParameters().Length != 0
-                || !property.PropertyType.IsAssignableFrom(bufferType))
+            foreach (var property in envelope.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
-                continue;
-            }
+                if (property.SetMethod is not { } setter
+                    || IsInitOnly(setter)
+                    || property.GetIndexParameters().Length != 0
+                    || !property.PropertyType.IsAssignableFrom(bufferType))
+                {
+                    continue;
+                }
 
-            object? current;
-            try
-            {
-                current = property.GetValue(envelope);
-            }
-            catch
-            {
-                continue;   // a throwing getter can't be the items source
-            }
+                object? current;
+                try
+                {
+                    current = property.GetValue(envelope);
+                }
+                catch
+                {
+                    continue;   // a throwing getter can't be the items source
+                }
 
-            if (!ReferenceEquals(current, items))
-            {
-                continue;
-            }
+                if (!ReferenceEquals(current, items))
+                {
+                    continue;
+                }
 
-            var buffer = BufferSequence(items);
-            property.SetValue(envelope, buffer);
-            return buffer;
+                var buffer = (IList)Activator.CreateInstance(bufferType)!;
+                foreach (var item in items)
+                {
+                    buffer.Add(item);
+                }
+
+                property.SetValue(envelope, buffer);
+                return buffer;
+            }
         }
 
         if (scope.Logger is { } logger && scope.WarnOnce.Mark("deferred-envelope", envelope.GetType()))

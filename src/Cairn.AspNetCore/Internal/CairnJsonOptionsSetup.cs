@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.Http;
@@ -29,8 +30,20 @@ internal sealed class CairnJsonOptionsSetup(IHttpContextAccessor accessor, Cairn
     {
         var modifier = new CairnLinkInjectionModifier(accessor, options, configs);
         serializer.TypeInfoResolver = JsonTypeInfoResolver.Combine(
-                serializer.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver(),
+                serializer.TypeInfoResolver ?? DefaultResolver(),
                 CairnJsonContext.Default)
             .WithAddedModifier(modifier.Modify);
     }
+
+    // The reflection-based resolver backstops a host that has no resolver at all — only when reflection
+    // serialization is enabled (the JIT default). In a source-gen-only app (Native AOT / PublishTrimmed
+    // with the feature switch off) it stays null and Combine skips it, leaving whatever the host
+    // configured plus Cairn's own context.
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+        Justification = "Guarded by JsonSerializer.IsReflectionEnabledByDefault; the feature-guard attribute that teaches the analyzer about this property only exists on net9.0+, so the guard is not recognized when compiling for net8.0.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "Guarded by JsonSerializer.IsReflectionEnabledByDefault, which is always false under Native AOT.")]
+    [ExcludeFromCodeCoverage(Justification = "The null arm requires a host with reflection serialization disabled (Native AOT or the feature switch); the test host always has it enabled.")]
+    private static IJsonTypeInfoResolver? DefaultResolver()
+        => JsonSerializer.IsReflectionEnabledByDefault ? new DefaultJsonTypeInfoResolver() : null;
 }

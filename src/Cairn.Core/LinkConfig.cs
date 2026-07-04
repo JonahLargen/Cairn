@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Cairn;
 
 /// <summary>Declares the links and affordances for resources of type <typeparamref name="T"/>.</summary>
@@ -129,8 +131,8 @@ public interface IAffordanceSpec<T>
     IAffordanceSpec<T> Delete();
 
     /// <summary>Declares the input type the action accepts, used to describe its form fields (e.g. HAL-FORMS).</summary>
-    /// <typeparam name="TInput">The request/body type the action accepts.</typeparam>
-    IAffordanceSpec<T> Accepts<TInput>();
+    /// <typeparam name="TInput">The request/body type the action accepts. Its public properties are preserved under trimming so form fields can be derived from them.</typeparam>
+    IAffordanceSpec<T> Accepts<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] TInput>();
 
     /// <summary>Sets the content type the action's input is submitted as (HAL-FORMS <c>contentType</c>, e.g. <c>multipart/form-data</c>).</summary>
     IAffordanceSpec<T> ContentType(string contentType);

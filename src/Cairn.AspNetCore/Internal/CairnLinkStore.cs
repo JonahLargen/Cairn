@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
@@ -57,16 +58,19 @@ internal sealed class HalLinkValueJsonConverter : JsonConverter<HalLinkValue>
 
     public override void Write(Utf8JsonWriter writer, HalLinkValue value, JsonSerializerOptions options)
     {
+        // Resolve HalLink's contract from the options' resolver chain (CairnJsonContext supplies it under a
+        // source-gen-only resolver) so emission never needs reflection-based contracts.
+        var linkInfo = options.GetTypeInfo(typeof(HalLink));
         if (!value.AlwaysArray && value.Links.Count == 1)
         {
-            JsonSerializer.Serialize(writer, value.Links[0], options);
+            JsonSerializer.Serialize(writer, value.Links[0], linkInfo);
             return;
         }
 
         writer.WriteStartArray();
         foreach (var link in value.Links)
         {
-            JsonSerializer.Serialize(writer, link, options);
+            JsonSerializer.Serialize(writer, link, linkInfo);
         }
 
         writer.WriteEndArray();
@@ -82,8 +86,11 @@ internal sealed record HalAction(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
-    [JsonIgnore]
-    public Type? Input { get; init; }
+    // Internal (not public + [JsonIgnore]) so the property stays out of the JSON contract entirely: the
+    // source generator emits accessor delegates for public properties even when ignored, and those
+    // delegates trip the trim analyzer (IL2111/IL2062) on an annotated property.
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
+    internal Type? Input { get; init; }
 
     [JsonIgnore]
     public string? ContentType { get; init; }

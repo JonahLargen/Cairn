@@ -26,7 +26,7 @@ class Program
         // internal: the catalog is app-internal, so it can't collide (or be CS0433-ambiguous) across projects.
         Assert.Contains("internal static partial class Routes", generated);
         Assert.Contains("public static global::Cairn.LinkTarget GetOrderById(int id)", generated);
-        Assert.Contains(@"Route(""GetOrderById"", new { id })", generated);
+        Assert.Contains(@"Route(""GetOrderById"", new global::System.Collections.Generic.Dictionary<string, object?> { [""id""] = id })", generated);
         Assert.Contains("public static global::Cairn.LinkTarget CancelOrder(int id)", generated);
         Assert.Contains("public static global::Cairn.LinkTarget ListOrders()", generated);
         Assert.Contains(@"Route(""ListOrders"", null)", generated);
@@ -167,7 +167,7 @@ class Program
         var generated = Run(source);
 
         Assert.Contains("public static global::Cairn.LinkTarget GetUserOrder(int userId, int id)", generated);
-        Assert.Contains(@"Route(""GetUserOrder"", new { userId, id })", generated);
+        Assert.Contains(@"Route(""GetUserOrder"", new global::System.Collections.Generic.Dictionary<string, object?> { [""userId""] = userId, [""id""] = id })", generated);
     }
 
     [Fact]
@@ -188,7 +188,7 @@ class Program
 
         // Group prefixes bound to locals are the common MapGroup shape; their route parameters must survive.
         Assert.Contains("public static global::Cairn.LinkTarget GetUserOrderViaVariable(int userId, int id)", generated);
-        Assert.Contains(@"Route(""GetUserOrderViaVariable"", new { userId, id })", generated);
+        Assert.Contains(@"Route(""GetUserOrderViaVariable"", new global::System.Collections.Generic.Dictionary<string, object?> { [""userId""] = userId, [""id""] = id })", generated);
     }
 
     [Fact]
@@ -234,7 +234,7 @@ class CustomersController
         var generated = Run(source);
 
         Assert.Contains("public static global::Cairn.LinkTarget GetCustomerById(int id)", generated);
-        Assert.Contains(@"Route(""GetCustomerById"", new { id })", generated);
+        Assert.Contains(@"Route(""GetCustomerById"", new global::System.Collections.Generic.Dictionary<string, object?> { [""id""] = id })", generated);
         Assert.Contains("public static global::Cairn.LinkTarget ListCustomers()", generated);
     }
 
@@ -322,7 +322,7 @@ class Program
 
         // Names factored into constants or nameof(...) previously vanished from the catalog.
         Assert.Contains("public static global::Cairn.LinkTarget GetOrder(int id)", generated);
-        Assert.Contains(@"Route(""GetOrder"", new { id })", generated);
+        Assert.Contains(@"Route(""GetOrder"", new global::System.Collections.Generic.Dictionary<string, object?> { [""id""] = id })", generated);
         Assert.Contains("public static global::Cairn.LinkTarget GetOrderItem(int id, int itemId)", generated);
     }
 
@@ -345,7 +345,7 @@ class WidgetsController
         var generated = Run(source);
 
         Assert.Contains("public static global::Cairn.LinkTarget GetWidget(int id)", generated);
-        Assert.Contains(@"Route(""GetWidget"", new { id })", generated);
+        Assert.Contains(@"Route(""GetWidget"", new global::System.Collections.Generic.Dictionary<string, object?> { [""id""] = id })", generated);
     }
 
     [Fact]

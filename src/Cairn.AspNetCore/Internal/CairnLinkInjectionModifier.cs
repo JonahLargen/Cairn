@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -83,6 +84,10 @@ internal sealed class CairnLinkInjectionModifier
             && _configs is LinkConfigRegistry registry
             && registry.HasConfiguredSubtype(type);
 
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+        Justification = "The injected property is always typed 'object'; its contract (and those of the emitted payloads) is source-generated in CairnJsonContext, which CairnJsonOptionsSetup combines into the resolver chain.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "JsonPropertyInfo<object> is a reference-type instantiation served by shared generic code, which always exists under Native AOT.")]
     private void AddProperty(JsonTypeInfo typeInfo, string name)
     {
         // Don't collide with a DTO that already declares a property of this JSON name — System.Text.Json

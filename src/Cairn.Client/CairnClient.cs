@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -14,6 +15,15 @@ public sealed class CairnClient
     private static readonly JsonSerializerOptions DefaultJsonOptions = new(JsonSerializerDefaults.Web);
 
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
+
+    internal const string TemplateVariablesRequiresUnreferencedCode =
+        "URI template variables supplied as an anonymous or POCO object are read via reflection, which trimming may remove. "
+        + "Variables supplied as an IReadOnlyDictionary<string, object?> expand without reflection.";
+
+    private const string JsonSuppressionJustification =
+        "User payloads (de)serialize through the caller-supplied JsonSerializerOptions. Trimmed and Native AOT applications "
+        + "must construct CairnClient with source-generated options (see docs/articles/aot.md); System.Text.Json then resolves "
+        + "contracts without reflection and fails with a descriptive exception when a contract is missing.";
 
     private readonly HttpClient _http;
     private readonly JsonSerializerOptions _json;
@@ -89,6 +99,7 @@ public sealed class CairnClient
     /// <exception cref="ArgumentNullException"><paramref name="link"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="link"/> is not templated but <paramref name="variables"/> were supplied.</exception>
     /// <exception cref="InvalidOperationException">The link target is rejected by the configured link policy.</exception>
+    [RequiresUnreferencedCode(TemplateVariablesRequiresUnreferencedCode)]
     public Task<ClientResult<T>> FollowAsync<T>(Link link, object? variables, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(link);
@@ -136,6 +147,15 @@ public sealed class CairnClient
 
     // A templated pagination link (e.g. a "next" carrying "{?page}") expands with the variables; with none,
     // every unresolved expression collapses per RFC 6570, so a templated next/prev stays followable.
+    internal Task<CollectionResult<TItem>> FollowCollectionAsync<TItem>(Link link, string itemsProperty, CancellationToken cancellationToken)
+        => TimeboxedAsync(async token =>
+        {
+            using var request = CreateRequest(HttpMethod.Get, Authorize(ResolveHref(link)));
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            return await ReadCollectionResultAsync<TItem>(response, itemsProperty, token).ConfigureAwait(false);
+        }, cancellationToken);
+
+    [RequiresUnreferencedCode(TemplateVariablesRequiresUnreferencedCode)]
     internal Task<CollectionResult<TItem>> FollowCollectionAsync<TItem>(Link link, object? variables, string itemsProperty, CancellationToken cancellationToken)
         => TimeboxedAsync(async token =>
         {
@@ -205,6 +225,8 @@ public sealed class CairnClient
 
     // Client-side HAL-FORMS validation: reject a bad submission before it leaves the process, with the
     // field-level reasons a server would only report back as an error response.
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode", Justification = JsonSuppressionJustification)]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode", Justification = JsonSuppressionJustification)]
     private void ValidateSubmission(IReadOnlyList<AffordanceField> fields, object? values)
     {
         var element = values is null ? default : JsonSerializer.SerializeToElement(values, _json);
@@ -336,6 +358,8 @@ public sealed class CairnClient
     // Honor the affordance's declared contentType (HAL-FORMS): JSON media types serialize the body as JSON
     // under that label; form encoding flattens the body's top-level scalars. Anything else must be handed to
     // us pre-encoded, so fail loudly rather than mislabel a JSON payload.
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode", Justification = JsonSuppressionJustification)]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode", Justification = JsonSuppressionJustification)]
     private HttpContent CreateContent(object body, string? contentType)
     {
         if (contentType is null)
@@ -364,6 +388,8 @@ public sealed class CairnClient
             $"The affordance's content type '{contentType}' is not supported. Use application/json, a +json media type, or application/x-www-form-urlencoded.");
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode", Justification = JsonSuppressionJustification)]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode", Justification = JsonSuppressionJustification)]
     private IEnumerable<KeyValuePair<string, string>> FormPairs(object body)
     {
         if (body is IEnumerable<KeyValuePair<string, string>> pairs)
@@ -419,6 +445,10 @@ public sealed class CairnClient
 
     // Expands a templated href with the variables; a non-templated link accepts none — silently dropping
     // them would hide a caller bug (the request would go to the unmodified href).
+    private static string ResolveHref(Link link)
+        => link.Templated ? UriTemplate.Expand(link.Href) : link.Href;
+
+    [RequiresUnreferencedCode(TemplateVariablesRequiresUnreferencedCode)]
     private static string ResolveHref(Link link, object? variables)
     {
         if (link.Templated)
@@ -639,6 +669,8 @@ public sealed class CairnClient
     }
 
     // Builds a resource from a parsed element: binds the typed value and its links/affordances/fields/embedded.
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode", Justification = JsonSuppressionJustification)]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode", Justification = JsonSuppressionJustification)]
     internal Resource<T> BuildResource<T>(JsonElement element, string? etag = null)
     {
         var value = element.Deserialize<T>(_json);

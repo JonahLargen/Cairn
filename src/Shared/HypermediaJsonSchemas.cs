@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Microsoft.AspNetCore.Mvc.ApiExplorer;
 using Microsoft.OpenApi;
@@ -101,6 +102,8 @@ internal static class HypermediaJsonSchemas
         return envelopes is not null && envelopes.IsPaginationEnvelope(type, out cursor);
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2070:UnrecognizedReflectionPattern",
+        Justification = "Detects the pagination-envelope interfaces by name for OpenAPI document generation. A type whose envelope interface was trimmed cannot behave as an envelope at runtime either, so describing it as unlinked is consistent with actual behavior.")]
     private static bool IsPaginationEnvelope(Type type, out bool cursor)
     {
         foreach (var candidate in type.GetInterfaces())
