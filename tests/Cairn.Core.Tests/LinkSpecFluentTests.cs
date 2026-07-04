@@ -142,6 +142,69 @@ public class LinkSpecFluentTests
         Assert.Empty(Assert.Single(set.Embedded).Resources);
     }
 
+    [Fact]
+    public async Task An_embed_gated_by_a_resource_predicate_is_dropped_when_it_fails()
+    {
+        var kept = await BuildAsync(new ResourceConditionEmbed(), new SpecOrder(7, "Open"));
+        var dropped = await BuildAsync(new ResourceConditionEmbed(), new SpecOrder(7, "Pending"));
+
+        Assert.Single(kept.Embedded);
+        Assert.Empty(dropped.Embedded);
+    }
+
+    [Fact]
+    public async Task An_embed_condition_can_observe_the_context()
+    {
+        var included = await BuildAsync(new ContextConditionEmbed(), new SpecOrder(7, "Pending"), new FakeAuthorizer(true));
+        var excluded = await BuildAsync(new ContextConditionEmbed(), new SpecOrder(7, "Pending"), new FakeAuthorizer(true), LinkResolutionMode.Strict);
+
+        Assert.Single(included.Embedded);
+        Assert.Empty(excluded.Embedded);
+    }
+
+    [Fact]
+    public async Task An_embed_condition_can_be_async()
+    {
+        var kept = await BuildAsync(new AsyncConditionEmbed(), new SpecOrder(7, "Open"));
+        var dropped = await BuildAsync(new AsyncConditionEmbed(), new SpecOrder(7, "Pending"));
+
+        Assert.Single(kept.Embedded);
+        Assert.Empty(dropped.Embedded);
+    }
+
+    [Fact]
+    public async Task An_embed_can_require_a_named_policy()
+    {
+        var authorizer = new FakeAuthorizer(false);
+
+        var set = await BuildAsync(new PolicyEmbed(), new SpecOrder(7, "Pending"), authorizer);
+
+        Assert.Empty(set.Embedded);
+        Assert.Contains("CanSeeChild", authorizer.AskedPolicies);
+    }
+
+    [Fact]
+    public async Task An_embed_can_require_the_default_policy()
+    {
+        var authorizer = new FakeAuthorizer(true);
+
+        var set = await BuildAsync(new DefaultPolicyEmbed(), new SpecOrder(7, "Pending"), authorizer);
+
+        Assert.Single(set.Embedded);
+        Assert.Contains("", authorizer.AskedPolicies);
+    }
+
+    [Fact]
+    public async Task A_gated_out_embed_does_not_resolve_its_children()
+    {
+        var probe = new ResolveProbe();
+
+        var set = await BuildAsync(new ProbedEmbed(probe), new SpecOrder(7, "Pending"));
+
+        Assert.Empty(set.Embedded);
+        Assert.False(probe.WasResolved);   // the condition short-circuits before the resolver runs
+    }
+
     private static async Task<LinkSet> BuildAsync(
         LinkConfig<SpecOrder> config,
         SpecOrder resource,
@@ -234,6 +297,53 @@ public class LinkSpecFluentTests
     {
         public override void Configure(ILinkBuilder<SpecOrder> b)
             => b.EmbedMany<SpecOrder>("children", _ => null);
+    }
+
+    private sealed class ResourceConditionEmbed : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Embed("child", o => o).When(o => o.Status == "Open");
+    }
+
+    private sealed class ContextConditionEmbed : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Embed("child", o => o).When((_, ctx) => ctx.Mode == LinkResolutionMode.Lax);
+    }
+
+    private sealed class AsyncConditionEmbed : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Embed("child", o => o).When((o, _) => new ValueTask<bool>(o.Status == "Open"));
+    }
+
+    private sealed class PolicyEmbed : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Embed("child", o => o).RequireAuthorization("CanSeeChild");
+    }
+
+    private sealed class DefaultPolicyEmbed : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Embed("child", o => o).RequireAuthorization();
+    }
+
+    private sealed class ResolveProbe
+    {
+        public bool WasResolved { get; private set; }
+
+        public SpecOrder Resolve(SpecOrder order)
+        {
+            WasResolved = true;
+            return order;
+        }
+    }
+
+    private sealed class ProbedEmbed(ResolveProbe probe) : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Embed("child", probe.Resolve).When(_ => false);
     }
 
     private sealed class ExplicitUrlResolver : ILinkUrlResolver

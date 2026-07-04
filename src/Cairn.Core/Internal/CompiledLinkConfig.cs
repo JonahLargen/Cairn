@@ -83,6 +83,14 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReport
                 }
             }
 
+            foreach (var spec in _builder.EmbedSpecs)
+            {
+                if (spec.Policy is { Length: > 0 } policy)
+                {
+                    (policies ??= new(StringComparer.Ordinal)).Add(policy);
+                }
+            }
+
             return policies ?? (IReadOnlyCollection<string>)Array.Empty<string>();
         }
     }
@@ -158,6 +166,11 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReport
         List<EmbeddedResource>? embedded = null;
         foreach (var spec in _builder.EmbedSpecs)
         {
+            if (!await IncludeAsync(spec, typed, context, cancellationToken).ConfigureAwait(false))
+            {
+                continue;   // a gated-out embed omits its relation from _embedded entirely
+            }
+
             var resources = spec.Resolve(typed);
             if (spec.Single && resources.Count == 0)
             {

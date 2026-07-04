@@ -54,6 +54,37 @@ public class CairnEmbeddedTests
         Assert.EndsWith("/orders/5", root.GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
     }
 
+    [Fact]
+    public async Task A_gated_embed_is_omitted_when_its_condition_fails()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o =>
+        {
+            o.AddLinks(new GatedEmbOrderLinks());
+            o.AddLinks(new EmbCustomerLinks());
+            o.AddLinks(new EmbItemLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapGet("/gated-orders/{id:int}", (int id) =>
+                TypedResults.Ok(new EmbOrder(id) { Customer = new EmbCustomer(99), Items = [new EmbItem(1)] }))
+            .WithName("GatedEmbGetOrder").WithLinks();
+        app.MapGet("/customers/{id:int}", (int id) => TypedResults.Ok(new EmbCustomer(id))).WithName("EmbGetCustomer");
+        app.MapGet("/items/{id:int}", (int id) => TypedResults.Ok(new EmbItem(id))).WithName("EmbGetItem");
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        // The customer embed is gated on an even id; the item embed is always present.
+        var oddEmbedded = JsonDocument.Parse(await client.GetStringAsync("/gated-orders/5")).RootElement.GetProperty("_embedded");
+        Assert.False(oddEmbedded.TryGetProperty("customer", out _));   // condition fails -> relation absent entirely
+        Assert.True(oddEmbedded.TryGetProperty("item", out _));
+
+        var evenEmbedded = JsonDocument.Parse(await client.GetStringAsync("/gated-orders/4")).RootElement.GetProperty("_embedded");
+        Assert.Equal(99, evenEmbedded.GetProperty("customer").GetProperty("id").GetInt32());
+    }
+
     private sealed record EmbOrder(int Id)
     {
         [JsonIgnore]
@@ -73,6 +104,16 @@ public class CairnEmbeddedTests
         {
             builder.Self(order => LinkTarget.Route("EmbGetOrder", new { id = order.Id }));
             builder.Embed("customer", order => order.Customer);
+            builder.EmbedMany("item", order => order.Items);
+        }
+    }
+
+    private sealed class GatedEmbOrderLinks : LinkConfig<EmbOrder>
+    {
+        public override void Configure(ILinkBuilder<EmbOrder> builder)
+        {
+            builder.Self(order => LinkTarget.Route("GatedEmbGetOrder", new { id = order.Id }));
+            builder.Embed("customer", order => order.Customer).When(order => order.Id % 2 == 0);
             builder.EmbedMany("item", order => order.Items);
         }
     }

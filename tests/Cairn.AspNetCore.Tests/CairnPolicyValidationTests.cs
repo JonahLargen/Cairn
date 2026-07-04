@@ -83,6 +83,24 @@ public class CairnPolicyValidationTests
     }
 
     [Fact]
+    public async Task Startup_fails_when_a_policy_gated_embed_references_an_unknown_policy()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAuthorization();
+        builder.Services.AddCairn(o => o.AddLinks(new EmbedTypoGatedLinks()));
+
+        await using var app = builder.Build();
+        app.MapGet("/pv/{id:int}", (int id) => TypedResults.Ok(new PolicyOrder(id))).WithName("PvGetOrder").WithLinks();
+
+        // Policies referenced by Embed()/EmbedMany() declarations are validated exactly like link policies.
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => app.StartAsync());
+
+        Assert.Contains("CanSeeChildd", failure.Message, StringComparison.Ordinal);    // the typo'd name
+        Assert.Contains(nameof(PolicyOrder), failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_policy_provider_that_throws_at_startup_does_not_fail_the_host()
     {
         var builder = WebApplication.CreateBuilder();
@@ -159,6 +177,16 @@ public class CairnPolicyValidationTests
         {
             builder.Self(o => LinkTarget.Route("PvGetOrder", new { id = o.Id }));
             builder.Link("audit", o => LinkTarget.Uri($"/pv/{o.Id}/audit")).RequireAuthorization("CanSeeAudti");
+        }
+    }
+
+    private sealed class EmbedTypoGatedLinks : LinkConfig<PolicyOrder>
+    {
+        public override void Configure(ILinkBuilder<PolicyOrder> builder)
+        {
+            builder.Self(o => LinkTarget.Route("PvGetOrder", new { id = o.Id }));
+            builder.Embed("sibling", o => o).When(_ => true);                       // ungated policy: no name to validate
+            builder.Embed("child", o => o).RequireAuthorization("CanSeeChildd");     // the typo'd name
         }
     }
 }
