@@ -21,9 +21,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\Cairn.Analyzers\bin\$(Configuration)\netstandard2.0\Cairn.Analyzers.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-    <None Include="..\Cairn.CodeFixes\bin\$(Configuration)\netstandard2.0\Cairn.CodeFixes.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-    <None Include="..\Cairn.SourceGenerators\bin\$(Configuration)\netstandard2.0\Cairn.SourceGenerators.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="..\Cairn.Analyzers\bin\$(Configuration)\netstandard2.0\Cairn.Analyzers.dll" Condition="Exists('..\Cairn.Analyzers\bin\$(Configuration)\netstandard2.0\Cairn.Analyzers.dll')" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="..\Cairn.CodeFixes\bin\$(Configuration)\netstandard2.0\Cairn.CodeFixes.dll" Condition="Exists('..\Cairn.CodeFixes\bin\$(Configuration)\netstandard2.0\Cairn.CodeFixes.dll')" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="..\Cairn.SourceGenerators\bin\$(Configuration)\netstandard2.0\Cairn.SourceGenerators.dll" Condition="Exists('..\Cairn.SourceGenerators\bin\$(Configuration)\netstandard2.0\Cairn.SourceGenerators.dll')" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
 
 </Project>
