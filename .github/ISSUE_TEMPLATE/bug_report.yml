@@ -1,0 +1,47 @@
+name: Bug report
+description: Something doesn't work the way it should.
+labels: [bug]
+body:
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      description: Which Cairn package and version (e.g. Cairn.AspNetCore 0.6.6)?
+      placeholder: Cairn.AspNetCore 0.6.6
+    validations:
+      required: true
+
+  - type: input
+    id: framework
+    attributes:
+      label: Target framework
+      placeholder: net10.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead? Include the emitted JSON, exception, or diagnostic message where relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: >-
+        The smallest endpoint + LinkConfig + DTO (or client call) that shows the
+        problem. A snippet is fine; a repo link is even better.
+      render: csharp
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Relevant CairnOptions settings, hypermedia format (HAL / HAL-FORMS), custom formatters, etc.
+    validations:
+      required: false

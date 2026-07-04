@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Cairn.Internal;
 
 /// <summary>Common, mutable state shared by link and affordance specifications.</summary>
@@ -105,6 +107,7 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
 
     public string HttpMethod { get; private set; } = "POST";
 
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
     public Type? InputType { get; private set; }
 
     public string? ContentTypeText { get; private set; }
@@ -127,7 +130,7 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
 
     public IAffordanceSpec<T> Delete() => Method("DELETE");
 
-    public IAffordanceSpec<T> Accepts<TInput>()
+    public IAffordanceSpec<T> Accepts<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] TInput>()
     {
         InputType = typeof(TInput);
         return this;

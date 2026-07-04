@@ -84,7 +84,7 @@ internal static class HypermediaParser
             // A templated self link is expanded with no variables (unresolved expressions collapse per
             // RFC 6570) so the fallback target never carries literal '{...}' braces onto the wire.
             var self = links.TryGetValue("self", out var selfLinks) && selfLinks.Count > 0 ? selfLinks[0] : null;
-            var selfHref = self is { Templated: true } ? UriTemplate.Expand(self.Href, null) : self?.Href;
+            var selfHref = self is { Templated: true } ? UriTemplate.Expand(self.Href) : self?.Href;
             foreach (var entry in templatesElement.EnumerateObject())
             {
                 var target = GetString(entry.Value, "target");

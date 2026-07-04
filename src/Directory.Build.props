@@ -15,6 +15,7 @@
     <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
 
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/JonahLargen/Cairn</PackageProjectUrl>
     <PackageTags>hateoas;hypermedia;rest;api;links;hal;aspnetcore;minimal-api;affordances</PackageTags>
@@ -32,8 +33,19 @@
     <PackageValidationBaselineVersion>0.6.6</PackageValidationBaselineVersion>
   </PropertyGroup>
 
+  <!-- Trim/AOT compatibility: every shippable library is trim- and Native-AOT-analyzed
+       (IsAotCompatible also turns on the trimming and single-file analyzers). Reflection-based
+       convenience APIs are annotated [RequiresUnreferencedCode]/[RequiresDynamicCode] so consumers
+       get warnings only on the members that need them (see docs/articles/aot.md). netstandard2.0
+       projects (analyzers, generators, code fixes) run inside the compiler and are skipped by the
+       TFM condition. -->
+  <PropertyGroup Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0'))">
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)../README.md" Pack="true" PackagePath="\" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)../README.md')" />
+    <None Include="$(MSBuildThisFileDirectory)../icon.png" Pack="true" PackagePath="\" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)../icon.png')" />
   </ItemGroup>
 
   <!-- Applied to every src project (not just packables) so the analyzer/generator assemblies that

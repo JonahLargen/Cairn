@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 
 namespace Cairn.Client;
@@ -69,7 +70,9 @@ public sealed class Resource<T>
         {
             if (string.Equals(curie.Name, prefix, StringComparison.OrdinalIgnoreCase))
             {
-                return curie.Templated ? UriTemplate.Expand(curie.Href, new { rel = relation[(colon + 1)..] }) : curie.Href;
+                return curie.Templated
+                    ? UriTemplate.Expand(curie.Href, new Dictionary<string, object?> { ["rel"] = relation[(colon + 1)..] })
+                    : curie.Href;
             }
         }
 
@@ -145,6 +148,7 @@ public sealed class Resource<T>
 
     /// <summary>Follows the link with the given relation, expanding it as an RFC 6570 URI template with <paramref name="variables"/> (e.g. <c>new { status = "open", page = 2 }</c>).</summary>
     /// <exception cref="InvalidOperationException">The resource has no link with that relation.</exception>
+    [RequiresUnreferencedCode(CairnClient.TemplateVariablesRequiresUnreferencedCode)]
     public Task<ClientResult<TNext>> FollowAsync<TNext>(string relation, object? variables, CancellationToken cancellationToken = default)
         => Links.TryGetValue(relation, out var link)
             ? _client.FollowAsync<TNext>(link, variables, cancellationToken)

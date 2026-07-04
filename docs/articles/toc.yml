@@ -26,6 +26,8 @@
   href: caching.md
 - name: Diagnostics &amp; observability
   href: diagnostics.md
+- name: Trimming &amp; Native AOT
+  href: aot.md
 - name: Controllers (MVC)
   href: controllers.md
 - name: The typed client

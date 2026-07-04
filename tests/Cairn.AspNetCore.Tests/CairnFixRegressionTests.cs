@@ -130,6 +130,23 @@ public partial class CairnFixRegressionTests
     }
 
     [Fact]
+    public async Task A_host_with_no_TypeInfoResolver_falls_back_to_the_reflection_resolver()
+    {
+        // A host that clears the resolver (rather than assigning a source-generated one) still serializes:
+        // Cairn's post-configure backstops the chain with the default reflection resolver when reflection
+        // serialization is enabled, plus its own context for the wire types.
+        await using var app = await StartAsync(
+            configureServices: services => services.ConfigureHttpJsonOptions(json =>
+                json.SerializerOptions.TypeInfoResolver = null));
+        using var client = app.GetTestClient();
+
+        var root = JsonDocument.Parse(await client.GetStringAsync("/orders/42")).RootElement;
+
+        Assert.True(root.TryGetProperty("id", out _));
+        Assert.True(root.GetProperty("_links").GetProperty("self").TryGetProperty("href", out _));
+    }
+
+    [Fact]
     public async Task Calling_AddCairn_twice_composes_both_configurations()
     {
         var builder = WebApplication.CreateBuilder();

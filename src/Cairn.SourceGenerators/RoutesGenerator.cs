@@ -508,9 +508,13 @@ public sealed class RoutesGenerator : IIncrementalGenerator
             }
             else
             {
+                // Route values are emitted as a dictionary rather than an anonymous type: link generation
+                // copies string-keyed pairs without reflection, so generated targets stay trim/AOT-safe.
                 var values = parameters.Count == 0
                     ? "null"
-                    : "new { " + string.Join(", ", parameters.Select(static p => Escape(p.Name))) + " }";
+                    : "new global::System.Collections.Generic.Dictionary<string, object?> { "
+                        + string.Join(", ", parameters.Select(static p => "[" + SymbolDisplay.FormatLiteral(p.Name, quote: true) + "] = " + Escape(p.Name)))
+                        + " }";
                 builder.AppendLine($"        public static global::Cairn.LinkTarget {method}({signature})");
                 builder.AppendLine($"            => global::Cairn.LinkTarget.Route({name}, {values});");
             }

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Cairn.AspNetCore.Internal;
 using Microsoft.AspNetCore.Http;
@@ -128,6 +129,8 @@ public sealed class CairnOptions
 
     /// <summary>Discovers and registers every non-abstract <see cref="LinkConfig{T}"/> with a public parameterless constructor in <paramref name="assembly"/>.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="assembly"/> is null.</exception>
+    [RequiresUnreferencedCode("Assembly scanning enumerates and instantiates types via reflection, which trimming may remove. Register configs explicitly with AddLinks<T> in trimmed applications.")]
+    [RequiresDynamicCode("Discovered configs are compiled through MakeGenericType over their runtime resource types. Register configs explicitly with AddLinks<T> in Native AOT applications.")]
     public CairnOptions AddLinksFromAssembly(Assembly assembly)
     {
         ThrowIfFrozen(nameof(AddLinksFromAssembly));
@@ -146,6 +149,8 @@ public sealed class CairnOptions
     }
 
     /// <summary>Discovers and registers every <see cref="LinkConfig{T}"/> in the assembly that contains <typeparamref name="T"/>.</summary>
+    [RequiresUnreferencedCode("Assembly scanning enumerates and instantiates types via reflection, which trimming may remove. Register configs explicitly with AddLinks<T> in trimmed applications.")]
+    [RequiresDynamicCode("Discovered configs are compiled through MakeGenericType over their runtime resource types. Register configs explicitly with AddLinks<T> in Native AOT applications.")]
     public CairnOptions AddLinksFromAssemblyContaining<T>() => AddLinksFromAssembly(typeof(T).Assembly);
 
     private static bool IsLinkConfig(Type type)
