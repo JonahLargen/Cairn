@@ -104,6 +104,21 @@ public class CairnSwashbuckleTests
     }
 
     [Fact]
+    public async Task A_configured_type_on_an_endpoint_without_WithLinks_keeps_plain_json_only()
+    {
+        using var document = await GetDocumentAsync();
+        var content = document.RootElement
+            .GetProperty("paths").GetProperty("/orders/unlinked").GetProperty("get")
+            .GetProperty("responses").GetProperty("200").GetProperty("content");
+
+        // The endpoint returns a configured type but never opted in, so it projects no hypermedia — the
+        // document must not advertise hal+json/hal-forms+json, or a client negotiating them gets plain JSON.
+        Assert.True(content.TryGetProperty("application/json", out _));
+        Assert.False(content.TryGetProperty("application/hal+json", out _));
+        Assert.False(content.TryGetProperty("application/prs.hal-forms+json", out _));
+    }
+
+    [Fact]
     public async Task Bare_collection_responses_keep_plain_json_only()
     {
         using var document = await GetDocumentAsync();
@@ -265,6 +280,9 @@ public class CairnSwashbuckleTests
         app.MapGet("/orders/adapted-cursor", () => TypedResults.Ok(new SwaggerCustomFeed([new(1)], "a", null))).WithLinks();
         app.MapGet("/clash", () => TypedResults.Ok(new SwaggerClashOrder(1, new Dictionary<string, string>()))).WithLinks();
         app.MapGet("/plain", () => TypedResults.Ok(new SwaggerPlainNote("hi")));
+        // A configured type returned by an endpoint that never opted in via WithLinks(): it projects no
+        // hypermedia at runtime, so the document must not advertise the negotiable HAL media types.
+        app.MapGet("/orders/unlinked", () => TypedResults.Ok(new SwaggerOrder(9)));
 
         await app.StartAsync();
         using var client = app.GetTestClient();

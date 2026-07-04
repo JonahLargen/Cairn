@@ -1,9 +1,13 @@
-# Strict 95% project gate. Codecov counts a partially covered line (a branch
-# line where not every direction was taken) as uncovered, so this target demands
-# fully exercised lines. The CI gate in ci.yml enforces the same policy with the
-# standard metrics: 95% line coverage AND 95% branch coverage via ReportGenerator.
-# The percentages differ (Codecov blends partials into its line number; CI reports
-# line and branch separately) but both gates require the same thing to go green.
+# Strict 95% coverage gates. Codecov counts a partially covered line (a branch
+# line where not every direction was taken) as uncovered, so these targets demand
+# fully exercised lines. The CI gate in ci.yml enforces the same policy on the
+# whole project with the standard metrics: 95% line AND 95% branch coverage via
+# ReportGenerator.
+#
+# - project: the whole codebase must stay at or above 95%.
+# - patch: the lines changed by a PR must themselves hit 95% — the canonical
+#   Codecov gate, so new code carries its own coverage rather than riding on the
+#   project average. Both statuses block the PR.
 coverage:
   status:
     project:
@@ -11,4 +15,4 @@ coverage:
         target: 95%
     patch:
       default:
-        informational: true
+        target: 95%

@@ -96,6 +96,27 @@ public class CairnPreconditionEdgeTests
         Assert.Equal(HttpStatusCode.NotModified, (await client.SendAsync(conditional)).StatusCode);
     }
 
+    [Fact]
+    public async Task A_412_echoes_the_current_etag_and_omits_it_when_absent()
+    {
+        await using var app = await StartAsync();
+        using var client = app.GetTestClient();
+
+        // A lost-update 412 carries the resource's current validator so the client can retry with it.
+        using var stale = new HttpRequestMessage(HttpMethod.Put, "/docs/5");
+        stale.Headers.TryAddWithoutValidation("If-Match", "\"stale\"");
+        var conflict = await client.SendAsync(stale);
+        Assert.Equal(HttpStatusCode.PreconditionFailed, conflict.StatusCode);
+        Assert.Equal("\"v5\"", Assert.Single(conflict.Headers.GetValues("ETag")));
+
+        // A 412 for a resource with no current representation has no validator to echo.
+        using var missing = new HttpRequestMessage(HttpMethod.Put, "/docs/404");
+        missing.Headers.TryAddWithoutValidation("If-Match", "\"v404\"");
+        var gone = await client.SendAsync(missing);
+        Assert.Equal(HttpStatusCode.PreconditionFailed, gone.StatusCode);
+        Assert.False(gone.Headers.Contains("ETag"));
+    }
+
     private static async Task<WebApplication> StartAsync()
     {
         var builder = WebApplication.CreateBuilder();

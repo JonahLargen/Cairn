@@ -73,10 +73,23 @@ internal sealed class LinkGeneratorUrlResolver(
                     case RoutePatternParameterPart parameter
                         when values.TryGetValue(parameter.Name, out var bound) && bound is not null:
                         consumed.Add(parameter.Name);
-                        path.Append(Uri.EscapeDataString(Convert.ToString(bound, CultureInfo.InvariantCulture) ?? string.Empty));
+                        var text = Convert.ToString(bound, CultureInfo.InvariantCulture) ?? string.Empty;
+                        // A catch-all ({*slug}/{**slug}) captures a whole path: its '/' separators are
+                        // structural, so escape each segment but keep the slashes rather than encoding them
+                        // into %2F (which would produce the wrong URL for a value like "docs/intro/setup").
+                        path.Append(parameter.IsCatchAll ? EscapeCatchAll(text) : Uri.EscapeDataString(text));
                         break;
                     case RoutePatternParameterPart parameter:
-                        path.Append('{').Append(parameter.Name).Append('}');
+                        // An unbound parameter stays a template variable. A catch-all keeps its marker as an
+                        // RFC 6570 reserved expansion ({+slug}) so the client expands a multi-segment value
+                        // with its '/' separators intact; a normal parameter is a simple {slug}.
+                        path.Append('{');
+                        if (parameter.IsCatchAll)
+                        {
+                            path.Append('+');
+                        }
+
+                        path.Append(parameter.Name).Append('}');
                         break;
                 }
             }
@@ -97,6 +110,18 @@ internal sealed class LinkGeneratorUrlResolver(
         }
 
         return Transform(http, url);
+    }
+
+    // Percent-encodes each segment of a catch-all value while preserving the '/' separators between them.
+    private static string EscapeCatchAll(string value)
+    {
+        var segments = value.Split('/');
+        for (var i = 0; i < segments.Length; i++)
+        {
+            segments[i] = Uri.EscapeDataString(segments[i]);
+        }
+
+        return string.Join('/', segments);
     }
 
     // The prefix ahead of the route path, honoring the configured URL style (mirrors ResolveRoute's handling).

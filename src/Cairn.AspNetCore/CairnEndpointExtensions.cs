@@ -21,11 +21,16 @@ public static class CairnEndpointExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        return builder.AddEndpointFilterFactory((_, next) => async invocation =>
+        builder.AddEndpointFilterFactory((_, next) => async invocation =>
         {
             var result = await next(invocation);
             return await CairnLinkRecorder.RecordResultAsync(invocation.HttpContext, result);
         });
+
+        // Leave a discoverable marker in the endpoint metadata: the filter above is invisible to the
+        // OpenAPI/Swagger document generators, so without it they cannot tell an opted-in endpoint from one
+        // that returns a configured type as plain JSON, and would advertise hal+json negotiation on both.
+        return builder.WithMetadata(CairnLinksMetadata.Instance);
     }
 
     /// <summary>

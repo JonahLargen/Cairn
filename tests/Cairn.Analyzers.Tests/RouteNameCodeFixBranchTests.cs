@@ -76,6 +76,27 @@ class Config
     }
 
     [Fact]
+    public async Task No_fix_is_offered_for_a_concatenated_constant_route_name()
+    {
+        const string source = @"
+namespace Cairn { public static class LinkTarget { public static object Route(string name, object values = null) => name; } }
+public static class EndpointExtensions { public static T WithName<T>(this T builder, string name) => builder; }
+class Config
+{
+    void Endpoints() { new object().WithName(""GetOrderById""); }
+    object Link() { return Cairn.LinkTarget.Route(""Get"" + ""OrderByIdd""); }
+}";
+
+        // The analyzer evaluates the concatenated constant and points the diagnostic at the whole binary
+        // expression, which wraps two string literals. Rewriting just the first would produce
+        // "GetOrderById" + "OrderByIdd" — the fix must stay away rather than corrupt the name.
+        var (document, diagnostic) = await GetDiagnosticAsync(source);
+        var actions = await RegisterAsync(document, diagnostic);
+
+        Assert.Empty(actions);
+    }
+
+    [Fact]
     public async Task No_fix_is_offered_when_the_diagnostic_points_at_a_non_string_literal()
     {
         const string source = @"

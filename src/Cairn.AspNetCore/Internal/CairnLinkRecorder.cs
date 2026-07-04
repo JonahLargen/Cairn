@@ -1096,17 +1096,19 @@ internal static class CairnLinkRecorder
             return links;
         }
 
-        var used = new List<HalLink>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        CollectCuries(links?.Keys, curies, used, seen);
+        // A response can carry many linked items whose rels use no curie prefix at all; defer the List/HashSet
+        // until a rel actually resolves to a registered prefix, so the common no-prefix path allocates nothing.
+        List<HalLink>? used = null;
+        HashSet<string>? seen = null;
+        CollectCuries(links?.Keys, curies, ref used, ref seen);
         if (scope.Format != HypermediaFormat.Hal)
         {
-            CollectCuries(EmittedActionNames(actions, scope.Format), curies, used, seen);
+            CollectCuries(EmittedActionNames(actions, scope.Format), curies, ref used, ref seen);
         }
 
-        CollectCuries(embedded?.Keys, curies, used, seen);
+        CollectCuries(embedded?.Keys, curies, ref used, ref seen);
 
-        if (used.Count == 0)
+        if (used is null)
         {
             return links;
         }
@@ -1144,7 +1146,7 @@ internal static class CairnLinkRecorder
         return names;
     }
 
-    private static void CollectCuries(IEnumerable<string>? relations, IReadOnlyDictionary<string, string> curies, List<HalLink> used, HashSet<string> seen)
+    private static void CollectCuries(IEnumerable<string>? relations, IReadOnlyDictionary<string, string> curies, ref List<HalLink>? used, ref HashSet<string>? seen)
     {
         if (relations is null)
         {
@@ -1154,9 +1156,10 @@ internal static class CairnLinkRecorder
         foreach (var relation in relations)
         {
             var colon = relation.IndexOf(':');
-            if (colon > 0 && curies.TryGetValue(relation[..colon], out var href) && seen.Add(relation[..colon]))
+            if (colon > 0 && curies.TryGetValue(relation[..colon], out var href)
+                && (seen ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(relation[..colon]))
             {
-                used.Add(new HalLink(href) { Name = relation[..colon], Templated = true });
+                (used ??= []).Add(new HalLink(href) { Name = relation[..colon], Templated = true });
             }
         }
     }

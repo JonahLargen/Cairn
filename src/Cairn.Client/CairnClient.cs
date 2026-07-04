@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -132,8 +133,12 @@ public sealed class CairnClient
     /// so that adding conditional-GET support stayed binary-compatible: callers compiled against the earlier
     /// signature keep binding to it, and a positional <see cref="CancellationToken"/> still resolves there.
     /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="itemsProperty"/> is <see langword="null"/> — pass the default <c>"items"</c> (or the envelope's array property), never <see langword="null"/>.</exception>
     public Task<CollectionResult<TItem>> GetCollectionAsync<TItem>(string url, string itemsProperty, string? ifNoneMatch, CancellationToken cancellationToken = default)
-        => TimeboxedAsync(async token =>
+    {
+        // Guard here rather than null-ref later reading the items property (matching CollectionResource.FollowAsync).
+        ArgumentNullException.ThrowIfNull(itemsProperty);
+        return TimeboxedAsync(async token =>
         {
             using var request = CreateRequest(HttpMethod.Get, url);
             if (ifNoneMatch is not null)
@@ -144,6 +149,7 @@ public sealed class CairnClient
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             return await ReadCollectionResultAsync<TItem>(response, itemsProperty, token).ConfigureAwait(false);
         }, cancellationToken);
+    }
 
     // A templated pagination link (e.g. a "next" carrying "{?page}") expands with the variables; with none,
     // every unresolved expression collapses per RFC 6570, so a templated next/prev stays followable.
@@ -295,7 +301,9 @@ public sealed class CairnClient
             }
         }
 
-        if (value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number))
+        // Range checks apply to a numeric value whether it was submitted as a JSON number or as a numeric
+        // string (a form field carries "150", not 150) — otherwise "150" would slip past a Max of 100.
+        if (TryGetNumber(value, out var number))
         {
             if (field.Min is { } min && number < min)
             {
@@ -306,27 +314,77 @@ public sealed class CairnClient
             {
                 (errors ??= []).Add($"'{field.Name}' must be at most {max}.");
             }
+
+            // HAL-FORMS step (HTML5 step semantics): the value must be an integral number of steps from the
+            // base — the field's min, or 0. Compared with a small relative tolerance so binary floating-point
+            // rounding (0.1 + 0.2) does not flag an otherwise-valid value. A non-finite value (from a "NaN" /
+            // "Infinity" string) yields a NaN comparison that is never > the tolerance, so it raises no step
+            // error without a separate finiteness guard.
+            if (field.Step is { } step && step > 0)
+            {
+                var steps = (number - (field.Min ?? 0)) / step;
+                if (Math.Abs(steps - Math.Round(steps)) > 1e-9 * Math.Max(1, Math.Abs(steps)))
+                {
+                    (errors ??= []).Add($"'{field.Name}' must be a multiple of {step}{(field.Min is { } b ? $" starting from {b}" : string.Empty)}.");
+                }
+            }
         }
 
         if (field.Options.Count > 0)
         {
-            // Compare the JSON scalar the server would receive: GetRawText keeps a bool as "true"/"false"
-            // (the values the server emits in its options), where JsonElement.ToString() yields "True".
-            var text = value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText();
-            if (!field.Options.Any(option => string.Equals(option.Value, text, StringComparison.Ordinal)))
+            // A multi-select field submits an array; each element must be a valid option on its own. Comparing
+            // the whole array's raw text to a single scalar option would reject every multi-select submission.
+            if (value.ValueKind == JsonValueKind.Array)
             {
-                (errors ??= []).Add($"'{field.Name}' must be one of: {string.Join(", ", field.Options.Select(option => option.Value))}.");
+                foreach (var element in value.EnumerateArray())
+                {
+                    ValidateOption(field, element, ref errors);
+                }
+            }
+            else
+            {
+                ValidateOption(field, value, ref errors);
             }
         }
     }
 
-    // HAL-FORMS regex follows HTML5 pattern semantics: it must match the whole value. A pattern the runtime
-    // cannot evaluate (invalid, or pathological enough to time out) never invalidates the value.
+    private static void ValidateOption(AffordanceField field, JsonElement value, ref List<string>? errors)
+    {
+        // Compare the JSON scalar the server would receive: GetRawText keeps a bool as "true"/"false"
+        // (the values the server emits in its options), where JsonElement.ToString() yields "True".
+        var text = value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText();
+        if (!field.Options.Any(option => string.Equals(option.Value, text, StringComparison.Ordinal)))
+        {
+            (errors ??= []).Add($"'{field.Name}' must be one of: {string.Join(", ", field.Options.Select(option => option.Value))}.");
+        }
+    }
+
+    // A field value as a double, whether encoded as a JSON number or a numeric string. A non-numeric value
+    // (or a string that does not parse) is not a range violation — it fails type/required checks elsewhere.
+    private static bool TryGetNumber(JsonElement value, out double number)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Number:
+                return value.TryGetDouble(out number);
+            case JsonValueKind.String:
+                return double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out number);
+            default:
+                number = 0;
+                return false;
+        }
+    }
+
+    // HAL-FORMS regex follows HTML5 pattern semantics — an ECMAScript regex anchored to the whole value.
+    // ECMAScript mode makes \d/\w/\s ASCII (not Unicode) and the \A...\z anchors bind to the absolute
+    // start/end (a plain $ would also match just before a trailing \n), so values a spec-compliant validator
+    // rejects are not silently accepted. A pattern the runtime cannot evaluate (invalid under ECMAScript, or
+    // pathological enough to time out) never invalidates the value.
     private static bool MatchesPattern(string text, string pattern)
     {
         try
         {
-            return Regex.IsMatch(text, $"^(?:{pattern})$", RegexOptions.None, RegexTimeout);
+            return Regex.IsMatch(text, $@"\A(?:{pattern})\z", RegexOptions.ECMAScript | RegexOptions.CultureInvariant, RegexTimeout);
         }
         catch (ArgumentException)
         {
@@ -349,10 +407,38 @@ public sealed class CairnClient
 
         if (ifMatch is not null)
         {
-            request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+            request.Headers.TryAddWithoutValidation("If-Match", StrongIfMatch(ifMatch));
         }
 
         return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+    }
+
+    // The raw ETag header, preserving a value the typed HttpResponseHeaders.ETag parser rejects (a
+    // non-RFC-7232 tag still round-trips as an opaque validator on a later conditional request). Null when the
+    // response carries no ETag.
+    private static string? ReadETag(HttpResponseMessage response)
+    {
+        if (response.Headers.NonValidated.TryGetValues("ETag", out var values))
+        {
+            foreach (var value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value.Trim();
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // RFC 9110 §13.1.1 compares If-Match with the strong function, so a weak validator (W/"...") must not be
+    // sent there. Send its strong form instead: a spurious 412 is the safe failure, whereas dropping the
+    // header would silently forfeit the caller's lost-update protection.
+    private static string StrongIfMatch(string ifMatch)
+    {
+        var trimmed = ifMatch.TrimStart();
+        return trimmed.StartsWith("W/", StringComparison.Ordinal) ? trimmed[2..].TrimStart() : ifMatch;
     }
 
     // Honor the affordance's declared contentType (HAL-FORMS): JSON media types serialize the body as JSON
@@ -495,7 +581,7 @@ public sealed class CairnClient
         // throw about. Surface it as a bodiless success the caller can distinguish via IsNotModified.
         if (response.StatusCode == HttpStatusCode.NotModified)
         {
-            return ClientResult<T>.Success(status, EmptyResource<T>(response.Headers.ETag?.ToString()));
+            return ClientResult<T>.Success(status, EmptyResource<T>(ReadETag(response)));
         }
 
         if (!response.IsSuccessStatusCode)
@@ -503,7 +589,7 @@ public sealed class CairnClient
             return ClientResult<T>.Failure(status, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
         }
 
-        var etag = response.Headers.ETag?.ToString();
+        var etag = ReadETag(response);
         var (document, problem) = await ParseBodyAsync(response, cancellationToken).ConfigureAwait(false);
         if (problem is not null)
         {
@@ -535,7 +621,7 @@ public sealed class CairnClient
     private async Task<CollectionResult<TItem>> ReadCollectionResultAsync<TItem>(HttpResponseMessage response, string itemsProperty, CancellationToken cancellationToken)
     {
         var status = (int)response.StatusCode;
-        var etag = response.Headers.ETag?.ToString();
+        var etag = ReadETag(response);
 
         // 304 Not Modified answers a conditional collection GET: the caller's cached page is still fresh and
         // no body was sent, so surface a bodiless success (empty items) that preserves the ETag, mirroring the
@@ -678,11 +764,17 @@ public sealed class CairnClient
         return new Resource<T>(this, value, parsed.Links, parsed.Affordances, parsed.Fields, etag, parsed.Embedded, parsed.Curies);
     }
 
-    // Error bodies honor the same buffer cap as success bodies, but by truncation: a hostile server's
-    // oversized error document degrades to the status-derived problem instead of an unbounded allocation.
+    // A problem document is small (RFC 9457 members plus a little hypermedia); cap the error-body buffer at
+    // 1 MiB rather than the multi-gigabyte success-body limit, so a hostile or misbehaving server's oversized
+    // error body degrades to the status-derived problem long before it becomes a large allocation.
+    private const int MaxProblemBodyBytes = 1 << 20;
+
+    // Error bodies are buffered by truncation: an oversized error document degrades to the status-derived
+    // problem instead of an unbounded allocation, bounded by the smaller of the problem cap and any lower
+    // MaxResponseContentBufferSize the caller set for untrusted servers.
     private async Task<Problem> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        var maxBytes = (int)Math.Min(_http.MaxResponseContentBufferSize, int.MaxValue);
+        var maxBytes = (int)Math.Min(_http.MaxResponseContentBufferSize, MaxProblemBodyBytes);
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var buffer = new MemoryStream();
         var chunk = new byte[8192];

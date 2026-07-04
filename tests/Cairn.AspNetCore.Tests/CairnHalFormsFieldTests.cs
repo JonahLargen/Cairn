@@ -82,6 +82,16 @@ public class CairnHalFormsFieldTests
         // [DefaultValue] surfaces as the HAL-FORMS "value" key.
         Assert.Equal("3", props["priority"].GetProperty("value").GetString());
 
+        // An enum default given as the enum member is emitted in the same wire form as its options (the
+        // numeric "1" here), not the member name "Shipped" — otherwise it would preselect no option.
+        Assert.Equal("1", props["defaultStatus"].GetProperty("value").GetString());
+        var statusOptions = props["defaultStatus"].GetProperty("options").GetProperty("inline").EnumerateArray()
+            .Select(o => o.GetProperty("value").GetString());
+        Assert.Contains("1", statusOptions);
+
+        // A default supplied as a raw number (not the enum member) keeps its plain formatting.
+        Assert.Equal("1", props["numericStatus"].GetProperty("value").GetString());
+
         // The C# `required` modifier and a non-nullable reference type both mean required;
         // a nullable string does not.
         Assert.True(props["reference"].GetProperty("required").GetBoolean());
@@ -112,6 +122,12 @@ public class CairnHalFormsFieldTests
 
         [System.ComponentModel.DefaultValue(3)]
         public int Priority { get; init; }
+
+        [System.ComponentModel.DefaultValue(OrderStatus.Shipped)]
+        public OrderStatus DefaultStatus { get; init; }
+
+        [System.ComponentModel.DefaultValue(1)]
+        public OrderStatus NumericStatus { get; init; }
 
         public required string Reference { get; init; }
     }

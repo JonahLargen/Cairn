@@ -89,9 +89,14 @@ internal static class UriTemplate
             var colon = name.IndexOf(':');
             if (colon >= 0)
             {
-                if (int.TryParse(name[(colon + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
+                // RFC 6570 §2.4.1: max-length = %x31-39 0*3DIGIT — a positive integer of 1–4 digits with no
+                // leading zero (1–9999). A malformed or zero modifier is a processing error, not a silent
+                // full-value ({v:}, {v:abc}) or empty-value ({v:0}) expansion.
+                var modifier = name[(colon + 1)..];
+                if (!TryParsePrefixLength(modifier, out prefixLength))
                 {
-                    prefixLength = parsed;
+                    throw new FormatException(
+                        $"The URI template variable '{name[..colon]}' has an invalid prefix modifier ':{modifier}'; RFC 6570 §2.4.1 requires a positive max-length of 1–9999.");
                 }
 
                 name = name[..colon];
@@ -132,6 +137,19 @@ internal static class UriTemplate
                     break;
             }
         }
+    }
+
+    // A valid RFC 6570 prefix max-length: 1–4 digits, the first non-zero (so 1–9999). NumberStyles.None
+    // rejects a sign or whitespace; the leading-digit and length checks reject a leading zero and out-of-range.
+    private static bool TryParsePrefixLength(string modifier, out int length)
+    {
+        length = -1;
+        if (modifier.Length is < 1 or > 4 || modifier[0] is < '1' or > '9')
+        {
+            return false;
+        }
+
+        return int.TryParse(modifier, NumberStyles.None, CultureInfo.InvariantCulture, out length);
     }
 
     private static void AppendNamedValue(StringBuilder result, string name, string value, bool named, string ifEmpty, bool allowReserved)

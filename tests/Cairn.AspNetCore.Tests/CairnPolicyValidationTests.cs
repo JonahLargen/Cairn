@@ -100,6 +100,34 @@ public class CairnPolicyValidationTests
         await app.StartAsync();   // the throwing lookup is inconclusive, not a missing policy — must not throw
     }
 
+    [Fact]
+    public async Task Startup_succeeds_with_a_scoped_authorization_handler_under_scope_validation()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+
+        // Validate scopes as the Development container does: resolving the transient IAuthorizationService —
+        // which pulls in the scoped handler below — from the root provider would throw. The startup validator
+        // must resolve it inside a scope, or an app with any scoped authorization handler cannot start.
+        builder.Host.UseDefaultServiceProvider(o => o.ValidateScopes = true);
+        builder.Services.AddAuthorization(o => o.AddPolicy("CanCancle", p => p.RequireAssertion(_ => true)));
+        builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ScopedAuthorizationHandler>();
+        builder.Services.AddCairn(o => o.AddLinks(new TypoGatedLinks()));
+
+        await using var app = builder.Build();
+        app.MapGet("/pv/{id:int}", (int id) => TypedResults.Ok(new PolicyOrder(id))).WithName("PvGetOrder").WithLinks();
+        app.MapPost("/pv/{id:int}/cancel", (int id) => TypedResults.NoContent()).WithName("PvCancel");
+
+        await app.StartAsync();   // must not throw
+    }
+
+    // A scoped authorization handler — the shape of a resource handler that depends on a DbContext. Its
+    // presence makes IAuthorizationService non-resolvable from the root provider under scope validation.
+    private sealed class ScopedAuthorizationHandler : Microsoft.AspNetCore.Authorization.IAuthorizationHandler
+    {
+        public Task HandleAsync(Microsoft.AspNetCore.Authorization.AuthorizationHandlerContext context) => Task.CompletedTask;
+    }
+
     private sealed class BootThrowingPolicyProvider : Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider
     {
         public Task<Microsoft.AspNetCore.Authorization.AuthorizationPolicy> GetDefaultPolicyAsync()

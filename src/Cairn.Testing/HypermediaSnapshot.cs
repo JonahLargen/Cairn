@@ -54,6 +54,21 @@ public static class HypermediaSnapshot
     // A "resource" object is subject to HypermediaOnly filtering; its _embedded values are resources again.
     private static void WriteResource(Utf8JsonWriter writer, JsonElement element, HypermediaSnapshotOptions options)
     {
+        // An array-root response is a collection of resources, so each item is a resource too — route it
+        // through WriteResource (not WriteValue) so HypermediaOnly filtering and _embedded handling still
+        // apply; otherwise a snapshot would silently keep data properties it was told to drop.
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            writer.WriteStartArray();
+            foreach (var item in element.EnumerateArray())
+            {
+                WriteResource(writer, item, options);
+            }
+
+            writer.WriteEndArray();
+            return;
+        }
+
         if (element.ValueKind != JsonValueKind.Object)
         {
             WriteValue(writer, null, element, options);

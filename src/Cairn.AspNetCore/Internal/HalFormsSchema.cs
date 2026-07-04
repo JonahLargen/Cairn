@@ -141,7 +141,7 @@ internal static class HalFormsSchema
             MaxLength = property.GetCustomAttribute<StringLengthAttribute>()?.MaximumLength ?? MaxLengthOf(property),
             Min = ToDouble(range?.Minimum),
             Max = ToDouble(range?.Maximum),
-            Value = DefaultValueOf(property),
+            Value = DefaultValueOf(property, underlying, serializer),
             Options = BuildOptions(underlying, serializer),
         };
     }
@@ -168,13 +168,29 @@ internal static class HalFormsSchema
         => property.GetCustomAttribute<EditableAttribute>() is { AllowEdit: false }
             || property.GetCustomAttribute<ReadOnlyAttribute>() is { IsReadOnly: true };
 
-    private static string? DefaultValueOf(PropertyInfo property)
-        => property.GetCustomAttribute<DefaultValueAttribute>()?.Value switch
+    private static string? DefaultValueOf(PropertyInfo property, Type underlying, JsonSerializerOptions serializer)
+    {
+        var value = property.GetCustomAttribute<DefaultValueAttribute>()?.Value;
+        if (value is null)
         {
-            null => null,
+            return null;
+        }
+
+        // An enum default given as the enum member ([DefaultValue(Status.Shipped)]) must be emitted in the
+        // same wire form as the options list below (numeric, or the converter's string) — the member name
+        // Convert.ToString would produce ("Shipped") matches no option, so it preselects nothing. A default
+        // supplied as a raw string or number is passed through the formatting below unchanged.
+        if (underlying.IsEnum && value.GetType() == underlying)
+        {
+            return WireValueOf(value, underlying, serializer);
+        }
+
+        return value switch
+        {
             bool flag => flag ? "true" : "false",   // match the bool options values below
-            var value => Convert.ToString(value, CultureInfo.InvariantCulture),
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture),
         };
+    }
 
     // An enum-typed (or bool) property becomes a fixed list of selectable values. Option values must
     // round-trip through the host's binder, so each member is serialized through the host's options: numeric
