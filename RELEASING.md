@@ -23,7 +23,8 @@ Versioning and publishing are fully tag-driven. There is no version number in th
    - pushes the `.nupkg` + `.snupkg` packages to NuGet.org;
    - creates the GitHub release with auto-generated notes and the packages attached;
    - generates signed [SLSA build provenance](https://slsa.dev/spec/v1.0/provenance) for the
-     packages and attaches it to the release as `multiple.intoto.jsonl` (see below).
+     packages, records it in GitHub's attestation store, and attaches it to the release as
+     `multiple.intoto.jsonl` / `multiple.sigstore.json` (see below).
 4. **Move the compatibility baseline forward.** After the packages are live, set
    `PackageValidationBaselineVersion` in `src/Directory.Build.props` to the version you just shipped, so
    the next cycle's builds validate against it. Commit it as the first change of the new cycle.
@@ -41,21 +42,22 @@ rather than working around the check.
 
 ### Build provenance
 
-Each release includes a `multiple.intoto.jsonl` asset: a signed [SLSA](https://slsa.dev) attestation,
-produced by the [slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator)
-reusable workflow, stating that this repository's Release workflow built the attached packages from a
-specific commit. Signing is keyless (Sigstore, via the workflow's OIDC identity), so there is no
-signing key to store or rotate, and nothing extra to do when releasing.
+Each release ships signed [SLSA](https://slsa.dev) provenance for the packages, produced by
+[GitHub Artifact Attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
+(`actions/attest-build-provenance`), stating that this repository's Release workflow built the
+attached packages from a specific commit. Signing is keyless (Sigstore, via the workflow's OIDC
+identity), so there is no signing key to store or rotate, and nothing extra to do when releasing.
+The attestation is recorded in GitHub's attestation store and also attached to the release as
+`multiple.intoto.jsonl` (the DSSE-wrapped in-toto statement) and `multiple.sigstore.json` (the full
+Sigstore bundle, for offline verification).
 
-Anyone can verify a downloaded package against it with
-[slsa-verifier](https://github.com/slsa-framework/slsa-verifier):
+Anyone can verify a downloaded package with the [GitHub CLI](https://cli.github.com/):
 
 ```sh
-slsa-verifier verify-artifact Cairn.X.Y.Z.nupkg \
-  --provenance-path multiple.intoto.jsonl \
-  --source-uri github.com/JonahLargen/Cairn \
-  --source-tag vX.Y.Z
+gh attestation verify Cairn.X.Y.Z.nupkg --repo JonahLargen/Cairn
 ```
+
+(offline, against the release asset: add `--bundle multiple.sigstore.json`).
 
 ### Pre-releases
 
@@ -71,9 +73,9 @@ NuGet lists it as a pre-release and the GitHub release is marked as a pre-releas
 ### Fixing a botched release
 
 - **Workflow failed after the tag was pushed** (flaky test, expired key): fix the cause and re-run
-  the workflow from the Actions tab. `--skip-duplicate` makes the NuGet push idempotent. If the
-  provenance job fails on a re-run because `multiple.intoto.jsonl` already exists on the release,
-  delete that stale asset from the release and re-run again.
+  the workflow from the Actions tab. `--skip-duplicate` makes the NuGet push idempotent, and the
+  release-creation step is skipped when the release already exists. A re-run records an additional
+  attestation in GitHub's attestation store, which is harmless.
 - **Bad package already on NuGet.org**: packages cannot be deleted, only unlisted. Unlist it on
   nuget.org and ship a fixed `vX.Y.(Z+1)`. Never move or reuse a tag that has been published.
 
