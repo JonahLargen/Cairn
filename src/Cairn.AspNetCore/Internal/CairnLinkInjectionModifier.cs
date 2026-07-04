@@ -53,10 +53,47 @@ internal sealed class CairnLinkInjectionModifier
             return;
         }
 
+        // A deferred envelope's items are buffered once during the compute stage and registered against the
+        // sequence instance (see CairnLinkRecorder.MaterializeEnvelopeItems). Wrap each reference-typed property
+        // so the serializer reads that buffer instead of re-enumerating the deferred sequence — which would
+        // rerun the query and produce fresh, link-less instances — without the compute stage having to mutate
+        // the envelope. Wrap before injecting the hypermedia properties below, which are object-typed and never
+        // carry buffered items.
+        foreach (var property in typeInfo.Properties)
+        {
+            SubstituteMaterializedItems(property);
+        }
+
         foreach (var name in _names)
         {
             AddProperty(typeInfo, name);
         }
+    }
+
+    // Substitute the buffered materialization for a deferred items sequence at serialization: when the property
+    // still yields the sequence the compute stage buffered, the serializer serializes the buffer (the same
+    // instances the links were recorded against) instead of re-enumerating. Only reference-typed, non-string
+    // properties can hold a buffered sequence, and a write-only property has nothing to read — the rest keep
+    // their original getter untouched, and the per-request lookup is a no-op unless a sequence was buffered.
+    private void SubstituteMaterializedItems(JsonPropertyInfo property)
+    {
+        if (property.PropertyType.IsValueType || property.PropertyType == typeof(string) || property.Get is not { } read)
+        {
+            return;
+        }
+
+        property.Get = instance =>
+        {
+            var value = read(instance);
+            if (value is not null
+                && _accessor.HttpContext is { } http
+                && CairnLinkStore.TryGetMaterialized(http, value, out var buffer))
+            {
+                return buffer;
+            }
+
+            return value;
+        };
     }
 
     // Only a type the compute stage can actually record hypermedia for gets the contract properties: one
