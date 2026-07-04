@@ -25,9 +25,11 @@ without a justification.
   on before you invest time in it.
 - Keep pull requests focused: one change per PR.
 - Add or update tests for behavior changes; the test suite lives under
-  `tests/`. CI enforces a 95% line-coverage minimum (measured with the
-  coverlet collector via `coverage.runsettings`, which excludes generated
-  code), so new code generally needs tests to keep the build green.
+  `tests/`. CI enforces a 95% minimum for both line and branch coverage
+  (measured with the coverlet collector via `coverage.runsettings`, which
+  excludes generated code), and the Codecov project status applies the same
+  strictness by counting partially covered lines as uncovered. New code
+  needs tests that exercise every branch to keep the build green.
 - Update the docs (`docs/articles/`) and XML doc comments when public behavior
   changes.
 - Public API changes are validated against the last released packages

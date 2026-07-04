@@ -45,8 +45,11 @@ jobs:
       - name: Test
         run: dotnet test Cairn.slnx --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --settings coverage.runsettings --results-directory coverage
 
-      # Merges the per-TFM coverage reports and fails the build when line coverage
-      # drops below 95% (generated code is excluded via coverage.runsettings).
+      # Merges the per-TFM coverage reports and fails the build when line or branch
+      # coverage drops below 95% (generated code is excluded via coverage.runsettings).
+      # Codecov applies the same strictness on the PR via codecov.yml: its project
+      # status counts partially covered lines as uncovered, so a line only passes
+      # both gates when every branch through it is exercised.
       - name: Enforce coverage threshold
         run: |
           dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.*
@@ -54,7 +57,7 @@ jobs:
             -reports:"coverage/**/coverage.cobertura.xml" \
             -targetdir:coverage/report \
             -reporttypes:"TextSummary" \
-            "minimumCoverageThresholds:lineCoverage=95"
+            "minimumCoverageThresholds:lineCoverage=95;branchCoverage=95"
           cat coverage/report/Summary.txt
 
       # Feeds the README coverage badge. Tokenless upload works for public repos;
