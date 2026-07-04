@@ -30,7 +30,11 @@ public sealed record HypermediaLink(string Href, string? Title)
 /// <param name="Href">The action's target URI.</param>
 /// <param name="Method">The HTTP method used to invoke the action.</param>
 /// <param name="Title">An optional human-readable title.</param>
-public sealed record HypermediaAffordance(string Href, string Method, string? Title);
+public sealed record HypermediaAffordance(string Href, string Method, string? Title)
+{
+    /// <summary>The media type the action's request body is submitted as (HAL-FORMS <c>contentType</c>); carried over from the backing template, or read from <c>_actions</c> when present.</summary>
+    public string? ContentType { get; init; }
+}
 
 /// <summary>The links and affordances parsed from a single resource's hypermedia response.</summary>
 public sealed class HypermediaResponse
@@ -142,7 +146,10 @@ public sealed class HypermediaResponse
                         }
 
                         // An absent method defaults to GET, matching the client's parser and HAL-FORMS.
-                        affordances[action.Name] = new HypermediaAffordance(href, GetString(action.Value, "method") ?? "GET", GetString(action.Value, "title"));
+                        affordances[action.Name] = new HypermediaAffordance(href, GetString(action.Value, "method") ?? "GET", GetString(action.Value, "title"))
+                        {
+                            ContentType = GetString(action.Value, "contentType"),
+                        };
                     }
                 }
             }
@@ -156,7 +163,10 @@ public sealed class HypermediaResponse
                     {
                         var parsed = ParseTemplate(template.Name, template.Value, selfHref);
                         templates[template.Name] = parsed;
-                        affordances[template.Name] = new HypermediaAffordance(parsed.Target, parsed.Method, parsed.Title);
+                        affordances[template.Name] = new HypermediaAffordance(parsed.Target, parsed.Method, parsed.Title)
+                        {
+                            ContentType = parsed.ContentType,
+                        };
                     }
                 }
             }

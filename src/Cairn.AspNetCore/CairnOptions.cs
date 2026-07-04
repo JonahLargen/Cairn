@@ -102,6 +102,16 @@ public sealed class CairnOptions
     public bool NegotiateFormat { get; set; } = true;
 
     /// <summary>
+    /// Whether the top-level (context) resource's links are also advertised as an RFC 8288 <c>Link</c> response
+    /// header (default <see langword="false"/>), so clients and intermediaries that never parse the body still
+    /// see its navigation links. Only the primary resource is emitted — not the links of embedded children or
+    /// of a collection's elements — and templated links are skipped (an RFC 6570 template is not a valid header
+    /// target). A bare collection response (a JSON array, which has no context resource of its own) emits no
+    /// header. This composes with the endpoint-level <c>Link</c> header from <c>WithDeprecation</c>.
+    /// </summary>
+    public bool EmitLinkHeader { get; set; }
+
+    /// <summary>
     /// The media types Cairn negotiates its wire formats by and labels responses with — the plain
     /// <c>application/json</c>, the flat-shape vendor type, HAL, and HAL-FORMS tokens. Override any of them to
     /// match your API's media-type scheme; they are validated (concrete and mutually distinct) when the host starts.

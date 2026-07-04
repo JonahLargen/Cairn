@@ -14,6 +14,9 @@ internal abstract class HypermediaSpec<T>
 
     public string? Policy { get; set; }
 
+    /// <summary>When set, <see cref="Policy"/> is evaluated against the object this returns (resource-based auth).</summary>
+    public Func<T, object?>? PolicyResource { get; set; }
+
     public string? TitleText { get; set; }
 
     public string? TypeText { get; set; }
@@ -94,6 +97,14 @@ internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
     public ILinkSpec<T> RequireAuthorization(string policy)
     {
         Policy = policy;
+        return this;
+    }
+
+    public ILinkSpec<T> RequireAuthorization(string policy, Func<T, object?> resource)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        Policy = policy;
+        PolicyResource = resource;
         return this;
     }
 
@@ -179,6 +190,14 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
         return this;
     }
 
+    public IAffordanceSpec<T> RequireAuthorization(string policy, Func<T, object?> resource)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        Policy = policy;
+        PolicyResource = resource;
+        return this;
+    }
+
     public IAffordanceSpec<T> RequireAuthorization() => RequireAuthorization(HypermediaSpec<T>.DefaultPolicy);
 }
 
@@ -188,6 +207,9 @@ internal sealed class EmbedSpec<T>
     public required LinkRelation Relation { get; init; }
 
     public required bool Single { get; init; }
+
+    /// <summary>The declared child resource type (<c>TChild</c>), so document generators can type the <c>_embedded</c> schema.</summary>
+    public required Type ChildType { get; init; }
 
     public required Func<T, IReadOnlyList<object>> Resolve { get; init; }
 }
@@ -270,7 +292,7 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
     {
         relation.ThrowIfDefault(nameof(relation));
         ArgumentNullException.ThrowIfNull(resource);
-        EmbedSpecs.Add(new EmbedSpec<T> { Relation = relation, Single = true, Resolve = t => resource(t) is { } child ? new object[] { child } : [] });
+        EmbedSpecs.Add(new EmbedSpec<T> { Relation = relation, Single = true, ChildType = typeof(TChild), Resolve = t => resource(t) is { } child ? new object[] { child } : [] });
     }
 
     public void EmbedMany<TChild>(LinkRelation relation, Func<T, IEnumerable<TChild>?> resources)
@@ -281,6 +303,7 @@ internal sealed class LinkBuilder<T> : ILinkBuilder<T>
         {
             Relation = relation,
             Single = false,
+            ChildType = typeof(TChild),
             Resolve = t =>
             {
                 if (resources(t) is not { } items)

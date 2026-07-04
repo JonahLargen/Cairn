@@ -74,11 +74,25 @@ internal static class HrefPattern
 public sealed class HypermediaResponseAssertions
 {
     private readonly HypermediaResponse _subject;
+    private readonly HypermediaResponseAssertions? _parent;
 
-    internal HypermediaResponseAssertions(HypermediaResponse subject) => _subject = subject;
+    internal HypermediaResponseAssertions(HypermediaResponse subject)
+        : this(subject, null)
+    {
+    }
 
-    /// <summary>Continues a chain of assertions.</summary>
-    public HypermediaResponseAssertions And => this;
+    private HypermediaResponseAssertions(HypermediaResponse subject, HypermediaResponseAssertions? parent)
+    {
+        _subject = subject;
+        _parent = parent;
+    }
+
+    /// <summary>
+    /// Continues a chain of assertions. On the response the chain began with, this is the same response;
+    /// after drilling into an embedded resource with <see cref="HaveEmbedded(string)"/>, it steps back out to
+    /// the resource that embeds it, so a single chain can assert across an <c>_embedded</c> boundary.
+    /// </summary>
+    public HypermediaResponseAssertions And => _parent ?? this;
 
     /// <summary>Asserts the response exposes a <c>self</c> link.</summary>
     public HypermediaResponseAssertions HaveSelfLink() => HaveLink("self");
@@ -170,15 +184,45 @@ public sealed class HypermediaResponseAssertions
     }
 
     /// <summary>
-    /// Asserts the response embeds a resource under the given relation, returning assertions for it.
-    /// A collection embed asserts on its first resource; use <see cref="HypermediaResponse.Embedded"/> for the full set.
+    /// Asserts the response embeds a resource under the given relation, returning assertions over its first
+    /// resource. A collection embed asserts on its first resource; use <see cref="HypermediaResponse.Embedded"/>
+    /// for the full set. The returned chain's <see cref="And"/> steps back out to this response, so you can keep
+    /// asserting on it after drilling into the embedded resource.
     /// </summary>
     public HypermediaResponseAssertions HaveEmbedded(string relation)
     {
         CairnAssert.That(
             _subject.Embedded.ContainsKey(relation),
             $"Expected the response to embed a '{relation}' resource, but its embedded relations are: {CairnAssert.Describe(_subject.Embedded.Keys)}.");
-        return new HypermediaResponseAssertions(_subject.Embedded[relation][0]);
+        return new HypermediaResponseAssertions(_subject.Embedded[relation][0], this);
+    }
+
+    /// <summary>
+    /// Asserts the response embeds exactly <paramref name="count"/> resources under the given relation, returning
+    /// assertions over the first. A single embed counts as one; <see cref="And"/> steps back out to this response.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    public HypermediaResponseAssertions HaveEmbedded(string relation, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        _subject.Embedded.TryGetValue(relation, out var resources);
+        var actual = resources?.Count ?? 0;
+        CairnAssert.That(
+            actual == count,
+            $"Expected the response to embed {count} '{relation}' {(count == 1 ? "resource" : "resources")}, but it embeds {actual}.");
+
+        // With no matching resource there is nothing to drill into, so the chain stays on this response;
+        // otherwise a non-zero count means resources has at least one element to assert on.
+        return actual == 0 ? this : new HypermediaResponseAssertions(resources![0], this);
+    }
+
+    /// <summary>Asserts the response does not embed any resource under the given relation.</summary>
+    public HypermediaResponseAssertions NotHaveEmbedded(string relation)
+    {
+        CairnAssert.That(
+            !_subject.Embedded.TryGetValue(relation, out var resources),
+            $"Expected the response not to embed a '{relation}' resource, but it embeds {resources?.Count ?? 0}.");
+        return this;
     }
 
     /// <summary>Asserts the response exposes the named HAL-FORMS template, returning assertions for it.</summary>
@@ -188,6 +232,15 @@ public sealed class HypermediaResponseAssertions
             _subject.Templates.ContainsKey(name),
             $"Expected the response to expose the '{name}' template, but its templates are: {CairnAssert.Describe(_subject.Templates.Keys)}.");
         return new HypermediaTemplateAssertions(this, name, _subject.Templates[name]);
+    }
+
+    /// <summary>Asserts the response does not expose the named HAL-FORMS template.</summary>
+    public HypermediaResponseAssertions NotHaveTemplate(string name)
+    {
+        CairnAssert.That(
+            !_subject.Templates.ContainsKey(name),
+            $"Expected the response not to expose the '{name}' template, but it does.");
+        return this;
     }
 }
 
@@ -237,6 +290,19 @@ public sealed class HypermediaAffordanceAssertions
         CairnAssert.That(
             HrefPattern.ToRegex(pattern).IsMatch(_affordance.Href),
             $"Expected the '{_name}' affordance's target to match '{pattern}', but it targets '{_affordance.Href}'.");
+        return this;
+    }
+
+    /// <summary>
+    /// Asserts the affordance's request body is submitted as the given media type. The content type is carried
+    /// from the backing HAL-FORMS template (or read from <c>_actions</c> when present); an affordance whose
+    /// declared content type is absent never matches.
+    /// </summary>
+    public HypermediaAffordanceAssertions WithContentType(string contentType)
+    {
+        CairnAssert.That(
+            _affordance.ContentType == contentType,
+            $"Expected the '{_name}' affordance to accept content type '{contentType}', but it accepts '{_affordance.ContentType ?? "none"}'.");
         return this;
     }
 }

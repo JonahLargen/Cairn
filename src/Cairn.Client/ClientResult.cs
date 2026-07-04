@@ -6,10 +6,11 @@ namespace Cairn.Client;
 /// <typeparam name="T">The resource body type.</typeparam>
 public sealed class ClientResult<T>
 {
-    private ClientResult(bool isSuccess, int status, Resource<T>? resource, Problem? problem)
+    private ClientResult(bool isSuccess, int status, string? location, Resource<T>? resource, Problem? problem)
     {
         IsSuccess = isSuccess;
         Status = status;
+        Location = location;
         Resource = resource;
         Problem = problem;
     }
@@ -32,11 +33,21 @@ public sealed class ClientResult<T>
     /// </summary>
     public bool IsNotModified => Status == 304;
 
+    /// <summary>
+    /// The response's <c>Location</c> header on success, if any — for a <c>201 Created</c> the URL of the
+    /// resource just created. Returned exactly as the server sent it (relative or absolute), so it can be
+    /// handed straight back to <c>GetAsync</c>. <see langword="null"/> when the response carried no <c>Location</c>.
+    /// </summary>
+    public string? Location { get; }
+
     /// <summary>The resource and its hypermedia, when <see cref="IsSuccess"/>. Empty (no value) on a <c>304</c>.</summary>
     public Resource<T>? Resource { get; }
 
     /// <summary>The resource's deserialized value on success, otherwise <see langword="default"/>. A shortcut for <c>Resource?.Value</c>.</summary>
     public T? Value => Resource is { } resource ? resource.Value : default;
+
+    /// <summary>The response's <c>ETag</c> on success, if any — a shortcut for <c>Resource?.ETag</c>. Pass it as <c>ifNoneMatch</c> to a later read, or as <c>ifMatch</c> to an action for optimistic concurrency.</summary>
+    public string? ETag => Resource?.ETag;
 
     /// <summary>The parsed problem detail, when not <see cref="IsSuccess"/>.</summary>
     public Problem? Problem { get; }
@@ -46,18 +57,20 @@ public sealed class ClientResult<T>
     public Resource<T> EnsureSuccess()
         => IsSuccess ? Resource! : throw new CairnClientException(Status, Problem);
 
-    internal static ClientResult<T> Success(int status, Resource<T> resource) => new(true, status, resource, null);
+    internal static ClientResult<T> Success(int status, string? location, Resource<T> resource) => new(true, status, location, resource, null);
 
-    internal static ClientResult<T> Failure(int status, Problem problem) => new(false, status, null, problem);
+    internal static ClientResult<T> Failure(int status, Problem problem) => new(false, status, null, null, problem);
 }
 
 /// <summary>The outcome of a request that returns no resource (e.g. an invoked action): success, or a <see cref="Client.Problem"/> on an HTTP error status.</summary>
 public sealed class ClientResult
 {
-    private ClientResult(bool isSuccess, int status, Problem? problem)
+    private ClientResult(bool isSuccess, int status, string? location, string? etag, Problem? problem)
     {
         IsSuccess = isSuccess;
         Status = status;
+        Location = location;
+        ETag = etag;
         Problem = problem;
     }
 
@@ -74,6 +87,20 @@ public sealed class ClientResult
     /// <summary>Whether the server returned <c>304 Not Modified</c> (in response to a conditional request).</summary>
     public bool IsNotModified => Status == 304;
 
+    /// <summary>
+    /// The response's <c>Location</c> header on success, if any — for a <c>201 Created</c> the URL of the
+    /// resource the action just created. Returned exactly as the server sent it (relative or absolute), so it
+    /// can be handed straight to <c>GetAsync</c>. <see langword="null"/> when the response carried no <c>Location</c>.
+    /// </summary>
+    public string? Location { get; }
+
+    /// <summary>
+    /// The response's <c>ETag</c> header on success, if any — the validator for the resource the action created
+    /// or updated. Pass it as <c>ifMatch</c> to a later action for optimistic concurrency, or as <c>ifNoneMatch</c>
+    /// to a conditional read. <see langword="null"/> when the response carried no <c>ETag</c>.
+    /// </summary>
+    public string? ETag { get; }
+
     /// <summary>The parsed problem detail, when not <see cref="IsSuccess"/>.</summary>
     public Problem? Problem { get; }
 
@@ -87,7 +114,7 @@ public sealed class ClientResult
         }
     }
 
-    internal static ClientResult Success(int status) => new(true, status, null);
+    internal static ClientResult Success(int status, string? location, string? etag) => new(true, status, location, etag, null);
 
-    internal static ClientResult Failure(int status, Problem problem) => new(false, status, problem);
+    internal static ClientResult Failure(int status, Problem problem) => new(false, status, null, null, problem);
 }

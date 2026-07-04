@@ -278,9 +278,12 @@ internal static class CairnLinkStore
         return null;
     }
 
-    /// <summary>Whether hypermedia was recorded for <paramref name="instance"/>, without marking it emitted.</summary>
-    public static bool Has(HttpContext http, object instance)
-        => Store(http)?.ContainsKey(instance) == true;
+    /// <summary>
+    /// The hypermedia recorded for <paramref name="instance"/>, or <see langword="null"/> if none — without
+    /// marking it emitted (unlike <see cref="Lookup"/>, which powers the never-emitted diagnostic).
+    /// </summary>
+    public static ResourceHypermedia? Peek(HttpContext http, object instance)
+        => Store(http) is { } store && store.TryGetValue(instance, out var entry) ? entry.Payload : null;
 
     public static bool HasEntries(HttpContext http) => Store(http) is { Count: > 0 };
 

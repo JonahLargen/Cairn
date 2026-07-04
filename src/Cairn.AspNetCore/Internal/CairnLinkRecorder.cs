@@ -121,9 +121,20 @@ internal static class CairnLinkRecorder
         // (a configured single resource, or a paged/cursor envelope). A problem document or uncovered body keeps
         // its content type per RFC 9457; and a bare collection serializes as a JSON array, which is not a HAL
         // document even though its elements carry _links — so it stays application/json.
-        if (CairnLinkStore.Has(http, value))
+        if (CairnLinkStore.Peek(http, value) is { } topLevel)
         {
             ApplyContentType(http, contentType);
+
+            // Advertise the context resource's links as an RFC 8288 Link header when opted in, so callers and
+            // intermediaries that never read the body still see its navigation links. Emitted here — during the
+            // compute stage, before the body is serialized — the header is set on the same response the body is
+            // written to (an error that resets the response before headers flush discards both). Only the
+            // top-level value is emitted; a bare collection has no top-level entry (Peek is null), so its
+            // elements never reach the header.
+            if (options.EmitLinkHeader)
+            {
+                LinkHeaderWriter.Emit(http, topLevel);
+            }
         }
 
         RegisterEmitMissDiagnostic(http, logger, warnOnce);

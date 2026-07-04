@@ -174,7 +174,7 @@ builder.Affordance("cancel", o => LinkTarget.Route("CancelOrder", new { id = o.I
     .RequireAuthorization("CanCancelOrders");   // same policy that guards the endpoint
 ```
 
-Conditions can also be service-aware and async when the decision needs more than the DTO — see [Link configurations](https://jonahlargen.github.io/Cairn/articles/link-configs.html).
+Need a per-item decision — "may this caller cancel *this* order?" — rather than a caller-wide one? The resource-based overload `RequireAuthorization("CancelOrder", o => o)` hands the resource to your ASP.NET Core policy handlers as `context.Resource`. Conditions can also be service-aware and async when the decision needs more than the DTO — see [Link configurations](https://jonahlargen.github.io/Cairn/articles/link-configs.html).
 
 ### One declaration, three wire formats
 
