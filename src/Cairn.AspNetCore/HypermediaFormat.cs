@@ -18,7 +18,8 @@ public enum HypermediaFormat
     /// <c>application/json</c> (or wildcard) request gets the bare resource, and links are emitted only when the
     /// <c>Accept</c> header explicitly names a hypermedia media type: <c>application/vnd.cairn+json</c> for the
     /// flat <see cref="Default"/> shape, <c>application/hal+json</c>, <c>application/prs.hal-forms+json</c>, or a
-    /// registered custom formatter's. Can also be forced per endpoint or route group with
+    /// registered custom formatter's (every built-in token is configurable via
+    /// <see cref="CairnOptions.MediaTypes"/>). Can also be forced per endpoint or route group with
     /// <c>WithHypermediaFormat(HypermediaFormat.None)</c> to suppress links there.
     /// </summary>
     None,

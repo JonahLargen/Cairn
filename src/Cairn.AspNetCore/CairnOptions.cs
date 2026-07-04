@@ -71,6 +71,13 @@ public sealed class CairnOptions
     public bool NegotiateFormat { get; set; } = true;
 
     /// <summary>
+    /// The media types Cairn negotiates its wire formats by and labels responses with — the plain
+    /// <c>application/json</c>, the flat-shape vendor type, HAL, and HAL-FORMS tokens. Override any of them to
+    /// match your API's media-type scheme; they are validated (concrete and mutually distinct) when the host starts.
+    /// </summary>
+    public CairnMediaTypeOptions MediaTypes { get; } = new();
+
+    /// <summary>
     /// Whether the authorization policies referenced by link configurations are validated against the host's
     /// <c>IAuthorizationPolicyProvider</c> at startup (default <see langword="true"/>). Disable this when the
     /// host uses a dynamic policy provider that materializes policies only after boot (e.g. from a database or
@@ -110,7 +117,42 @@ public sealed class CairnOptions
     // snapshots the formatter list, and startup validation reads the registry once. A registration that lands
     // after the options singleton is resolved would take effect partially or not at all, so it fails loudly
     // instead (the pre-freeze path is the ordinary AddCairn(configure) / Configure<CairnOptions> flow).
-    internal void Freeze() => _frozen = true;
+    internal void Freeze()
+    {
+        ValidateMediaTypes();
+        _frozen = true;
+    }
+
+    // The negotiation candidate set (the four built-in tokens plus every custom formatter) must have distinct
+    // media types, or an Accept range could match two formats and the winner would be arbitrary. Checked once,
+    // when the options freeze at startup, so a collision fails the host boot rather than a request.
+    private void ValidateMediaTypes()
+    {
+        var tokens = MediaTypes.All;
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            for (var j = i + 1; j < tokens.Count; j++)
+            {
+                if (string.Equals(tokens[i].Value, tokens[j].Value, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Cairn: MediaTypes.{tokens[i].Name} and MediaTypes.{tokens[j].Name} are both '{tokens[i].Value}'. Each wire format needs a distinct media type so Accept negotiation is unambiguous.");
+                }
+            }
+        }
+
+        foreach (var formatter in _formatters)
+        {
+            foreach (var (name, value) in tokens)
+            {
+                if (string.Equals(formatter.MediaType, value, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Cairn: the custom formatter for '{formatter.MediaType}' collides with the built-in MediaTypes.{name}. Give the formatter a different media type, or override MediaTypes.{name}.");
+                }
+            }
+        }
+    }
 
     private void ThrowIfFrozen(string operation)
     {

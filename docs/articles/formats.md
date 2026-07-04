@@ -132,6 +132,29 @@ The response's `Content-Type` echoes `application/vnd.cairn+json` when that shap
 
 `None` is non-breaking: `DefaultFormat` is `HypermediaFormat.Default` unless you change it, so existing apps keep emitting links on `application/json`. A per-endpoint `.WithHypermediaFormat(...)` override still wins over the negotiated default in either mode.
 
+## Customizing the media types
+
+Every token Cairn negotiates by is configurable through `CairnOptions.MediaTypes`; the defaults are the conventional ones. Override any of them to match your API's media-type scheme:
+
+```csharp
+builder.Services.AddCairn(options =>
+{
+    options.MediaTypes.Json     = "application/json";                 // plain JSON: flat shape normally, bare under opt-in
+    options.MediaTypes.Cairn    = "application/vnd.acme+json";        // the flat shape's explicit vendor type
+    options.MediaTypes.Hal      = "application/hal+json";
+    options.MediaTypes.HalForms = "application/prs.hal-forms+json";
+});
+```
+
+| Token | Default | Role |
+| --- | --- | --- |
+| `MediaTypes.Json` | `application/json` | Selects and labels the flat shape normally; selects the **bare** resource under opt-in (`DefaultFormat = None`). |
+| `MediaTypes.Cairn` | `application/vnd.cairn+json` | Always selects the flat shape — the door that stays open when `Json` is reserved for the bare resource. |
+| `MediaTypes.Hal` | `application/hal+json` | Selects and labels HAL. |
+| `MediaTypes.HalForms` | `application/prs.hal-forms+json` | Selects and labels HAL-FORMS. |
+
+The four tokens must be distinct, concrete media types (no wildcards or parameters) and must not collide with a registered [custom formatter](custom-formats.md)'s media type; both are validated when the host starts, so a mistake fails boot rather than a request. Because `Cairn` is a real negotiation token, setting it to your own vendor type gives you a fully-branded API: a client asks for `application/vnd.acme+json` and gets the flat shape (labeled the same), while a plain `application/json` request behaves per `DefaultFormat`. A bare response (opt-in `None`) is labeled with `MediaTypes.Json`.
+
 You can also force `None` on a single endpoint or route group to suppress links there even while the app default emits them:
 
 ```csharp

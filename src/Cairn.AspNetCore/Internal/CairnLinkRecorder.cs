@@ -20,11 +20,6 @@ internal static class CairnLinkRecorder
 {
     private const string EmitDiagnosticKey = "Cairn.EmitDiagnostic";
 
-    // The media type for Cairn's flat _links/_actions shape. That shape is normally served as application/json,
-    // but when links are opt-in (DefaultFormat = None) a bare application/json returns no hypermedia — so this
-    // vendor type is the explicit door a client uses to ask for the flat shape by name in either mode.
-    internal const string CairnMediaType = "application/vnd.cairn+json";
-
     // Minimal-API entry point: a handler may return an IResult carrying the value, or the bare value itself.
     // Returns the (possibly substituted) result the endpoint filter should pass down the pipeline.
     public static async ValueTask<object?> RecordResultAsync(HttpContext http, object? result)
@@ -66,9 +61,11 @@ internal static class CairnLinkRecorder
         // Accept named no hypermedia media type). Serialize the resource untouched: skip the compute pass so the
         // un-negotiated path carries none of Cairn's per-resource cost, and record nothing so the emit stage's
         // injected properties are all omitted. ResolveFormat has already appended Vary: Accept, so shared caches
-        // still key on the header that decides whether links are present.
+        // still key on the header that decides whether links are present. The bare body is plain JSON, but relabel
+        // it when the app gave "no hypermedia" a media type other than application/json (contentType is null otherwise).
         if (format == HypermediaFormat.None)
         {
+            ApplyContentType(http, contentType);
             return value;
         }
 
@@ -282,7 +279,7 @@ internal static class CairnLinkRecorder
         {
             if (forced.MediaType is not { } mediaType)
             {
-                return (forced.Format, null, ContentTypeFor(forced.Format));
+                return (forced.Format, null, ContentTypeFor(forced.Format, options.MediaTypes));
             }
 
             return FindFormatter(options, mediaType)
@@ -299,17 +296,22 @@ internal static class CairnLinkRecorder
             }
         }
 
-        return (options.DefaultFormat, null, ContentTypeFor(options.DefaultFormat));
+        return (options.DefaultFormat, null, ContentTypeFor(options.DefaultFormat, options.MediaTypes));
     }
 
-    // The response Content-Type a built-in format is served as, or null to keep the serializer's
-    // application/json — Cairn's flat Default shape and None both stay labeled application/json.
-    private static string? ContentTypeFor(HypermediaFormat format) => format switch
+    // The response Content-Type a built-in format is served as, or null to keep the serializer's own
+    // application/json. HAL and HAL-FORMS are relabeled to their tokens; Cairn's flat Default shape and None
+    // are served under the plain-JSON token, relabeled only when the app renamed it away from application/json.
+    private static string? ContentTypeFor(HypermediaFormat format, CairnMediaTypeOptions media) => format switch
     {
-        HypermediaFormat.Hal => "application/hal+json",
-        HypermediaFormat.HalForms => "application/prs.hal-forms+json",
-        _ => null,
+        HypermediaFormat.Hal => media.Hal,
+        HypermediaFormat.HalForms => media.HalForms,
+        _ => RelabelTarget(media.Json),
     };
+
+    // The serializer always writes application/json, so a media type equal to it needs no relabel.
+    private static string? RelabelTarget(string mediaType)
+        => mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase) ? null : mediaType;
 
     // A forced media type resolves to a registered custom formatter, or to the built-in format it names.
     private static (HypermediaFormat, IHypermediaFormatter?, string?)? FindFormatter(CairnOptions options, string mediaType)
@@ -322,14 +324,15 @@ internal static class CairnLinkRecorder
             }
         }
 
-        return FormatFor(mediaType) switch
+        var media = options.MediaTypes;
+        return FormatFor(mediaType, media) switch
         {
-            NegotiatedFormat.Hal => (HypermediaFormat.Hal, null, "application/hal+json"),
-            NegotiatedFormat.HalForms => (HypermediaFormat.HalForms, null, "application/prs.hal-forms+json"),
-            // The vendor media type names Cairn's flat shape explicitly and is labeled as such; a forced plain
-            // application/json is the same flat shape but keeps its application/json label.
-            NegotiatedFormat.Flat => (HypermediaFormat.Default, null, CairnMediaType),
-            NegotiatedFormat.PlainJson => (HypermediaFormat.Default, null, null),
+            NegotiatedFormat.Hal => (HypermediaFormat.Hal, null, media.Hal),
+            NegotiatedFormat.HalForms => (HypermediaFormat.HalForms, null, media.HalForms),
+            // The vendor token names Cairn's flat shape explicitly and is labeled as such; a forced plain-JSON
+            // token is the same flat shape but keeps its (application/json) label.
+            NegotiatedFormat.Flat => (HypermediaFormat.Default, null, media.Cairn),
+            NegotiatedFormat.PlainJson => (HypermediaFormat.Default, null, RelabelTarget(media.Json)),
             _ => null,
         };
     }
@@ -397,18 +400,18 @@ internal static class CairnLinkRecorder
             return (HypermediaFormat.Default, selected.Custom, selected.Custom.MediaType);
         }
 
+        var media = options.MediaTypes;
         return selected.Builtin switch
         {
-            NegotiatedFormat.Hal => (HypermediaFormat.Hal, null, "application/hal+json"),
-            NegotiatedFormat.HalForms => (HypermediaFormat.HalForms, null, "application/prs.hal-forms+json"),
-            // The vendor media type always selects Cairn's flat _links/_actions shape — the door to the default
-            // shape that a bare application/json no longer opens once links are opt-in (DefaultFormat = None).
-            NegotiatedFormat.Flat => (HypermediaFormat.Default, null, CairnMediaType),
-            // Explicit application/json (and the wildcard/no-preference tie that lands on the plain-JSON
-            // candidate): normally Cairn's flat default shape, but no hypermedia at all when the app has opted
-            // into client-negotiated links via DefaultFormat = None — a caller that didn't ask for a hypermedia
-            // media type gets the bare resource.
-            _ => (options.DefaultFormat == HypermediaFormat.None ? HypermediaFormat.None : HypermediaFormat.Default, null, null),
+            NegotiatedFormat.Hal => (HypermediaFormat.Hal, null, media.Hal),
+            NegotiatedFormat.HalForms => (HypermediaFormat.HalForms, null, media.HalForms),
+            // The vendor token always selects Cairn's flat _links/_actions shape — the door to the default shape
+            // that the plain-JSON token no longer opens once links are opt-in (DefaultFormat = None).
+            NegotiatedFormat.Flat => (HypermediaFormat.Default, null, media.Cairn),
+            // The plain-JSON token (and the wildcard/no-preference tie that lands on it): normally Cairn's flat
+            // default shape, but no hypermedia at all when the app has opted into client-negotiated links via
+            // DefaultFormat = None — a caller that didn't ask for a hypermedia media type gets the bare resource.
+            _ => (options.DefaultFormat == HypermediaFormat.None ? HypermediaFormat.None : HypermediaFormat.Default, null, RelabelTarget(media.Json)),
         };
     }
 
@@ -417,6 +420,7 @@ internal static class CairnLinkRecorder
     // the remaining built-ins.
     private static IEnumerable<(NegotiatedFormat? Builtin, IHypermediaFormatter? Custom, string MediaType)> Candidates(CairnOptions options)
     {
+        var media = options.MediaTypes;
         var preferred = options.DefaultFormat switch
         {
             HypermediaFormat.Hal => NegotiatedFormat.Hal,
@@ -424,7 +428,7 @@ internal static class CairnLinkRecorder
             _ => NegotiatedFormat.PlainJson,
         };
 
-        yield return (preferred, null, MediaTypeOf(preferred));
+        yield return (preferred, null, MediaTypeOf(preferred, media));
 
         foreach (var formatter in options.Formatters)
         {
@@ -435,17 +439,17 @@ internal static class CairnLinkRecorder
         {
             if (format != preferred)
             {
-                yield return (format, null, MediaTypeOf(format));
+                yield return (format, null, MediaTypeOf(format, media));
             }
         }
     }
 
-    private static string MediaTypeOf(NegotiatedFormat format) => format switch
+    private static string MediaTypeOf(NegotiatedFormat format, CairnMediaTypeOptions media) => format switch
     {
-        NegotiatedFormat.Hal => "application/hal+json",
-        NegotiatedFormat.HalForms => "application/prs.hal-forms+json",
-        NegotiatedFormat.Flat => CairnMediaType,
-        _ => "application/json",
+        NegotiatedFormat.Hal => media.Hal,
+        NegotiatedFormat.HalForms => media.HalForms,
+        NegotiatedFormat.Flat => media.Cairn,
+        _ => media.Json,
     };
 
     // The most specific matching range determines the candidate's quality (RFC 9110 §12.5.1); among ranges of
@@ -523,29 +527,30 @@ internal static class CairnLinkRecorder
         // Explicit application/json: the client asked for plain JSON, not merely "anything".
         PlainJson,
 
-        // Cairn's flat _links/_actions shape under its own media type (application/vnd.cairn+json), so it stays
-        // requestable when a bare application/json means "no hypermedia" (DefaultFormat = None).
+        // Cairn's flat _links/_actions shape under its own media type (MediaTypes.Cairn, default
+        // application/vnd.cairn+json), so it stays requestable when the plain-JSON token means "no hypermedia"
+        // (DefaultFormat = None).
         Flat,
     }
 
-    private static NegotiatedFormat? FormatFor(Microsoft.Extensions.Primitives.StringSegment mediaType)
+    private static NegotiatedFormat? FormatFor(Microsoft.Extensions.Primitives.StringSegment mediaType, CairnMediaTypeOptions media)
     {
-        if (mediaType.Equals("application/prs.hal-forms+json", StringComparison.OrdinalIgnoreCase))
+        if (mediaType.Equals(media.HalForms, StringComparison.OrdinalIgnoreCase))
         {
             return NegotiatedFormat.HalForms;
         }
 
-        if (mediaType.Equals("application/hal+json", StringComparison.OrdinalIgnoreCase))
+        if (mediaType.Equals(media.Hal, StringComparison.OrdinalIgnoreCase))
         {
             return NegotiatedFormat.Hal;
         }
 
-        if (mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase))
+        if (mediaType.Equals(media.Json, StringComparison.OrdinalIgnoreCase))
         {
             return NegotiatedFormat.PlainJson;
         }
 
-        if (mediaType.Equals(CairnMediaType, StringComparison.OrdinalIgnoreCase))
+        if (mediaType.Equals(media.Cairn, StringComparison.OrdinalIgnoreCase))
         {
             return NegotiatedFormat.Flat;
         }
