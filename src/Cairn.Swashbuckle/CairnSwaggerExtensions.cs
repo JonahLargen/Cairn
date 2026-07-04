@@ -7,10 +7,12 @@ namespace Cairn.Swashbuckle;
 public static class CairnSwaggerExtensions
 {
     /// <summary>
-    /// Documents Cairn's hypermedia on the Swagger document: the <c>_links</c>, <c>_embedded</c>,
-    /// <c>_actions</c>, and <c>_templates</c> (HAL-FORMS) shape on the schemas of linked resource types, and
-    /// the <c>application/hal+json</c> / <c>application/prs.hal-forms+json</c> media types those types'
-    /// responses can negotiate.
+    /// Documents Cairn's hypermedia on the Swagger document: the format-neutral <c>_links</c> and
+    /// <c>_embedded</c> core on the schemas of linked resource types, and — per negotiated media type
+    /// (<c>application/hal+json</c> / <c>application/prs.hal-forms+json</c> alongside <c>application/json</c>)
+    /// — the format-specific <c>_actions</c> (default JSON) and <c>_templates</c> (HAL-FORMS) sections. Also
+    /// marks <c>WithDeprecation</c> operations deprecated and documents the <c>ETag</c> header and <c>304</c>
+    /// response of <c>WithETag</c> operations.
     /// </summary>
     /// <param name="options">The Swagger generation options.</param>
     /// <returns>The same <see cref="SwaggerGenOptions"/> instance, for chaining.</returns>
