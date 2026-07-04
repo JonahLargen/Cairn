@@ -21,18 +21,19 @@ Nothing about the link configuration changes between versions — the route temp
 
 ## Query-string versioning
 
-When the version is a query-string parameter (e.g. `?api-version=1.0`), it isn't part of the route, so route-resolved links won't carry it. Re-apply it with `CairnOptions.TransformUrl`, which post-processes each route-resolved link and affordance URL given the current `HttpContext` and the generated URL:
+When the version is a query-string parameter (e.g. `?api-version=1.0`), it isn't part of the route, so route-resolved links won't carry it. Re-apply it with `CairnOptions.TransformUrl`, which post-processes every emitted URL — route-resolved links, affordances, explicit hrefs, and pagination links — given the current `HttpContext` and the generated URL:
 
 ```csharp
 using Microsoft.AspNetCore.WebUtilities;
 
 builder.Services.AddCairn(o => o.TransformUrl = (http, url) =>
     http.Request.Query.TryGetValue("api-version", out var v) && v.Count > 0
+     && !url.Contains("api-version=", StringComparison.OrdinalIgnoreCase)
         ? QueryHelpers.AddQueryString(url, "api-version", v.ToString())
         : url);
 ```
 
-`TransformUrl` runs for every route-resolved link and affordance, so all of them stay on the caller's version. Pagination links are not passed through `TransformUrl` because they already preserve the request's other query parameters — the default offset and cursor links swap only the `page` or `cursor` parameter on the current request URL and keep `api-version` (and anything else) intact. See [Pagination: offset & cursor](pagination.md).
+`TransformUrl` runs for every route-resolved link, affordance, and pagination link, so all of them stay on the caller's version. The `!url.Contains(...)` guard keeps it idempotent: the default pagination links already preserve the request's other query parameters — they swap only the `page` or `cursor` parameter on the current request URL and keep `api-version` (and anything else) intact — so the guard stops a second `api-version` being appended to them. See [Pagination: offset & cursor](pagination.md).
 
 ## Header and media-type versioning
 

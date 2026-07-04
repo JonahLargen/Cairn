@@ -136,5 +136,5 @@ Pagination links are added alongside the page's items — they do not replace pe
 ## Details that keep envelopes safe
 
 - **Deferred `Items` are materialized once.** An envelope carrying an unmaterialized sequence (an `IQueryable`, a LINQ projection) is buffered before serialization, so the underlying query runs once and the per-item links survive re-enumeration.
-- **URL policy applies.** Pagination links honor `CairnOptions.UrlStyle` and `PublicBaseUri` like every other link — see [url-policy.md](url-policy.md). They are not passed through `TransformUrl` (they already derive from the request URL, query string included).
+- **URL policy applies.** Pagination links honor `CairnOptions.UrlStyle`, `PublicBaseUri`, and the per-request `ResolvePublicBaseUri` like every other link — see [url-policy.md](url-policy.md). They also pass through `TransformUrl`; because they already derive from the request URL (query string included), write that transform to be idempotent so an already-present parameter isn't appended twice.
 - **Documents stay honest.** The OpenAPI/Swagger integrations describe pagination envelopes — including types adapted via `AddPaging`/`AddCursorPaging` — with their navigation `_links` and negotiable media types; see [openapi.md](openapi.md).

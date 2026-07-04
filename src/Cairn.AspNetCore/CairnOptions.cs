@@ -67,6 +67,37 @@ public sealed class CairnOptions
         }
     }
 
+    /// <summary>
+    /// A per-request resolver for the public origin absolute links are built against — scheme, host, and
+    /// optional path base — for multi-tenant hosts that serve several origins from one application. It is
+    /// evaluated against the current request's <see cref="HttpContext"/> and takes precedence over
+    /// <see cref="PublicBaseUri"/>; returning <see langword="null"/> falls back to <see cref="PublicBaseUri"/>
+    /// (then the incoming request's own origin), so a resolver can rebase only the tenants it recognizes. The
+    /// URI it returns must be absolute. Keep it cheap and free of side effects — it may be consulted several
+    /// times while a response's links are built. Ignored when <see cref="UrlStyle"/> is <see cref="LinkUrlStyle.PathRelative"/>.
+    /// </summary>
+    public Func<HttpContext, Uri?>? ResolvePublicBaseUri { get; set; }
+
+    // The effective public origin for this request: the per-request resolver wins when it yields a URI,
+    // then the static PublicBaseUri. Null means neither is configured, so links fall back to the request's
+    // own scheme/host. A relative URI from the resolver can't name an origin and would fail with an opaque
+    // error deeper in link generation, so reject it up front with the same guidance as the setter.
+    internal Uri? PublicBaseUriFor(HttpContext http)
+    {
+        if (ResolvePublicBaseUri is { } resolve && resolve(http) is { } resolved)
+        {
+            if (!resolved.IsAbsoluteUri)
+            {
+                throw new InvalidOperationException(
+                    "Cairn: ResolvePublicBaseUri must return an absolute URI (e.g. https://tenant.example.com) or null.");
+            }
+
+            return resolved;
+        }
+
+        return _publicBaseUri;
+    }
+
     /// <summary>Whether a known hypermedia media type in the request's <c>Accept</c> header selects the format (default <see langword="true"/>).</summary>
     public bool NegotiateFormat { get; set; } = true;
 

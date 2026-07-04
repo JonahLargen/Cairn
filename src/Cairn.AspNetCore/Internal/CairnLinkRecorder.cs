@@ -157,7 +157,7 @@ internal static class CairnLinkRecorder
 
         if (offset is { } paged)
         {
-            await RecordEnvelopeAsync(http, value, paged.Items, () => PaginationLinks.BuildOffset(paged, ResolvePageUrl(http, scope.Options)), scope);
+            await RecordEnvelopeAsync(http, value, paged.Items, () => PaginationLinks.BuildOffset(http, paged, ResolvePageUrl(http, scope.Options), scope.Options), scope);
             return;
         }
 
@@ -170,7 +170,7 @@ internal static class CairnLinkRecorder
 
         if (cursor is { } cursored)
         {
-            await RecordEnvelopeAsync(http, value, cursored.Items, () => PaginationLinks.BuildCursor(http.Request, cursored, ResolveCursorUrl(http, scope.Options), scope.Options), scope);
+            await RecordEnvelopeAsync(http, value, cursored.Items, () => PaginationLinks.BuildCursor(http, cursored, ResolveCursorUrl(http, scope.Options), scope.Options), scope);
             return;
         }
 

@@ -248,7 +248,7 @@ See [Route safety](https://jonahlargen.github.io/Cairn/articles/route-safety.htm
 
 - **[Embedded resources](https://jonahlargen.github.io/Cairn/articles/embedded-resources.html)** — HAL `_embedded`, link arrays, and CURIEs.
 - **[API versioning](https://jonahlargen.github.io/Cairn/articles/versioning.html)** — composes with `Asp.Versioning`; URL-segment versions flow into links automatically.
-- **[Link URL policy](https://jonahlargen.github.io/Cairn/articles/url-policy.html)** — absolute URLs by default, with `PublicBaseUri` pinning and path-relative mode for proxied deployments.
+- **[Link URL policy](https://jonahlargen.github.io/Cairn/articles/url-policy.html)** — absolute URLs by default, with `PublicBaseUri` pinning (or a per-request `ResolvePublicBaseUri` for multi-tenant hosts) and path-relative mode for proxied deployments.
 - **[Conditional requests](https://jonahlargen.github.io/Cairn/articles/conditional-requests.html)** — `WithETag(...)`, precondition evaluation (304/412/428), an OPTIONS handler, and deprecation headers.
 - **[Error responses](https://jonahlargen.github.io/Cairn/articles/error-responses.html)** — problem details (RFC 9457) that carry links and actions.
 - **[OpenAPI & Swagger](https://jonahlargen.github.io/Cairn/articles/openapi.html)** — hypermedia properties documented in your OpenAPI schema.
