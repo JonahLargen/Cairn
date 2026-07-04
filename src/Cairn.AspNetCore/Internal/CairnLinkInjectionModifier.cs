@@ -138,8 +138,6 @@ internal sealed class CairnLinkInjectionModifier
         typeInfo.Properties.Add(property);
     }
 
-    [UnconditionalSuppressMessage("Trimming", "IL2072:UnrecognizedReflectionPattern",
-        Justification = "HalAction.Input is only ever assigned from Affordance.Input, which requires PublicProperties; the annotation cannot live on HalAction.Input itself because System.Text.Json's source generator emits accessors for the property that would then warn (IL2111/IL2062).")]
     private static IReadOnlyDictionary<string, HalFormsTemplate>? ToTemplates(IReadOnlyDictionary<string, HalAction>? actions, System.Text.Json.JsonSerializerOptions serializer, HttpContext http, Type resourceType)
     {
         if (actions is null)

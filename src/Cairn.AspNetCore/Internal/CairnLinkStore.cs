@@ -86,11 +86,11 @@ internal sealed record HalAction(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Title { get; init; }
 
-    // Carries Affordance.Input's DynamicallyAccessedMembers(PublicProperties) guarantee without restating
-    // it: the JSON source generator emits accessors for annotated properties that themselves trip the
-    // trim analyzer (IL2111/IL2062). Consumers re-assert the annotation where the type flows onward.
-    [JsonIgnore]
-    public Type? Input { get; init; }
+    // Internal (not public + [JsonIgnore]) so the property stays out of the JSON contract entirely: the
+    // source generator emits accessor delegates for public properties even when ignored, and those
+    // delegates trip the trim analyzer (IL2111/IL2062) on an annotated property.
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
+    internal Type? Input { get; init; }
 
     [JsonIgnore]
     public string? ContentType { get; init; }
@@ -188,8 +188,6 @@ internal sealed record ResourceHypermedia(
     /// <summary>The formatter-facing view of this hypermedia, built once per resource on first use.</summary>
     public HypermediaDocument ToDocument() => _document ??= Build();
 
-    [UnconditionalSuppressMessage("Trimming", "IL2072:UnrecognizedReflectionPattern",
-        Justification = "HalAction.Input is only ever assigned from Affordance.Input, which requires PublicProperties; the annotation cannot live on HalAction.Input itself because System.Text.Json's source generator emits accessors for the property that would then warn (IL2111/IL2062).")]
     private HypermediaDocument Build()
     {
         List<Link> links = [];
