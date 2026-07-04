@@ -50,8 +50,11 @@ public class CairnOpenApiPlaceholderTests
             .GetProperty("responses").GetProperty("200")
             .GetProperty("content").GetProperty("application/json").GetProperty("schema");
 
-        var properties = Resolve(document, response).GetProperty("properties");
-        Assert.True(properties.TryGetProperty("_links", out _));
+        // The default-JSON response is allOf[{$ref component}, {_actions}]: the component carries the _links
+        // core and the media-type variant layers on _actions.
+        var component = Resolve(document, response.GetProperty("allOf")[0]).GetProperty("properties");
+        Assert.True(component.TryGetProperty("_links", out _));
+        Assert.True(response.GetProperty("allOf")[1].GetProperty("properties").TryGetProperty("_actions", out _));
     }
 
     [Fact]
@@ -66,10 +69,14 @@ public class CairnOpenApiPlaceholderTests
             .GetProperty("requestBody").GetProperty("content").GetProperty("application/json").GetProperty("schema");
 
         // The schema component is shared between the type's request and response usages; readOnly: true is
-        // OpenAPI's "sent in responses, never in requests" marker, so clients don't build phantom fields.
+        // OpenAPI's "sent in responses, never in requests" marker, so clients don't build phantom fields. The
+        // component carries only the format-neutral core, so a request body never even mentions the
+        // response-only _actions/_templates sections.
         var properties = Resolve(document, request).GetProperty("properties");
         Assert.True(properties.GetProperty("_links").GetProperty("readOnly").GetBoolean());
-        Assert.True(properties.GetProperty("_templates").GetProperty("readOnly").GetBoolean());
+        Assert.True(properties.GetProperty("_embedded").GetProperty("readOnly").GetBoolean());
+        Assert.False(properties.TryGetProperty("_actions", out _));
+        Assert.False(properties.TryGetProperty("_templates", out _));
         Assert.True(properties.TryGetProperty("id", out _));
     }
 

@@ -45,6 +45,61 @@ public class LinkSpecFluentTests
     }
 
     [Fact]
+    public async Task A_link_can_require_resource_authorization()
+    {
+        var authorizer = new ResourceAuthorizer(false);
+        var order = new SpecOrder(7, "Pending");
+
+        var set = await BuildAsync(new ResourcePolicyLinks(), order, authorizer);
+
+        Assert.Empty(set.Links);
+        // The resource-based seam saw the order itself, and the caller-only path was never taken.
+        Assert.Equal(("CanSeeAudit", (object?)order), Assert.Single(authorizer.ResourceAsks));
+        Assert.Empty(authorizer.CallerAsks);
+    }
+
+    [Fact]
+    public async Task A_resource_policy_authorizes_the_selected_projection()
+    {
+        var authorizer = new ResourceAuthorizer(true);
+
+        var set = await BuildAsync(new ProjectedResourcePolicyLinks(), new SpecOrder(7, "Pending"), authorizer);
+
+        Assert.Single(set.Links);
+        // The selector projected the id, so that is the object handed to the policy — not the DTO.
+        Assert.Equal(("CanSeeAudit", (object?)7), Assert.Single(authorizer.ResourceAsks));
+    }
+
+    [Fact]
+    public async Task An_affordance_can_require_resource_authorization()
+    {
+        var authorizer = new ResourceAuthorizer(false);
+        var order = new SpecOrder(7, "Pending");
+
+        var set = await BuildAsync(new ResourcePolicyAffordance(), order, authorizer);
+
+        Assert.Empty(set.Affordances);
+        Assert.Equal(("CanApprove", (object?)order), Assert.Single(authorizer.ResourceAsks));
+    }
+
+    [Fact]
+    public async Task A_resource_policy_falls_back_to_the_caller_on_a_v1_authorizer()
+    {
+        // An authorizer that predates the resource-based overload uses the default interface method, which
+        // ignores the resource and evaluates the policy against the caller alone.
+        var authorizer = new FakeAuthorizer(false);
+
+        var set = await BuildAsync(new ResourcePolicyLinks(), new SpecOrder(7, "Pending"), authorizer);
+
+        Assert.Empty(set.Links);
+        Assert.Contains("CanSeeAudit", authorizer.AskedPolicies);
+    }
+
+    [Fact]
+    public void A_resource_authorization_requires_a_resource_selector()
+        => Assert.Throws<ArgumentNullException>(() => new LinkConfigRegistry().Add(new NullResourceSelectorLinks()));
+
+    [Fact]
     public async Task Get_and_patch_shorthands_set_the_method()
     {
         var set = await BuildAsync(new MethodShorthandLinks(), new SpecOrder(7, "Pending"));
@@ -124,6 +179,30 @@ public class LinkSpecFluentTests
             => b.Link("audit", o => LinkTarget.Uri($"/orders/{o.Id}/audit")).RequireAuthorization();
     }
 
+    private sealed class ResourcePolicyLinks : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Link("audit", o => LinkTarget.Uri($"/orders/{o.Id}/audit")).RequireAuthorization("CanSeeAudit", o => o);
+    }
+
+    private sealed class ProjectedResourcePolicyLinks : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Link("audit", o => LinkTarget.Uri($"/orders/{o.Id}/audit")).RequireAuthorization("CanSeeAudit", o => o.Id);
+    }
+
+    private sealed class ResourcePolicyAffordance : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Affordance("approve", o => LinkTarget.Uri($"/orders/{o.Id}/approve")).RequireAuthorization("CanApprove", o => o);
+    }
+
+    private sealed class NullResourceSelectorLinks : LinkConfig<SpecOrder>
+    {
+        public override void Configure(ILinkBuilder<SpecOrder> b)
+            => b.Link("audit", o => LinkTarget.Uri($"/orders/{o.Id}/audit")).RequireAuthorization("CanSeeAudit", null!);
+    }
+
     private sealed class MethodShorthandLinks : LinkConfig<SpecOrder>
     {
         public override void Configure(ILinkBuilder<SpecOrder> b)
@@ -169,6 +248,25 @@ public class LinkSpecFluentTests
         public ValueTask<bool> AuthorizeAsync(string policy, CancellationToken cancellationToken = default)
         {
             AskedPolicies.Add(policy);
+            return new ValueTask<bool>(result);
+        }
+    }
+
+    private sealed class ResourceAuthorizer(bool result) : ILinkAuthorizer
+    {
+        public List<(string Policy, object? Resource)> ResourceAsks { get; } = [];
+
+        public List<string> CallerAsks { get; } = [];
+
+        public ValueTask<bool> AuthorizeAsync(string policy, CancellationToken cancellationToken = default)
+        {
+            CallerAsks.Add(policy);
+            return new ValueTask<bool>(result);
+        }
+
+        public ValueTask<bool> AuthorizeAsync(object? resource, string policy, CancellationToken cancellationToken = default)
+        {
+            ResourceAsks.Add((policy, resource));
             return new ValueTask<bool>(result);
         }
     }
