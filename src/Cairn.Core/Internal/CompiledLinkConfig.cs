@@ -173,9 +173,18 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReport
             return false;
         }
 
-        if (spec.Policy is not null && !await context.Authorizer.AuthorizeAsync(spec.Policy, cancellationToken).ConfigureAwait(false))
+        if (spec.Policy is { } policy)
         {
-            return false;
+            // A resource selector routes through the resource-based seam so the policy's handlers see the object;
+            // without one the policy is evaluated against the caller alone (the memoized, resource-blind path).
+            var authorized = spec.PolicyResource is { } selectResource
+                ? await context.Authorizer.AuthorizeAsync(selectResource(resource), policy, cancellationToken).ConfigureAwait(false)
+                : await context.Authorizer.AuthorizeAsync(policy, cancellationToken).ConfigureAwait(false);
+
+            if (!authorized)
+            {
+                return false;
+            }
         }
 
         return true;

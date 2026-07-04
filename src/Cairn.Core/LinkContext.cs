@@ -22,6 +22,22 @@ public interface ILinkAuthorizer
 {
     /// <summary>Returns whether the caller satisfies the named policy.</summary>
     ValueTask<bool> AuthorizeAsync(string policy, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns whether the caller satisfies the named policy evaluated against <paramref name="resource"/> —
+    /// ASP.NET Core resource-based authorization, where the policy's handlers receive the object as their
+    /// resource (<c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c>).
+    /// </summary>
+    /// <param name="resource">The resource the policy is evaluated against (may be <see langword="null"/>).</param>
+    /// <param name="policy">The policy name, or the empty string for the host's default policy.</param>
+    /// <param name="cancellationToken">The request's cancellation token.</param>
+    /// <remarks>
+    /// The default implementation ignores <paramref name="resource"/> and defers to
+    /// <see cref="AuthorizeAsync(string, CancellationToken)"/>, so an authorizer written before this overload
+    /// existed keeps compiling and evaluates resource-gated links against the caller alone until it opts in.
+    /// </remarks>
+    ValueTask<bool> AuthorizeAsync(object? resource, string policy, CancellationToken cancellationToken = default)
+        => AuthorizeAsync(policy, cancellationToken);
 }
 
 /// <summary>Details of a link or affordance that could not be resolved to a URL.</summary>

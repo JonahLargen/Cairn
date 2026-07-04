@@ -14,6 +14,9 @@ internal abstract class HypermediaSpec<T>
 
     public string? Policy { get; set; }
 
+    /// <summary>When set, <see cref="Policy"/> is evaluated against the object this returns (resource-based auth).</summary>
+    public Func<T, object?>? PolicyResource { get; set; }
+
     public string? TitleText { get; set; }
 
     public string? TypeText { get; set; }
@@ -97,6 +100,14 @@ internal sealed class LinkSpec<T> : HypermediaSpec<T>, ILinkSpec<T>
         return this;
     }
 
+    public ILinkSpec<T> RequireAuthorization(string policy, Func<T, object?> resource)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        Policy = policy;
+        PolicyResource = resource;
+        return this;
+    }
+
     public ILinkSpec<T> RequireAuthorization() => RequireAuthorization(HypermediaSpec<T>.DefaultPolicy);
 }
 
@@ -176,6 +187,14 @@ internal sealed class AffordanceSpec<T> : HypermediaSpec<T>, IAffordanceSpec<T>
     public IAffordanceSpec<T> RequireAuthorization(string policy)
     {
         Policy = policy;
+        return this;
+    }
+
+    public IAffordanceSpec<T> RequireAuthorization(string policy, Func<T, object?> resource)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        Policy = policy;
+        PolicyResource = resource;
         return this;
     }
 

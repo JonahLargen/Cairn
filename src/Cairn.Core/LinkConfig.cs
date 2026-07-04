@@ -98,11 +98,21 @@ public interface ILinkSpec<T>
 
     /// <summary>
     /// Includes the link only when the caller satisfies the named authorization policy. The policy is evaluated
-    /// against the caller alone (memoized per request) — it cannot see the resource. For per-resource decisions,
-    /// use <see cref="When(Func{T, LinkContext, ValueTask{bool}})"/> and call
-    /// <c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c> yourself.
+    /// against the caller alone (memoized per request) — it cannot see the resource. For a per-resource decision,
+    /// use <see cref="RequireAuthorization(string, Func{T, object})"/>.
     /// </summary>
     ILinkSpec<T> RequireAuthorization(string policy);
+
+    /// <summary>
+    /// Includes the link only when the caller satisfies the named policy evaluated against the object returned by
+    /// <paramref name="resource"/> — ASP.NET Core resource-based authorization
+    /// (<c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c>). Pass <c>o =&gt; o</c> to authorize
+    /// against the resource being linked, or select a projection or domain entity the policy's handlers expect.
+    /// The policy name is validated at startup exactly as the caller-only overload's is.
+    /// </summary>
+    /// <param name="policy">The policy name, or the empty string for the host's default policy.</param>
+    /// <param name="resource">Selects the object the policy is evaluated against.</param>
+    ILinkSpec<T> RequireAuthorization(string policy, Func<T, object?> resource);
 
     /// <summary>Includes the link only when the caller satisfies the default authorization policy (an authenticated user, by default).</summary>
     ILinkSpec<T> RequireAuthorization();
@@ -158,11 +168,21 @@ public interface IAffordanceSpec<T>
 
     /// <summary>
     /// Includes the affordance only when the caller satisfies the named authorization policy. The policy is
-    /// evaluated against the caller alone (memoized per request) — it cannot see the resource. For per-resource
-    /// decisions, use <see cref="When(Func{T, LinkContext, ValueTask{bool}})"/> and call
-    /// <c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c> yourself.
+    /// evaluated against the caller alone (memoized per request) — it cannot see the resource. For a per-resource
+    /// decision, use <see cref="RequireAuthorization(string, Func{T, object})"/>.
     /// </summary>
     IAffordanceSpec<T> RequireAuthorization(string policy);
+
+    /// <summary>
+    /// Includes the affordance only when the caller satisfies the named policy evaluated against the object
+    /// returned by <paramref name="resource"/> — ASP.NET Core resource-based authorization
+    /// (<c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c>). Pass <c>o =&gt; o</c> to authorize
+    /// against the resource the action belongs to, or select a projection or domain entity the policy's handlers
+    /// expect. The policy name is validated at startup exactly as the caller-only overload's is.
+    /// </summary>
+    /// <param name="policy">The policy name, or the empty string for the host's default policy.</param>
+    /// <param name="resource">Selects the object the policy is evaluated against.</param>
+    IAffordanceSpec<T> RequireAuthorization(string policy, Func<T, object?> resource);
 
     /// <summary>Includes the affordance only when the caller satisfies the default authorization policy (an authenticated user, by default).</summary>
     IAffordanceSpec<T> RequireAuthorization();
