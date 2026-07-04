@@ -4,7 +4,7 @@ Cairn projects a resource's `_links`, affordances, and embedded resources into o
 
 ## The three built-in formats
 
-`HypermediaFormat` has three members:
+`HypermediaFormat` has three wire-format members, plus `None` (no hypermedia at all — see [opt-in links](#opt-in-links-only-when-the-client-asks)):
 
 ```csharp
 public enum HypermediaFormat
@@ -12,14 +12,18 @@ public enum HypermediaFormat
     Default,
     Hal,
     HalForms,
+    None,
 }
 ```
 
 | Format | Media type | Emits |
 | --- | --- | --- |
-| `HypermediaFormat.Default` | `application/json` | `_links` and `_actions` |
+| `HypermediaFormat.Default` | `application/json` (also `application/vnd.cairn+json`) | `_links` and `_actions` |
 | `HypermediaFormat.Hal` | `application/hal+json` | `_links` only — affordances are not emitted |
 | `HypermediaFormat.HalForms` | `application/prs.hal-forms+json` | `_links` and `_templates` for affordances |
+| `HypermediaFormat.None` | `application/json` | nothing — the resource serializes exactly as its DTO declares |
+
+The flat `Default` shape answers to two media types: plain `application/json`, and the explicit `application/vnd.cairn+json`. The alias matters when links are made [opt-in](#opt-in-links-only-when-the-client-asks), where `application/json` is reserved for the bare resource.
 
 `_links` is always present when a resource has links. The difference is how affordances surface:
 
@@ -85,6 +89,78 @@ builder.Services.AddCairn(options =>
     options.NegotiateFormat = false;
     options.DefaultFormat = HypermediaFormat.Hal;
 });
+```
+
+## Opt-in links: only when the client asks
+
+`.WithLinks()` is a *server-side, per-endpoint* opt-in: the developer chooses which endpoints carry hypermedia. But once an endpoint is opted in, it emits links for **every** request — a plain `application/json` caller gets `_links`/`_actions` whether it wants them or not. There is deliberately no media type that means "the resource, with no links": all four negotiable media types above carry hypermedia, differing only in shape.
+
+Sometimes you want the *client* to decide per request — lean `application/json` for callers that just want data, links for callers that ask. Set `DefaultFormat = HypermediaFormat.None` to flip the un-negotiated default from "flat links-and-actions" to "no hypermedia":
+
+```csharp
+builder.Services.AddCairn(options =>
+{
+    options.AddLinks(new OrderLinks());
+    options.DefaultFormat = HypermediaFormat.None;   // hypermedia is opt-in by the client
+});
+```
+
+With `None` as the default, on an opted-in endpoint:
+
+| Request `Accept` | Response |
+| --- | --- |
+| `application/json` | the **bare** resource — no `_links`, no `_actions` |
+| `*/*`, `application/*`, or no `Accept` header | the bare resource (a wildcard expresses no hypermedia preference) |
+| `application/vnd.cairn+json` | Cairn's flat shape, with `_links` and `_actions` |
+| `application/hal+json` | HAL, with `_links` |
+| `application/prs.hal-forms+json` | HAL-FORMS, with `_links` and `_templates` |
+| a registered custom formatter's media type | that format |
+
+So a hypermedia media type is the client's "I understand hypermedia" signal — a dumb client gets clean JSON, a hypermedia-aware client names the shape it wants and gets the links.
+
+### Reaching the flat shape: `application/vnd.cairn+json`
+
+Cairn's flat `_links`/`_actions` shape normally lives at `application/json`. Under opt-in, `application/json` is claimed for the bare resource — so the flat shape gets its own media type, **`application/vnd.cairn+json`**, and that is how a client asks for it:
+
+```bash
+curl https://api.example.com/orders/42                                  # bare resource
+curl -H "Accept: application/vnd.cairn+json" https://api.example.com/orders/42   # flat _links + _actions
+curl -H "Accept: application/hal+json"        https://api.example.com/orders/42   # HAL
+```
+
+The response's `Content-Type` echoes `application/vnd.cairn+json` when that shape is negotiated, so caches (already keyed by the `Vary: Accept` Cairn adds) and clients can tell the bare and linked representations apart from the header alone. `application/vnd.cairn+json` is recognized in every mode — even with the default `HypermediaFormat.Default`, a client can name it to request the flat shape explicitly — and it can be forced per endpoint with `.WithHypermediaFormat("application/vnd.cairn+json")`.
+
+`None` is non-breaking: `DefaultFormat` is `HypermediaFormat.Default` unless you change it, so existing apps keep emitting links on `application/json`. A per-endpoint `.WithHypermediaFormat(...)` override still wins over the negotiated default in either mode.
+
+## Customizing the media types
+
+Every token Cairn negotiates by is configurable through `CairnOptions.MediaTypes`; the defaults are the conventional ones. Override any of them to match your API's media-type scheme:
+
+```csharp
+builder.Services.AddCairn(options =>
+{
+    options.MediaTypes.Json     = "application/json";                 // plain JSON: flat shape normally, bare under opt-in
+    options.MediaTypes.Cairn    = "application/vnd.acme+json";        // the flat shape's explicit vendor type
+    options.MediaTypes.Hal      = "application/hal+json";
+    options.MediaTypes.HalForms = "application/prs.hal-forms+json";
+});
+```
+
+| Token | Default | Role |
+| --- | --- | --- |
+| `MediaTypes.Json` | `application/json` | Selects and labels the flat shape normally; selects the **bare** resource under opt-in (`DefaultFormat = None`). |
+| `MediaTypes.Cairn` | `application/vnd.cairn+json` | Always selects the flat shape — the door that stays open when `Json` is reserved for the bare resource. |
+| `MediaTypes.Hal` | `application/hal+json` | Selects and labels HAL. |
+| `MediaTypes.HalForms` | `application/prs.hal-forms+json` | Selects and labels HAL-FORMS. |
+
+The four tokens must be distinct, concrete media types (no wildcards or parameters) and must not collide with a registered [custom formatter](custom-formats.md)'s media type; both are validated when the host starts, so a mistake fails boot rather than a request. Because `Cairn` is a real negotiation token, setting it to your own vendor type gives you a fully-branded API: a client asks for `application/vnd.acme+json` and gets the flat shape (labeled the same), while a plain `application/json` request behaves per `DefaultFormat`. A bare response (opt-in `None`) is labeled with `MediaTypes.Json`.
+
+You can also force `None` on a single endpoint or route group to suppress links there even while the app default emits them:
+
+```csharp
+app.MapGet("/orders/{id}", GetOrder)
+    .WithLinks()
+    .WithHypermediaFormat(HypermediaFormat.None);   // this endpoint never emits hypermedia
 ```
 
 ## Content-Type relabeling

@@ -65,7 +65,8 @@ public static class CairnEndpointExtensions
 
     /// <summary>
     /// Forces the hypermedia <paramref name="format"/> for this endpoint or route group, overriding content
-    /// negotiation and the global default.
+    /// negotiation and the global default. Pass <see cref="HypermediaFormat.None"/> to suppress links here even
+    /// on an opted-in endpoint.
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
     public static TBuilder WithHypermediaFormat<TBuilder>(this TBuilder builder, HypermediaFormat format)
