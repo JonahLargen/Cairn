@@ -43,6 +43,7 @@ internal sealed class CairnJsonOptionsSetup(IHttpContextAccessor accessor, Cairn
         Justification = "Guarded by JsonSerializer.IsReflectionEnabledByDefault; the feature-guard attribute that teaches the analyzer about this property only exists on net9.0+, so the guard is not recognized when compiling for net8.0.")]
     [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
         Justification = "Guarded by JsonSerializer.IsReflectionEnabledByDefault, which is always false under Native AOT.")]
+    [ExcludeFromCodeCoverage(Justification = "The null arm requires a host with reflection serialization disabled (Native AOT or the feature switch); the test host always has it enabled.")]
     private static IJsonTypeInfoResolver? DefaultResolver()
         => JsonSerializer.IsReflectionEnabledByDefault ? new DefaultJsonTypeInfoResolver() : null;
 }

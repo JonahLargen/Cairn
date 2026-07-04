@@ -19,8 +19,8 @@ internal static class UriTemplate
     public static string Expand(string template) => ExpandCore(template, NoVariables);
 
     /// <summary>Expands from a string-keyed dictionary, which supplies variables without reflection.</summary>
-    public static string Expand(string template, IReadOnlyDictionary<string, object?>? variables)
-        => ExpandCore(template, variables ?? NoVariables);
+    public static string Expand(string template, IReadOnlyDictionary<string, object?> variables)
+        => ExpandCore(template, variables);
 
     [RequiresUnreferencedCode("Expanding template variables from an arbitrary object reflects over its public properties, which trimming may remove. Pass an IReadOnlyDictionary<string, object?> instead.")]
     public static string Expand(string template, object? variables)

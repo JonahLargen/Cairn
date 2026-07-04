@@ -100,7 +100,7 @@ internal static class CairnLinkRecorder
             && !options.IsPagingEnvelope(value.GetType())
             && !IsMaterialized(enumerable))
         {
-            value = TryBufferSequence(enumerable) ?? value;
+            value = BufferOrKeep(enumerable);
         }
 
         await RecordAsync(http, value, scope, warnIfUnconfigured: true);
@@ -848,12 +848,13 @@ internal static class CairnLinkRecorder
     }
 
     // Enumerate the deferred sequence exactly once into a List<T> (preserving the element type so the
-    // serialization contract is unchanged) that both the recorder and the serializer share. Returns null
-    // when the List<T> instantiation is unavailable (Native AOT with an uninstantiated value-type element);
-    // callers then leave the sequence deferred, the documented degradation.
+    // serialization contract is unchanged) that both the recorder and the serializer share. Returns the
+    // source unchanged when the List<T> instantiation is unavailable (Native AOT with an uninstantiated
+    // value-type element), leaving the sequence deferred — the documented degradation.
+    [ExcludeFromCodeCoverage(Justification = "The catch arm requires a Native AOT runtime missing the List<T> instantiation; it cannot execute on the JIT test host.")]
     [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
-        Justification = "List<T> over reference-type elements uses shared generic code that always exists under Native AOT; a missing value-type instantiation throws NotSupportedException, which callers turn into the documented deferred-sequence fallback.")]
-    private static IEnumerable? TryBufferSequence(IEnumerable source)
+        Justification = "List<T> over reference-type elements uses shared generic code that always exists under Native AOT; a missing value-type instantiation throws NotSupportedException, which degrades to keeping the sequence deferred.")]
+    private static IEnumerable BufferOrKeep(IEnumerable source)
     {
         IList buffer;
         try
@@ -862,7 +863,7 @@ internal static class CairnLinkRecorder
         }
         catch (NotSupportedException)
         {
-            return null;
+            return source;
         }
 
         foreach (var item in source)
@@ -871,6 +872,27 @@ internal static class CairnLinkRecorder
         }
 
         return buffer;
+    }
+
+    // The List<T> buffer type for the sequence's element type, or null when the instantiation is
+    // unavailable under Native AOT (the caller falls back to its logged warning). The return annotation
+    // lets the caller instantiate the buffer without re-running MakeGenericType.
+    [ExcludeFromCodeCoverage(Justification = "The catch arm requires a Native AOT runtime missing the List<T> instantiation; it cannot execute on the JIT test host.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "A missing List<T> instantiation under Native AOT throws NotSupportedException, which the caller turns into the documented logged fallback.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2073:UnrecognizedReflectionPattern",
+        Justification = "Every List<T> instantiation has a public parameterless constructor.")]
+    [return: DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
+    private static Type? TryMakeBufferType(IEnumerable items)
+    {
+        try
+        {
+            return typeof(List<>).MakeGenericType(ElementTypeOf(items));
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
@@ -898,8 +920,6 @@ internal static class CairnLinkRecorder
     // relying only on the post-response emit-miss diagnostic.
     [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
         Justification = "Searches the envelope's public properties for the one exposing the deferred items so the buffer can be written back. A property removed by trimming simply isn't found, taking the same logged fallback as an envelope with no settable items property.")]
-    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
-        Justification = "A List<T> instantiation missing under Native AOT throws NotSupportedException, which is caught and routed to the same logged fallback as an envelope with no settable items property.")]
     private static IEnumerable MaterializeEnvelopeItems(object envelope, IEnumerable items, RecordScope scope)
     {
         if (items is string || IsMaterialized(items))
@@ -907,17 +927,8 @@ internal static class CairnLinkRecorder
             return items;
         }
 
-        Type? bufferType;
-        try
-        {
-            bufferType = typeof(List<>).MakeGenericType(ElementTypeOf(items));
-        }
-        catch (NotSupportedException)
-        {
-            bufferType = null;   // Native AOT without this List<T> instantiation: fall through to the warning
-        }
-
-        if (bufferType is not null)
+        // A null buffer type (Native AOT without the List<T> instantiation) falls through to the warning.
+        if (TryMakeBufferType(items) is { } bufferType)
         {
             foreach (var property in envelope.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
@@ -944,9 +955,10 @@ internal static class CairnLinkRecorder
                     continue;
                 }
 
-                if (TryBufferSequence(items) is not { } buffer)
+                var buffer = (IList)Activator.CreateInstance(bufferType)!;
+                foreach (var item in items)
                 {
-                    break;   // the missing instantiation degrades to the warning below
+                    buffer.Add(item);
                 }
 
                 property.SetValue(envelope, buffer);

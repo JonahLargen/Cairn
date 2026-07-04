@@ -84,6 +84,30 @@ public class CairnClientErgonomicsTests
     }
 
     [Fact]
+    public async Task A_non_templated_curie_returns_its_href_verbatim()
+    {
+        await using var app = await BuildServerAsync();
+        var client = new CairnClient(NewHttpClient(app));
+
+        var resource = (await client.GetAsync<Doc>("/curied-doc-flat")).Resource!;
+
+        Assert.Equal("https://docs.example.com/rels/widget", resource.DocumentationFor("acme:widget"));
+    }
+
+    [Fact]
+    public async Task A_template_without_a_target_falls_back_to_the_expanded_self_link()
+    {
+        await using var app = await BuildServerAsync();
+        var client = new CairnClient(NewHttpClient(app));
+
+        var resource = (await client.GetAsync<Doc>("/templated-self-doc")).Resource!;
+
+        // The templated self href expands with no variables (the optional query expression collapses per
+        // RFC 6570), so the fallback target carries no literal braces.
+        Assert.Equal("/templated-self-doc", resource.Affordances["do"].Href);
+    }
+
+    [Fact]
     public async Task The_link_policy_is_enforced_on_every_redirect_hop()
     {
         await using var app = await BuildServerAsync();
@@ -167,6 +191,31 @@ public class CairnClientErgonomicsTests
               }
             }
             """, "application/hal+json"));
+
+        app.MapGet("/curied-doc-flat", () => Results.Text(
+            """
+            {
+              "name": "doc",
+              "_links": {
+                "self": { "href": "/curied-doc-flat" },
+                "curies": [{ "name": "acme", "href": "https://docs.example.com/rels/widget" }],
+                "acme:widget": { "href": "/widgets/1" }
+              }
+            }
+            """, "application/hal+json"));
+
+        app.MapGet("/templated-self-doc", () => Results.Text(
+            """
+            {
+              "name": "doc",
+              "_links": {
+                "self": { "href": "/templated-self-doc{?q}", "templated": true }
+              },
+              "_templates": {
+                "do": { "method": "POST" }
+              }
+            }
+            """, "application/prs.hal-forms+json"));
 
         app.MapGet("/redirect-ok", () => Results.Redirect("/landing"));
         app.MapGet("/landing", () => Results.Json(new Doc("landed")));
