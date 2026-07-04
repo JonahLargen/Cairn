@@ -1,0 +1,66 @@
+# Automated PR review by Claude (anthropics/claude-code-action).
+#
+# Trigger policy: reviews each PR once, when it first becomes reviewable —
+#   - non-draft PRs are reviewed when opened
+#   - draft PRs are reviewed when marked "Ready for review"
+# Later pushes do NOT trigger a re-review. To change this, edit the
+# `types` list below (add `synchronize` to review every push).
+#
+# Auth: uses a Claude Pro/Max subscription OAuth token stored in the
+# CLAUDE_CODE_OAUTH_TOKEN repository secret (generate with `claude setup-token`).
+
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  claude-review:
+    # Skip drafts on `opened`; they get their review at `ready_for_review`.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Claude review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Posts a progress-tracking comment that updates as the review runs.
+          track_progress: true
+
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request as a senior .NET engineer. Focus on:
+
+            1. **Correctness** — logic errors, unhandled edge cases, async/await
+               pitfalls, nullability issues, and error handling.
+            2. **API design** — public surface consistency with the rest of the
+               library, naming, and breaking-change risk.
+            3. **Performance** — allocations, LINQ in hot paths, and anything
+               the benchmarks suggest we care about.
+            4. **Tests** — missing coverage for new behavior and edge cases
+               (this repo enforces a 95% line-coverage threshold).
+            5. **Docs** — XML doc comments on public APIs and README/docs
+               updates for user-facing changes.
+
+            Post line-specific issues as inline comments on the exact code.
+            Use a single top-level summary comment for overall observations.
+            Be concise: skip praise-only comments and nitpicks that a linter
+            would catch. If the PR looks good, say so briefly.
+
+          claude_args: |
+            --model claude-sonnet-5
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
