@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Coverage collection settings for the coverlet collector ("XPlat Code Coverage").
+  Source-generator output (System.Text.Json contexts, ASP.NET Core OpenAPI XML-comment
+  support, etc.) is emitted under obj/ and is not hand-written code, so it is excluded
+  from the coverage measurement that the 95% CI threshold is enforced against.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <ExcludeByFile>**/obj/**/*.cs</ExcludeByFile>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

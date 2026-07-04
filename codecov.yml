@@ -1,0 +1,9 @@
+# Codecov must agree with the ReportGenerator gate in ci.yml: 95% line coverage.
+coverage:
+  status:
+    project:
+      default:
+        target: 95%
+    patch:
+      default:
+        informational: true
