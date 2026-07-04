@@ -83,7 +83,7 @@ Read these three in order — they build on each other:
 **Running in production**
 
 - [API versioning](articles/versioning.md) — composing with `Asp.Versioning`.
-- [Link URL policy](articles/url-policy.md) — absolute vs path-relative links, `PublicBaseUri`, `TransformUrl`.
+- [Link URL policy](articles/url-policy.md) — absolute vs path-relative links, `PublicBaseUri`, the per-request `ResolvePublicBaseUri` for multi-tenant hosts, and `TransformUrl`.
 - [Conditional requests, OPTIONS & deprecation](articles/conditional-requests.md) — `WithETag`, preconditions, `Allow`, deprecation headers.
 - [Diagnostics & observability](articles/diagnostics.md) — warnings, metrics, and tracing.
 
