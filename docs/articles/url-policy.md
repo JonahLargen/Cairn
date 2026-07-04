@@ -25,9 +25,20 @@ Both `UrlStyle` and `PublicBaseUri` apply to route-resolved links, affordances, 
 > [!NOTE]
 > With `Absolute` URLs, the request's `Host` header is what links are built from — and it is client-controlled and proxy-rewritten. When neither `ForwardedHeadersOptions` (via the options system) nor `PublicBaseUri` is configured, Cairn logs a one-time warning at startup. Configure forwarded headers, pin `PublicBaseUri`, or switch to `PathRelative` to silence it.
 
+## Per-request origins (multi-tenant): `ResolvePublicBaseUri`
+
+`PublicBaseUri` pins one origin for the whole app. When a single app serves several origins — a tenant per host, a regional edge per request — resolve the origin from the request instead:
+
+```csharp
+builder.Services.AddCairn(o => o.ResolvePublicBaseUri = http =>
+    tenants.TryGetOrigin(http.Request.Host.Host, out var origin) ? origin : null);
+```
+
+The resolver takes precedence over `PublicBaseUri`: a non-null `Uri` becomes this request's origin, and returning `null` falls back to `PublicBaseUri` (then the incoming request's own scheme and host), so a resolver can rebase only the tenants it recognizes. The URI it returns must be absolute — a relative one throws at request time. Keep it cheap and side-effect-free; it may be consulted several times while a response's links are built. Like `PublicBaseUri`, it feeds route links, affordances, and pagination links alike, and is ignored under `PathRelative`. Configuring it also silences the startup `Host`-header warning, since the host now controls the origin.
+
 ## Post-processing: `TransformUrl`
 
-`TransformUrl` runs after resolution on each route-resolved link and affordance URL:
+`TransformUrl` runs after resolution on **every** emitted URL — route-resolved links, affordances, explicit `LinkTarget.Uri` hrefs, and [pagination](pagination.md) links:
 
 ```csharp
 builder.Services.AddCairn(o => o.TransformUrl = (http, url) =>
@@ -36,7 +47,7 @@ builder.Services.AddCairn(o => o.TransformUrl = (http, url) =>
         : url);
 ```
 
-Its main use is carrying request state onto links — the query-string API version above is the canonical example (see [versioning.md](versioning.md)). It does not run on pagination links, which already derive from the request URL and keep its query string.
+Its main use is carrying request state onto links — the query-string API version above is the canonical example (see [versioning.md](versioning.md)) — but it also fits URL signing, tracking parameters, or CDN rewrites that should reach the whole document. Because pagination links already derive from the request URL (query string included), write the transform to be idempotent so a parameter that's already present isn't appended twice.
 
 ## Related
 

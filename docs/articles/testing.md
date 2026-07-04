@@ -12,7 +12,7 @@ Parsing reads `_links`, `_actions`, HAL-FORMS `_templates`, and `_embedded` from
 - `Templates` — the HAL-FORMS templates as `HypermediaTemplate` values, with their fields.
 - `Embedded` — the `_embedded` resources per relation (a single embed parses as a one-element list).
 
-Each link is a `HypermediaLink(string Href, string? Title)` (with `Name`, `Templated`, and the RFC 8288 attributes `Type`, `Deprecation`, `Hreflang`, and `Profile`); each affordance is a `HypermediaAffordance(string Href, string Method, string? Title)` — an action or template that omits its `method` defaults to `GET`, as HAL-FORMS prescribes. A link or action without an `href` — or a template with an empty `target` — fails parsing with a `FormatException`; a template *omitting* `target` falls back to the `self` link.
+Each link is a `HypermediaLink(string Href, string? Title)` (with `Name`, `Templated`, and the RFC 8288 attributes `Type`, `Deprecation`, `Hreflang`, and `Profile`); each affordance is a `HypermediaAffordance(string Href, string Method, string? Title)` with a `ContentType` (carried over from the backing HAL-FORMS template, or read from `_actions` when present) — an action or template that omits its `method` defaults to `GET`, as HAL-FORMS prescribes. A link or action without an `href` — or a template with an empty `target` — fails parsing with a `FormatException`; a template *omitting* `target` falls back to the `self` link.
 
 Four entry points cover the common cases:
 
@@ -50,9 +50,21 @@ Call `.Should()` on a `HypermediaResponse` to begin a chain:
 | `HaveAffordance(string name)` | The named affordance is present; returns affordance assertions |
 | `NotHaveAffordance(string name)` | No affordance with the given name is present |
 | `HaveTemplate(string name)` | The named HAL-FORMS template is present; returns template assertions |
+| `NotHaveTemplate(string name)` | No HAL-FORMS template with the given name is present |
 | `HaveEmbedded(string relation)` | An `_embedded` entry is present; returns assertions over its first resource |
+| `HaveEmbedded(string relation, int count)` | The relation embeds exactly `count` resources; returns assertions over the first |
+| `NotHaveEmbedded(string relation)` | No `_embedded` entry with the given relation is present |
 
-`HaveAffordance(string name)` returns a `HypermediaAffordanceAssertions` exposing `WithMethod(HttpMethod method)`, `WithHref(string href)`, and `WithHrefMatching(string pattern)`. All return the affordance assertions, so they chain directly; use the `And` property to return to the response-level chain.
+`HaveAffordance(string name)` returns a `HypermediaAffordanceAssertions` exposing `WithMethod(HttpMethod method)`, `WithHref(string href)`, `WithHrefMatching(string pattern)`, and `WithContentType(string contentType)` (the media type the action's request body is submitted as). All return the affordance assertions, so they chain directly; use the `And` property to return to the response-level chain.
+
+`HaveEmbedded` returns assertions over the embedded resource — the full response surface, so you can drill in with `HaveLink`, `HaveAffordance`, and so on. Its `And` steps back **out** to the resource that embeds it, so one chain can assert across an `_embedded` boundary and return:
+
+```csharp
+hypermedia.Should()
+    .HaveEmbedded("customer").HaveLink("self", "/customers/99")
+    .And.HaveEmbedded("item", 2).HaveLink("self", "/items/1")
+    .And.HaveSelfLink();   // back on the embedding resource
+```
 
 `HaveTemplate(string name)` returns `HypermediaTemplateAssertions` — `WithMethod`, `WithTarget`, `WithTargetMatching(pattern)`, `WithContentType`, and `HaveField(name)`, which drills into a single HAL-FORMS field (`ThatIsRequired()`, `ThatIsOptional()`, `ThatIsReadOnly()`, `WithType(...)`, `WithRegex(...)`, `WithPrompt(...)`).
 
@@ -105,6 +117,28 @@ public class OrderHypermediaTests : IClassFixture<WebApplicationFactory<Program>
 ```
 
 `WithMethod` compares the affordance's parsed `Method` string against `HttpMethod.Method`, so the method must match exactly (for example, `PUT`).
+
+## Asserting the HTTP response
+
+The hypermedia lives in the body, but a REST response also carries a status line and headers worth asserting. Call `.Should()` on the `HttpResponseMessage` itself for transport-level checks, before (or alongside) reading its hypermedia:
+
+```csharp
+using HttpResponseMessage response = await client.GetAsync("/orders/42");
+
+response.Should()
+    .HaveStatusCode(HttpStatusCode.OK)
+    .And.HaveContentType("application/hal+json")   // parameters like charset are ignored
+    .And.HaveETag("\"v1\"");
+
+HypermediaResponse hypermedia = await response.ReadHypermediaAsync();
+```
+
+| Assertion | Checks |
+| --- | --- |
+| `HaveStatusCode(HttpStatusCode statusCode)` | The response has the given status code |
+| `HaveContentType(string mediaType)` | The `Content-Type` media type equals `mediaType` (case-insensitive; parameters such as `charset` are ignored) |
+| `HaveETag()` | An `ETag` header is present |
+| `HaveETag(string etag)` | The `ETag` header equals `etag`, quotes and any weak `W/` prefix included (for example, `"v1"` or `W/"v1"`) |
 
 ## Snapshot testing
 

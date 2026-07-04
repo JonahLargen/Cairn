@@ -47,6 +47,22 @@ public class CairnStartupConfigTests
     }
 
     [Fact]
+    public async Task Setting_ResolvePublicBaseUri_suppresses_the_host_warning()
+    {
+        var logs = new CapturingLoggerProvider();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Logging.AddProvider(logs);
+        builder.Services.AddCairn(o => o.ResolvePublicBaseUri = _ => new Uri("https://tenant.example.com"));
+
+        await using var app = builder.Build();
+        await app.StartAsync();
+
+        // A per-request resolver means the host has taken control of the origin, just like a static PublicBaseUri.
+        Assert.DoesNotContain(logs.Messages, m => m.Contains("UrlStyle is Absolute", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task PathRelative_urls_suppress_the_host_warning()
     {
         var logs = new CapturingLoggerProvider();

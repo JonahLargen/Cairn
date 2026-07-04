@@ -51,6 +51,7 @@ Affordances support the same conditional and authorization gates as links:
 
 - `When(Func<T, bool>)`, `When(Func<T, LinkContext, bool>)`, and `When(Func<T, LinkContext, ValueTask<bool>>)` include the affordance only when the predicate holds.
 - `RequireAuthorization(policy)` includes it only when the caller satisfies the named authorization policy; `RequireAuthorization()` requires the default policy (an authenticated user, by default).
+- `RequireAuthorization(policy, o => resource)` evaluates the policy against a resource (ASP.NET Core resource-based authorization) so the decision can be per-item — "may this caller cancel *this* order?" See [Link configurations](link-configs.md#resource-based-authorization).
 
 ```csharp
 builder.Affordance("cancel", o => LinkTarget.Route("CancelOrder", new { id = o.Id }))

@@ -175,6 +175,26 @@ Relabeling is conservative. It only rewrites a content type whose media type is 
 
 Content types that are not plain `application/json` are left untouched — including `application/problem+json` (per RFC 9457; see [error-responses.md](error-responses.md)) and any explicit vendor media type the handler already set. Relabeling also applies only when the top-level returned value is itself a decorated resource (a configured single resource, or an offset/cursor [pagination](pagination.md) envelope). A bare collection serializes as a JSON array — its elements still carry `_links`, but the array itself is not a HAL document, so it remains `application/json`.
 
+## The `Link` header (RFC 8288)
+
+The top-level resource's links live in the body, under `_links`. Set `CairnOptions.EmitLinkHeader` to also advertise them as an [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288) `Link` response header, so a proxy, a cache, or any client that reads headers without parsing the body still sees where to go next:
+
+```csharp
+builder.Services.AddCairn(options => options.EmitLinkHeader = true);
+```
+
+```http
+Link: <https://api.example.com/orders/42>; rel="self", <https://api.example.com/orders?page=3>; rel="next"; title="Next page"
+```
+
+The header mirrors the body's links, with a few deliberate limits:
+
+- **The context resource only.** The links emitted are those of the top-level returned value — a single configured resource, or an offset/cursor [pagination](pagination.md) envelope (its `self`/`next`/`prev`/`first`/`last`). The links of embedded children and of a collection's individual elements are *not* emitted, and a bare collection (a JSON array, which has no single context resource) emits no header at all.
+- **Concrete targets only.** A templated link (`templated: true`, which includes `curies`) is skipped — an RFC 6570 template is not a valid `Link` target. So is an href that can't sit in a header field (one containing a control character or an angle bracket).
+- **Standard attributes.** A link's `title`, `name`, `type`, `profile`, and `hreflang` ride along when it declares them; quoted-string values are escaped per the grammar.
+
+It is off by default: the links are already in the body, and duplicating them into every header block is bytes many APIs don't need. The header is set during the compute stage, before the body is written, so it lives on the same response the body does. It composes with the endpoint-level `Link: <…>; rel="deprecation"` from [`WithDeprecation`](conditional-requests.md#deprecating-endpoints-withdeprecation) — both are appended. Whether links are present at all depends on the negotiated format, and Cairn already adds `Vary: Accept` so shared caches key on the header that decides it.
+
 ## One format per response
 
 The resolved format is computed once per request, then used to shape every resource in the response — the top-level value, each element of a returned collection, and every embedded child are all rendered in the same format.

@@ -19,6 +19,7 @@ internal sealed class CairnStartupWarnings(IServiceProvider services, CairnOptio
     {
         if (options.UrlStyle == LinkUrlStyle.Absolute
             && options.PublicBaseUri is null
+            && options.ResolvePublicBaseUri is null
             && !ForwardedHeadersConfigured()
             && services.GetService<ILoggerFactory>() is { } loggerFactory)
         {

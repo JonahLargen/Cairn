@@ -67,8 +67,49 @@ public sealed class CairnOptions
         }
     }
 
+    /// <summary>
+    /// A per-request resolver for the public origin absolute links are built against — scheme, host, and
+    /// optional path base — for multi-tenant hosts that serve several origins from one application. It is
+    /// evaluated against the current request's <see cref="HttpContext"/> and takes precedence over
+    /// <see cref="PublicBaseUri"/>; returning <see langword="null"/> falls back to <see cref="PublicBaseUri"/>
+    /// (then the incoming request's own origin), so a resolver can rebase only the tenants it recognizes. The
+    /// URI it returns must be absolute. Keep it cheap and free of side effects — it may be consulted several
+    /// times while a response's links are built. Ignored when <see cref="UrlStyle"/> is <see cref="LinkUrlStyle.PathRelative"/>.
+    /// </summary>
+    public Func<HttpContext, Uri?>? ResolvePublicBaseUri { get; set; }
+
+    // The effective public origin for this request: the per-request resolver wins when it yields a URI,
+    // then the static PublicBaseUri. Null means neither is configured, so links fall back to the request's
+    // own scheme/host. A relative URI from the resolver can't name an origin and would fail with an opaque
+    // error deeper in link generation, so reject it up front with the same guidance as the setter.
+    internal Uri? PublicBaseUriFor(HttpContext http)
+    {
+        if (ResolvePublicBaseUri is { } resolve && resolve(http) is { } resolved)
+        {
+            if (!resolved.IsAbsoluteUri)
+            {
+                throw new InvalidOperationException(
+                    "Cairn: ResolvePublicBaseUri must return an absolute URI (e.g. https://tenant.example.com) or null.");
+            }
+
+            return resolved;
+        }
+
+        return _publicBaseUri;
+    }
+
     /// <summary>Whether a known hypermedia media type in the request's <c>Accept</c> header selects the format (default <see langword="true"/>).</summary>
     public bool NegotiateFormat { get; set; } = true;
+
+    /// <summary>
+    /// Whether the top-level (context) resource's links are also advertised as an RFC 8288 <c>Link</c> response
+    /// header (default <see langword="false"/>), so clients and intermediaries that never parse the body still
+    /// see its navigation links. Only the primary resource is emitted — not the links of embedded children or
+    /// of a collection's elements — and templated links are skipped (an RFC 6570 template is not a valid header
+    /// target). A bare collection response (a JSON array, which has no context resource of its own) emits no
+    /// header. This composes with the endpoint-level <c>Link</c> header from <c>WithDeprecation</c>.
+    /// </summary>
+    public bool EmitLinkHeader { get; set; }
 
     /// <summary>
     /// The media types Cairn negotiates its wire formats by and labels responses with — the plain

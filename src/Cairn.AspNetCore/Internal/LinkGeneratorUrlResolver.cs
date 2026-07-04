@@ -17,11 +17,17 @@ internal sealed class LinkGeneratorUrlResolver(
 {
     public string? Resolve(LinkTarget target) => target switch
     {
-        ExplicitLinkTarget explicitTarget => explicitTarget.Href,
+        ExplicitLinkTarget explicitTarget => ResolveExplicit(explicitTarget),
         RouteLinkTarget route => ResolveRoute(route),
         RouteTemplateLinkTarget template => ResolveRouteTemplate(template),
         _ => null,
     };
+
+    // An explicit URI is used verbatim, then post-processed by TransformUrl like every route-resolved link,
+    // so a host rewrite (query-string versioning, signing, a CDN origin) reaches hand-written hrefs too.
+    // Outside a request there is no HttpContext to hand the transform, so the href passes through untouched.
+    private string? ResolveExplicit(ExplicitLinkTarget target)
+        => accessor.HttpContext is { } http ? Transform(http, target.Href) : target.Href;
 
     [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
         Justification = "Generated Routes.* targets supply route values as Dictionary<string, object?>, which LinkGenerator copies into a RouteValueDictionary without reflection. Anonymous-object route values in hand-written configs do reflect over the object's properties and are documented (docs/articles/aot.md) as requiring dictionaries in trimmed applications.")]
@@ -35,7 +41,7 @@ internal sealed class LinkGeneratorUrlResolver(
 
         var url = options.UrlStyle == LinkUrlStyle.PathRelative
             ? linkGenerator.GetPathByName(http, route.RouteName, route.RouteValues)
-            : options.PublicBaseUri is { } publicBase
+            : options.PublicBaseUriFor(http) is { } publicBase
                 ? linkGenerator.GetUriByName(route.RouteName, route.RouteValues, publicBase.Scheme, Host(publicBase), BasePath(publicBase))
                 : linkGenerator.GetUriByName(http, route.RouteName, route.RouteValues);
         return Transform(http, url);
@@ -128,7 +134,7 @@ internal sealed class LinkGeneratorUrlResolver(
     private string TemplateBase(HttpContext http)
         => options.UrlStyle == LinkUrlStyle.PathRelative
             ? http.Request.PathBase.ToString()
-            : options.PublicBaseUri is { } publicBase
+            : options.PublicBaseUriFor(http) is { } publicBase
                 ? $"{publicBase.Scheme}://{publicBase.Authority}{BasePath(publicBase)}"
                 : $"{http.Request.Scheme}://{http.Request.Host}{http.Request.PathBase}";
 

@@ -50,6 +50,37 @@ public class CairnVersioningTests
         Assert.Contains("api-version=1.0", self);
     }
 
+    [Fact]
+    public async Task An_idempotent_transform_carries_the_query_version_without_doubling_it_on_pagination_links()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o => o.TransformUrl = (http, url) =>
+            http.Request.Query.TryGetValue("api-version", out var v) && v.Count > 0
+             && !url.Contains("api-version=", StringComparison.OrdinalIgnoreCase)
+                ? QueryHelpers.AddQueryString(url, "api-version", v.ToString())
+                : url);
+
+        var app = builder.Build();
+        app.MapGet("/orders", (int page = 1) => TypedResults.Ok(
+            new PagedResource<VersionedOrder>([new VersionedOrder(1)], page, PageSize: 1, TotalCount: 5))).WithLinks();
+        await app.StartAsync();
+        await using var _ = app;
+
+        using var client = app.GetTestClient();
+        var links = JsonDocument.Parse(await client.GetStringAsync("/orders?api-version=1.0&page=2"))
+            .RootElement.GetProperty("_links");
+
+        // The default pagination links already preserve api-version; the guard keeps the transform from
+        // appending a second one, so every navigation link stays on the caller's version exactly once.
+        foreach (var rel in new[] { "self", "first", "next", "prev", "last" })
+        {
+            var href = links.GetProperty(rel).GetProperty("href").GetString()!;
+            Assert.Contains("api-version=1.0", href);
+            Assert.Equal(1, href.Split("api-version=").Length - 1);
+        }
+    }
+
     private static async Task<WebApplication> StartAsync(IApiVersionReader reader, string template, Action<CairnOptions>? configure = null)
     {
         var builder = WebApplication.CreateBuilder();

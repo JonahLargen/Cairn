@@ -13,10 +13,10 @@ namespace Cairn.Hypermedia;
 /// </summary>
 internal static class HypermediaJsonSchemas
 {
-    /// <summary>The HAL media type (<c>_links</c> only) an opted-in endpoint can negotiate.</summary>
+    /// <summary>The HAL media type (<c>_links</c> plus <c>_embedded</c>) an opted-in endpoint can negotiate.</summary>
     public const string HalMediaType = "application/hal+json";
 
-    /// <summary>The HAL-FORMS media type (<c>_links</c> plus <c>_templates</c>) an opted-in endpoint can negotiate.</summary>
+    /// <summary>The HAL-FORMS media type (<c>_links</c>, <c>_embedded</c>, plus <c>_templates</c>) an opted-in endpoint can negotiate.</summary>
     public const string HalFormsMediaType = "application/prs.hal-forms+json";
 
     private const string JsonMediaType = "application/json";
@@ -26,21 +26,30 @@ internal static class HypermediaJsonSchemas
     private const string CursorPagedResourceInterface = "Cairn.AspNetCore.ICursorPagedResource";
 
     /// <summary>
-    /// Adds the hypermedia properties to the schema of a Cairn-linked resource type. Mirrors the emit stage's
-    /// collision guard: a hypermedia property the DTO itself declares is the user's real property — the wire
-    /// serializes their data, so the document must keep their schema rather than clobber it with Cairn's shape.
-    /// <paramref name="declaredByType"/> says whether an already-present schema property is such a real member;
-    /// when unknowable (<see langword="null"/>), any existing property is preserved. Cairn's own emit-stage
-    /// contract properties (present when the schema is generated from the serializer's <c>JsonTypeInfo</c>)
-    /// are not real members and are replaced by the full hypermedia shape.
+    /// Adds the format-neutral hypermedia core to the schema of a Cairn-linked resource type: <c>_links</c>
+    /// and <c>_embedded</c>, the two sections every wire format emits. The format-specific sections
+    /// (<c>_actions</c> for default JSON, <c>_templates</c> for HAL-FORMS) are not added here — they are
+    /// projected per media type by <see cref="AddNegotiatedMediaTypes"/>, because the shared component schema
+    /// cannot carry a section one negotiated format emits and another omits.
+    /// <para>
+    /// Mirrors the emit stage's collision guard: a hypermedia property the DTO itself declares is the user's
+    /// real property — the wire serializes their data, so the document must keep their schema rather than
+    /// clobber it with Cairn's shape. <paramref name="declaredByType"/> says whether an already-present schema
+    /// property is such a real member; when unknowable (<see langword="null"/>), any existing property is
+    /// preserved. When <paramref name="embeds"/> and <paramref name="childSchema"/> are supplied, the
+    /// <c>_embedded</c> schema is typed with each declared relation's child resource schema; otherwise it is an
+    /// untyped object.
+    /// </para>
     /// </summary>
-    public static void Apply(OpenApiSchema schema, Func<string, bool>? declaredByType = null)
+    public static void Apply(
+        OpenApiSchema schema,
+        Func<string, bool>? declaredByType = null,
+        IReadOnlyList<EmbeddedResourceSchema>? embeds = null,
+        Func<Type, IOpenApiSchema>? childSchema = null)
     {
         schema.Properties ??= new Dictionary<string, IOpenApiSchema>();
         Set(schema.Properties, "_links", LinksSchema(), declaredByType);
-        Set(schema.Properties, "_embedded", EmbeddedSchema(), declaredByType);
-        Set(schema.Properties, "_actions", ActionsSchema(), declaredByType);
-        Set(schema.Properties, "_templates", TemplatesSchema(), declaredByType);
+        Set(schema.Properties, "_embedded", EmbeddedSchema(embeds, childSchema), declaredByType);
     }
 
     /// <summary>
@@ -127,8 +136,11 @@ internal static class HypermediaJsonSchemas
     }
 
     /// <summary>
-    /// Mirrors each Cairn-linked <c>application/json</c> response of <paramref name="operation"/> onto the
-    /// HAL and HAL-FORMS media types the endpoint can negotiate, reusing the JSON entry's schema.
+    /// Projects each Cairn-linked <c>application/json</c> response of <paramref name="operation"/> onto the
+    /// per-format schemas the endpoint can negotiate. A configured resource emits distinct shapes per format —
+    /// <c>_actions</c> only in default JSON, <c>_templates</c> only in HAL-FORMS, neither in HAL — so each media
+    /// type gets its own schema; a pagination envelope emits only navigation <c>_links</c>, identical across
+    /// the three, so the negotiated types reuse the JSON schema.
     /// </summary>
     public static void AddNegotiatedMediaTypes(ApiDescription description, OpenApiOperation operation, ILinkConfigProvider provider, IPaginationEnvelopeProvider? envelopes)
     {
@@ -151,18 +163,81 @@ internal static class HypermediaJsonSchemas
             var key = responseType.IsDefaultResponse ? "default" : responseType.StatusCode.ToString(CultureInfo.InvariantCulture);
             if (!responses.TryGetValue(key, out var response)
                 || response.Content is not { } content
-                || !content.TryGetValue(JsonMediaType, out var json))
+                || !content.TryGetValue(JsonMediaType, out var json)
+                || json.Schema is not { } baseSchema)
             {
                 continue;
             }
 
-            content.TryAdd(HalMediaType, new OpenApiMediaType { Schema = json.Schema });
-            content.TryAdd(HalFormsMediaType, new OpenApiMediaType { Schema = json.Schema });
+            // A configured resource's default JSON carries _actions and its HAL-FORMS carries _templates, so
+            // the media types differ; the shared component schema holds the format-neutral core (_links,
+            // _embedded) and each format extends it via allOf (HAL adds nothing). IsLinked already established
+            // the response type is non-null.
+            if (provider.GetConfig(responseType.Type!) is not null)
+            {
+                json.Schema = new OpenApiSchema { AllOf = [baseSchema, SectionFragment("_actions", ActionsSchema())] };
+                content.TryAdd(HalMediaType, new OpenApiMediaType { Schema = baseSchema });
+                content.TryAdd(HalFormsMediaType, new OpenApiMediaType { Schema = new OpenApiSchema { AllOf = [baseSchema, SectionFragment("_templates", TemplatesSchema())] } });
+            }
+            else
+            {
+                // A pagination envelope emits only navigation _links, identical across formats.
+                content.TryAdd(HalMediaType, new OpenApiMediaType { Schema = baseSchema });
+                content.TryAdd(HalFormsMediaType, new OpenApiMediaType { Schema = baseSchema });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Marks <paramref name="operation"/> deprecated when its endpoint declared deprecation via
+    /// <c>WithDeprecation(...)</c> — the same signal the runtime uses to emit the <c>Deprecation</c> header —
+    /// so the OpenAPI document carries <c>deprecated: true</c> and tooling flags the endpoint.
+    /// </summary>
+    public static void MarkDeprecated(ApiDescription description, OpenApiOperation operation)
+    {
+        if (HasEndpointMetadata(description, DeprecationMetadataName))
+        {
+            operation.Deprecated = true;
+        }
+    }
+
+    /// <summary>
+    /// Documents the entity tag an endpoint with <c>WithETag(...)</c> emits: an <c>ETag</c> response header on
+    /// each success (2xx) response, and a <c>304 Not Modified</c> response for the conditional
+    /// <c>GET</c>/<c>HEAD</c> that <c>WithETag</c> answers when <c>If-None-Match</c> still matches.
+    /// </summary>
+    public static void DocumentETag(ApiDescription description, OpenApiOperation operation)
+    {
+        if (operation.Responses is not { } responses || !HasEndpointMetadata(description, ETagMetadataName))
+        {
+            return;
+        }
+
+        foreach (var (status, response) in responses)
+        {
+            // Only concrete success responses carry a body (and therefore an entity tag); the "default"
+            // catch-all and error responses do not. A reference response is not ours to mutate.
+            if (IsSuccessStatus(status) && response is OpenApiResponse concrete)
+            {
+                concrete.Headers ??= new Dictionary<string, IOpenApiHeader>(StringComparer.Ordinal);
+                concrete.Headers.TryAdd("ETag", ETagHeader());
+            }
+        }
+
+        // WithETag answers a conditional GET/HEAD whose If-None-Match still matches with 304 (RFC 9110 §15.4.5).
+        if (!responses.ContainsKey("304"))
+        {
+            responses["304"] = new OpenApiResponse
+            {
+                Description = "Not Modified — the entity tag supplied in If-None-Match still matches, so the body is omitted (RFC 9110 §15.4.5).",
+            };
         }
     }
 
     // Matched by full name because this file is compiled into projects that don't reference Cairn.AspNetCore.
     private const string LinksMetadataInterface = "Cairn.AspNetCore.Internal.ICairnLinksMetadata";
+    private const string DeprecationMetadataName = "Cairn.AspNetCore.Internal.DeprecationMetadata";
+    private const string ETagMetadataName = "Cairn.AspNetCore.Internal.ETagMetadata";
 
     // Whether the endpoint opted into Cairn hypermedia. WithLinks() and [CairnLinks] both leave a metadata
     // object implementing ICairnLinksMetadata in the endpoint metadata; an endpoint that only returns a
@@ -196,6 +271,27 @@ internal static class HypermediaJsonSchemas
 
         return false;
     }
+
+    // Whether the endpoint carries a Cairn metadata object of the given type, matched by full name because
+    // this file is compiled into projects that don't reference Cairn.AspNetCore. WithDeprecation and WithETag
+    // each leave such an object so the document generators can describe the header behavior they configure.
+    private static bool HasEndpointMetadata(ApiDescription description, string metadataTypeFullName)
+    {
+        foreach (var item in description.ActionDescriptor.EndpointMetadata)
+        {
+            if (item.GetType().FullName == metadataTypeFullName)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A 2xx status key; the entity tag applies to a returned representation, so only success responses carry
+    // the ETag header. Non-numeric keys ("default") and error statuses are skipped.
+    private static bool IsSuccessStatus(string status)
+        => int.TryParse(status, NumberStyles.None, CultureInfo.InvariantCulture, out var code) && code is >= 200 and <= 299;
 
     // Every hypermedia section is response-only decoration, so each schema below carries readOnly: true —
     // the schema component for a type is shared between its response and request-body usages, and readOnly
@@ -262,13 +358,39 @@ internal static class HypermediaJsonSchemas
         },
     };
 
-    private static OpenApiSchema EmbeddedSchema() => new()
+    // _embedded: when the configuration declares Embed/EmbedMany relations, each is typed with its child
+    // resource schema (a single object, or an array for EmbedMany); otherwise an untyped object, since the
+    // type may still embed through a custom formatter.
+    private static OpenApiSchema EmbeddedSchema(IReadOnlyList<EmbeddedResourceSchema>? embeds, Func<Type, IOpenApiSchema>? childSchema)
     {
-        Type = JsonSchemaType.Object,
-        ReadOnly = true,
-        Description = "Embedded resources keyed by relation (HAL _embedded); each value is a resource or an array of resources.",
-        AdditionalProperties = new OpenApiSchema(),
-    };
+        if (embeds is not { Count: > 0 } declared || childSchema is null)
+        {
+            return new OpenApiSchema
+            {
+                Type = JsonSchemaType.Object,
+                ReadOnly = true,
+                Description = "Embedded resources keyed by relation (HAL _embedded); each value is a resource or an array of resources.",
+                AdditionalProperties = new OpenApiSchema(),
+            };
+        }
+
+        var properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal);
+        foreach (var embed in declared)
+        {
+            var child = childSchema(embed.ResourceType);
+            properties[embed.Relation.Value] = embed.Single
+                ? child
+                : new OpenApiSchema { Type = JsonSchemaType.Array, Items = child };
+        }
+
+        return new OpenApiSchema
+        {
+            Type = JsonSchemaType.Object,
+            ReadOnly = true,
+            Description = "Embedded resources keyed by relation (HAL _embedded); each declared relation carries its child resource (an array for EmbedMany).",
+            Properties = properties,
+        };
+    }
 
     private static OpenApiSchema ActionsSchema() => new()
     {
@@ -311,6 +433,22 @@ internal static class HypermediaJsonSchemas
                 },
             },
         },
+    };
+
+    // A single format-specific hypermedia section (_actions or _templates) as an allOf fragment layered onto
+    // the format-neutral component schema for one negotiated media type.
+    private static OpenApiSchema SectionFragment(string name, OpenApiSchema section) => new()
+    {
+        Type = JsonSchemaType.Object,
+        Properties = new Dictionary<string, IOpenApiSchema> { [name] = section },
+    };
+
+    // The ETag response header WithETag emits (RFC 9110 §8.8.3); an opaque validator the client echoes in
+    // If-None-Match to make a conditional request.
+    private static OpenApiHeader ETagHeader() => new()
+    {
+        Description = "Entity tag of the returned representation (RFC 9110 §8.8.3). Echo it in If-None-Match to make a conditional request.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
     };
 
     // A HAL-FORMS template field, derived from the affordance input type's data annotations.
