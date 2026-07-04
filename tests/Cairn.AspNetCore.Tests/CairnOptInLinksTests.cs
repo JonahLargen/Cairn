@@ -116,6 +116,52 @@ public class CairnOptInLinksTests
     }
 
     [Fact]
+    public async Task The_cairn_media_type_reaches_the_flat_shape_when_links_are_opt_in()
+    {
+        await using var app = await StartAsync(o => o.DefaultFormat = HypermediaFormat.None);
+        using var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.cairn+json");
+
+        var response = await client.GetAsync("/orders/42");
+        var root = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        // application/json means "bare" under opt-in, so the flat _links+_actions shape has its own door.
+        Assert.Equal("application/vnd.cairn+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.True(root.GetProperty("_links").TryGetProperty("self", out _));
+        Assert.True(root.GetProperty("_actions").TryGetProperty("cancel", out _));
+    }
+
+    [Fact]
+    public async Task The_cairn_media_type_also_selects_the_flat_shape_in_default_mode()
+    {
+        await using var app = await StartAsync();
+        using var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.cairn+json");
+
+        var response = await client.GetAsync("/orders/42");
+        var root = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        Assert.Equal("application/vnd.cairn+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.True(root.TryGetProperty("_actions", out _));
+    }
+
+    [Fact]
+    public async Task The_cairn_media_type_can_be_forced_per_endpoint()
+    {
+        await using var app = await StartAsync(
+            o => o.DefaultFormat = HypermediaFormat.None,
+            e => e.WithHypermediaFormat("application/vnd.cairn+json"));
+        using var client = app.GetTestClient();
+
+        // No Accept header, but the endpoint forces the flat shape regardless of the opt-in default.
+        var response = await client.GetAsync("/orders/42");
+        var root = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        Assert.Equal("application/vnd.cairn+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.True(root.TryGetProperty("_actions", out _));
+    }
+
+    [Fact]
     public async Task Forcing_none_suppresses_links_on_an_opted_in_endpoint()
     {
         await using var app = await StartAsync(configureEndpoint: e => e.WithHypermediaFormat(HypermediaFormat.None));

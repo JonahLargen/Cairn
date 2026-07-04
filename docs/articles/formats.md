@@ -18,10 +18,12 @@ public enum HypermediaFormat
 
 | Format | Media type | Emits |
 | --- | --- | --- |
-| `HypermediaFormat.Default` | `application/json` | `_links` and `_actions` |
+| `HypermediaFormat.Default` | `application/json` (also `application/vnd.cairn+json`) | `_links` and `_actions` |
 | `HypermediaFormat.Hal` | `application/hal+json` | `_links` only — affordances are not emitted |
 | `HypermediaFormat.HalForms` | `application/prs.hal-forms+json` | `_links` and `_templates` for affordances |
 | `HypermediaFormat.None` | `application/json` | nothing — the resource serializes exactly as its DTO declares |
+
+The flat `Default` shape answers to two media types: plain `application/json`, and the explicit `application/vnd.cairn+json`. The alias matters when links are made [opt-in](#opt-in-links-only-when-the-client-asks), where `application/json` is reserved for the bare resource.
 
 `_links` is always present when a resource has links. The difference is how affordances surface:
 
@@ -109,13 +111,26 @@ With `None` as the default, on an opted-in endpoint:
 | --- | --- |
 | `application/json` | the **bare** resource — no `_links`, no `_actions` |
 | `*/*`, `application/*`, or no `Accept` header | the bare resource (a wildcard expresses no hypermedia preference) |
+| `application/vnd.cairn+json` | Cairn's flat shape, with `_links` and `_actions` |
 | `application/hal+json` | HAL, with `_links` |
 | `application/prs.hal-forms+json` | HAL-FORMS, with `_links` and `_templates` |
 | a registered custom formatter's media type | that format |
 
-So the hypermedia `+json` media types double as the client's "I understand hypermedia" signal — a dumb client gets clean JSON, a hypermedia-aware client asks for HAL/HAL-FORMS and gets the affordances. This is content negotiation used the way HTTP intends it, and it composes with everything else: negotiation still adds `Vary: Accept` (the body shape now depends on the header), and a per-endpoint `.WithHypermediaFormat(...)` override still wins.
+So a hypermedia media type is the client's "I understand hypermedia" signal — a dumb client gets clean JSON, a hypermedia-aware client names the shape it wants and gets the links.
 
-`None` is non-breaking: `DefaultFormat` is `HypermediaFormat.Default` unless you change it, so existing apps keep emitting links on `application/json`. Note that under opt-in mode, Cairn's *flat* `_actions` shape (which lives at `application/json`) is not itself negotiable — a client that wants affordances asks for HAL-FORMS. Register a [custom formatter](custom-formats.md) if you want the flat shape available under its own media type.
+### Reaching the flat shape: `application/vnd.cairn+json`
+
+Cairn's flat `_links`/`_actions` shape normally lives at `application/json`. Under opt-in, `application/json` is claimed for the bare resource — so the flat shape gets its own media type, **`application/vnd.cairn+json`**, and that is how a client asks for it:
+
+```bash
+curl https://api.example.com/orders/42                                  # bare resource
+curl -H "Accept: application/vnd.cairn+json" https://api.example.com/orders/42   # flat _links + _actions
+curl -H "Accept: application/hal+json"        https://api.example.com/orders/42   # HAL
+```
+
+The response's `Content-Type` echoes `application/vnd.cairn+json` when that shape is negotiated, so caches (already keyed by the `Vary: Accept` Cairn adds) and clients can tell the bare and linked representations apart from the header alone. `application/vnd.cairn+json` is recognized in every mode — even with the default `HypermediaFormat.Default`, a client can name it to request the flat shape explicitly — and it can be forced per endpoint with `.WithHypermediaFormat("application/vnd.cairn+json")`.
+
+`None` is non-breaking: `DefaultFormat` is `HypermediaFormat.Default` unless you change it, so existing apps keep emitting links on `application/json`. A per-endpoint `.WithHypermediaFormat(...)` override still wins over the negotiated default in either mode.
 
 You can also force `None` on a single endpoint or route group to suppress links there even while the app default emits them:
 
