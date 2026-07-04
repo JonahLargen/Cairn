@@ -149,6 +149,46 @@ public class CairnEnvelopeDeferredItemsTests
     }
 
     [Fact]
+    public async Task Nested_deferred_envelopes_each_buffer_their_items_independently()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o => o.AddLinks(new DeferredItemLinks()));
+
+        await using var app = builder.Build();
+        app.MapGet("/nested", () =>
+        {
+            // An outer page whose deferred items yield an inner page that also defers its items: both
+            // sequences are buffered in the one request, so each keeps its own correlated instances.
+            var inner = new DeferredPage
+            {
+                Items = new[] { 7 }.Select(id => new DeferredItem(id)),
+            };
+            var outer = new NestedOuterPage
+            {
+                Items = new object[] { inner }.Select(x => x),
+            };
+            return TypedResults.Ok(outer);
+        }).WithLinks();
+        app.MapGet("/di/{id:int}", (int id) => TypedResults.Ok(new DeferredItem(id))).WithName("DefGetItem");
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var root = JsonDocument.Parse(await client.GetStringAsync("/nested")).RootElement;
+
+        // The outer envelope carries its pagination links and exactly one nested page...
+        Assert.True(root.GetProperty("_links").TryGetProperty("self", out _));
+        var outerItems = root.GetProperty("items");
+        Assert.Equal(1, outerItems.GetArrayLength());
+
+        // ...whose own deferred items were buffered separately and kept their links.
+        var innerItems = outerItems[0].GetProperty("items");
+        Assert.Equal(1, innerItems.GetArrayLength());
+        Assert.EndsWith("/di/7", innerItems[0].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
+    }
+
+    [Fact]
     public async Task A_string_valued_items_property_is_left_alone()
     {
         var builder = WebApplication.CreateBuilder();
@@ -171,8 +211,9 @@ public class CairnEnvelopeDeferredItemsTests
     }
 
     [Fact]
-    public async Task An_init_only_envelope_is_never_mutated_and_warns_about_its_deferred_items()
+    public async Task An_init_only_envelope_keeps_its_item_links_and_is_never_mutated()
     {
+        var projections = 0;
         var logs = new CapturingLoggerProvider();
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -180,24 +221,69 @@ public class CairnEnvelopeDeferredItemsTests
         builder.Services.AddCairn(o => o.AddLinks(new DeferredItemLinks()));
 
         InitOnlyPage? envelope = null;
-        var deferred = new[] { 1, 2 }.Select(id => new DeferredItem(id));
+        var deferred = new[] { 1, 2 }.Select(id =>
+        {
+            Interlocked.Increment(ref projections);
+            return new DeferredItem(id);
+        });
 
         await using var app = builder.Build();
         app.MapGet("/dio", () => TypedResults.Ok(envelope = new InitOnlyPage { Items = deferred })).WithLinks();
+        app.MapGet("/di/{id:int}", (int id) => TypedResults.Ok(new DeferredItem(id))).WithName("DefGetItem");
 
         await app.StartAsync();
         using var client = app.GetTestClient();
 
         var root = JsonDocument.Parse(await client.GetStringAsync("/dio")).RootElement;
 
-        // The response still works and carries the pagination links...
-        Assert.Equal(2, root.GetProperty("items").GetArrayLength());
+        // The buffer is substituted at serialization rather than written back through the init-only property,
+        // so the items keep their links and the deferred sequence is enumerated exactly once...
+        var items = root.GetProperty("items");
+        Assert.Equal(2, items.GetArrayLength());
+        Assert.EndsWith("/di/1", items[0].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
+        Assert.EndsWith("/di/2", items[1].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
         Assert.True(root.GetProperty("_links").TryGetProperty("self", out _));
+        Assert.Equal(2, Volatile.Read(ref projections));
 
-        // ...but the init-only property was NOT rewritten through reflection: the declared immutability
-        // contract holds, and the deferred-items warning explains what that costs.
+        // ...while the declared immutability contract holds: reflection never rewrites the init-only property,
+        // and nothing warns, because the correlation between compute and serialization was never broken.
         Assert.Same(deferred, envelope!.Items);
-        Assert.Contains(logs.Messages, m => m.Contains("no settable property", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Messages, m => m.Contains("no stable readable property", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_shared_envelope_with_deferred_items_is_not_mutated_across_requests()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o => o.AddLinks(new DeferredItemLinks()));
+
+        // One envelope instance, reused for every request, as an app returning a cached/singleton envelope would.
+        var deferred = new[] { 1, 2 }.Select(id => new DeferredItem(id));
+        var shared = new DeferredPage { Items = deferred };
+
+        await using var app = builder.Build();
+        app.MapGet("/shared", () => TypedResults.Ok(shared)).WithLinks();
+        app.MapGet("/di/{id:int}", (int id) => TypedResults.Ok(new DeferredItem(id))).WithName("DefGetItem");
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var first = JsonDocument.Parse(await client.GetStringAsync("/shared")).RootElement;
+        var second = JsonDocument.Parse(await client.GetStringAsync("/shared")).RootElement;
+
+        // Both requests against the same instance serve correlated item links...
+        foreach (var root in new[] { first, second })
+        {
+            var items = root.GetProperty("items");
+            Assert.Equal(2, items.GetArrayLength());
+            Assert.EndsWith("/di/1", items[0].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
+            Assert.EndsWith("/di/2", items[1].GetProperty("_links").GetProperty("self").GetProperty("href").GetString());
+        }
+
+        // ...and the shared envelope was never rewritten behind the app's back: its items property still holds
+        // the original deferred sequence, not a buffered list swapped in by the first request.
+        Assert.Same(deferred, shared.Items);
     }
 
     [Fact]
@@ -226,8 +312,8 @@ public class CairnEnvelopeDeferredItemsTests
 
     private sealed record DeferredItem(int Id);
 
-    // An immutable envelope: the items property only has an init accessor, so the recorder must not write
-    // a buffer back through it.
+    // An immutable envelope: the items property only has an init accessor. The recorder must not write a buffer
+    // back through it, yet the items still keep their links — the buffer is substituted at serialization instead.
     private sealed class InitOnlyPage : IPagedResource
     {
         public required IEnumerable<DeferredItem> Items { get; init; }
@@ -300,6 +386,23 @@ public class CairnEnvelopeDeferredItemsTests
         public int PageSize => 10;
 
         public int TotalCount => 2;
+
+        public int TotalPages => 1;
+
+        IEnumerable IPagedResource.Items => Items;
+    }
+
+    // An offset envelope whose deferred items are themselves paging envelopes, so materializing them buffers a
+    // second deferred sequence within the same request.
+    private sealed class NestedOuterPage : IPagedResource
+    {
+        public required IEnumerable<object> Items { get; set; }
+
+        public int Page => 1;
+
+        public int PageSize => 10;
+
+        public int TotalCount => 1;
 
         public int TotalPages => 1;
 
