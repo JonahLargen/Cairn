@@ -21,7 +21,9 @@ Versioning and publishing are fully tag-driven. There is no version number in th
    - packs every shippable project at exactly `0.6.0` (MinVer reads the tag), validating each against the
      previous release's package (see below);
    - pushes the `.nupkg` + `.snupkg` packages to NuGet.org;
-   - creates the GitHub release with auto-generated notes and the packages attached.
+   - creates the GitHub release with auto-generated notes and the packages attached;
+   - generates signed [SLSA build provenance](https://slsa.dev/spec/v1.0/provenance) for the
+     packages and attaches it to the release as `multiple.intoto.jsonl` (see below).
 4. **Move the compatibility baseline forward.** After the packages are live, set
    `PackageValidationBaselineVersion` in `src/Directory.Build.props` to the version you just shipped, so
    the next cycle's builds validate against it. Commit it as the first change of the new cycle.
@@ -37,6 +39,24 @@ A removed or re-signatured public member fails the pack instead of shipping a `M
 consumers. When you intend a breaking change, that is a major-version decision — bump the version deliberately
 rather than working around the check.
 
+### Build provenance
+
+Each release includes a `multiple.intoto.jsonl` asset: a signed [SLSA](https://slsa.dev) attestation,
+produced by the [slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator)
+reusable workflow, stating that this repository's Release workflow built the attached packages from a
+specific commit. Signing is keyless (Sigstore, via the workflow's OIDC identity), so there is no
+signing key to store or rotate, and nothing extra to do when releasing.
+
+Anyone can verify a downloaded package against it with
+[slsa-verifier](https://github.com/slsa-framework/slsa-verifier):
+
+```sh
+slsa-verifier verify-artifact Cairn.X.Y.Z.nupkg \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/JonahLargen/Cairn \
+  --source-tag vX.Y.Z
+```
+
 ### Pre-releases
 
 Tag with a SemVer pre-release suffix and everything else is identical:
@@ -51,7 +71,9 @@ NuGet lists it as a pre-release and the GitHub release is marked as a pre-releas
 ### Fixing a botched release
 
 - **Workflow failed after the tag was pushed** (flaky test, expired key): fix the cause and re-run
-  the workflow from the Actions tab. `--skip-duplicate` makes the NuGet push idempotent.
+  the workflow from the Actions tab. `--skip-duplicate` makes the NuGet push idempotent. If the
+  provenance job fails on a re-run because `multiple.intoto.jsonl` already exists on the release,
+  delete that stale asset from the release and re-run again.
 - **Bad package already on NuGet.org**: packages cannot be deleted, only unlisted. Unlist it on
   nuget.org and ship a fixed `vX.Y.(Z+1)`. Never move or reuse a tag that has been published.
 
