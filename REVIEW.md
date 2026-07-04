@@ -1,11 +1,12 @@
 # Cairn — Action List
 
 Originally reviewed at `main` = `aba3217` (released `v0.6.6` = `3b9e051`).
-**Status re-checked at `main` = `d9cdc7a` (PR #97)** — the tree is ~29 PRs past the
+**Status re-checked at `main` = `e5fac86` (PR #98)** — the tree is ~30 PRs past the
 original review. Each item is marked **done** / **partial** / **rejected**. Fix
 waves landed in PRs #70 (release blockers, polymorphic links), #71 (server
 hardening/caching/HAL-FORMS), #72 (client/analyzer/generator/testing), #92
-(trimming/AOT), plus supply-chain PRs #73/#93/#95 and coverage PRs #94/#97.
+(trimming/AOT), and **#98 (this review's own code-review findings)**, plus
+supply-chain PRs #73/#93/#95 and coverage PRs #94/#97/#98.
 
 ## Before the next release
 
@@ -132,9 +133,9 @@ hardening/caching/HAL-FORMS), #72 (client/analyzer/generator/testing), #92
 - [x] **Done** — `concurrency` group added to `ci.yml:14-16`
   (`cancel-in-progress: true`).
 - [x] **Done** — Strong naming skipped; decision recorded in `CONTRIBUTING.md:60-72`.
-- [ ] **Partial** — Analyzers-ship-only-inside-Cairn.AspNetCore is documented
-  (`CONTRIBUTING.md:50-52`, `docs/articles/packages.md:29`), but the pack items are
-  not yet guarded.
+- [ ] **Partial** (still open after #98) — Analyzers-ship-only-inside-Cairn.AspNetCore
+  is documented (`CONTRIBUTING.md:50-52`, `docs/articles/packages.md:29`), but the
+  pack items are still not guarded.
   - [ ] Add `Condition="Exists(...)"` to the `Cairn.Analyzers.dll` /
     `Cairn.CodeFixes.dll` / `Cairn.SourceGenerators.dll` `<None Include>` pack items
     (`src/Cairn.AspNetCore/Cairn.AspNetCore.csproj:24-26`).
@@ -194,121 +195,87 @@ value-add backlog. (`V5` of the AOT work is the one exception, marked in v2.)*
 - [x] **Done** — Trimming/AOT posture declared and annotated for Cairn.Core and
   Cairn.Client (`IsAotCompatible=true` + attributes, `docs/articles/aot.md`). (#92)
 
-## New findings (code review at #97)
+## New findings (code review at #97) — resolved in #98
 
-Net-new issues found reviewing the current tree (not in the original list).
-Severity in brackets; none are release-critical, but the `[Med]` ones are
-cheap correctness fixes worth landing before v1.
+The code-review pass at #97 surfaced 16 net-new issues (7 `[Med]`, the rest
+`[Low]`/nit). **PR #98 fixed all of them except one nit**, and added ~940 lines of
+regression tests plus a blocking 95%-patch-coverage gate. Kept here as a record.
 
 ### Server
 
-- [ ] **[Med]** `AuthorizationPolicyStartupValidator` resolves `IAuthorizationService`
-  from the **root** provider (it's a singleton `IHostedService`), so an app with any
-  *scoped* authorization handler (e.g. a resource handler using `DbContext`) throws
-  under `ValidateScopes` and aborts startup — the exact apps that use policy-gated
-  Cairn links (`AuthorizationPolicyStartupValidator.cs:53,60`). Fix: resolve inside a
-  `CreateScope()`, or inspect the `ServiceDescriptor` instead of instantiating.
-- [ ] **[Med]** `ResolveRouteTemplate` `Uri.EscapeDataString`s every route parameter,
-  so a catch-all (`{**slug}`) value like `docs/intro/setup` gets its `/` encoded to
-  `%2F` (wrong URL), and an unbound catch-all emits `{slug}` (drops the `*` marker)
-  (`LinkGeneratorUrlResolver.cs:73-79`). Fix: special-case `parameter.IsCatchAll`.
-- [ ] **[Low]** HAL-FORMS enum default `value` uses the enum *member name* while
-  `options` use the serialized wire form, so the default matches no option and can't
-  preselect (`HalFormsSchema.cs:171-177` vs `:209-235`). Route the default through
-  `WireValueOf`.
-- [ ] **[Low]** The change-token cache pattern in `RoutePatternCache` and
-  `CairnHeadersMiddleware` can republish a stale snapshot if endpoints change during
-  the build window (callback fires, then the stale build overwrites the nulled field
-  and the token is already spent). Use `ChangeToken.OnChange` (as
-  `CairnOptionsMiddleware.cs:22` already does).
-- [ ] **[Low, perf]** `AddCuries` allocates a `List`+`HashSet` and scans all rels per
-  linked resource whenever *any* curie is registered, even when no rel uses a prefix —
-  per-item churn on large paged responses (`CairnLinkRecorder.cs:1094-1101`). Allocate
-  lazily on first prefix hit.
-- [ ] **[Nit]** `HypermediaProblem.ResolveHref` re-resolves `ILinkUrlResolver` +
-  `CairnOptions` per link/action; `MaterializeEnvelopeItems` writes the buffered list
-  back onto a possibly-shared envelope via `SetValue`; a 412 from `CairnPreconditions`
-  doesn't echo the current `ETag`.
+- [x] **Done** — Auth validator resolves `IAuthorizationService` inside a
+  `CreateScope()` (and injects `ILoggerFactory`), so scoped authorization handlers no
+  longer abort startup (`AuthorizationPolicyStartupValidator.cs`). (#98)
+- [x] **Done** — Catch-all route params keep their `/` separators (`EscapeCatchAll`)
+  and an unbound catch-all emits an RFC 6570 reserved expansion `{+slug}`
+  (`LinkGeneratorUrlResolver.cs:77-90,115-121`). (#98)
+- [x] **Done** — HAL-FORMS enum default emitted through `WireValueOf` so it matches an
+  option's wire form and can preselect (`HalFormsSchema.cs`). (#98)
+- [x] **Done** — `RoutePatternCache` and `CairnHeadersMiddleware` use
+  `ChangeToken.OnChange`, so endpoint invalidation stays live and no stale snapshot is
+  republished. (#98)
+- [x] **Done** — `AddCuries` allocates its list/set lazily on the first prefix hit
+  (`CairnLinkRecorder.cs`). (#98)
+- [x] **Done** — `HypermediaProblem` resolves the URL resolver + mode once per
+  document, and a 412 from `CairnPreconditions` echoes the current `ETag`. (#98)
+- [ ] **[Nit] — still open** — `MaterializeEnvelopeItems` still writes the buffered
+  list back onto the envelope via `property.SetValue` (`CairnLinkRecorder.cs:964`),
+  which mutates a cached/shared envelope instance across requests. Not addressed by
+  #98; low impact (only bites apps that return a singleton envelope).
 
 ### Client
 
-- [ ] **[Med]** A JSON `"method": ""` (empty/whitespace) on an action/template throws
-  `ArgumentException` from the `Affordance` ctor, which escapes the client's
-  no-throw-on-response contract (the guard only catches `JsonException`/
-  `NotSupportedException`) (`HypermediaParser.cs:73,98`). Treat empty method as `GET`.
-- [ ] **[Med]** Multi-select (array) submissions to an options field always fail
-  client validation — the array's raw text is compared to a single scalar option
-  (`CairnClient.cs:311-320`). Validate each element individually.
-- [ ] **[Med]** Client-side HAL-FORMS `regex` is evaluated with .NET semantics, so
-  values a spec-compliant (ECMAScript/HTML5) validator rejects are accepted — e.g.
-  `\d` matches Unicode digits, `$` matches before a trailing `\n`
-  (`CairnClient.cs:325-339`). Use `RegexOptions.ECMAScript | CultureInvariant` and
-  `\A…\z` anchors. (Distinct from the server-side *doc* item, which is done.)
-- [ ] **[Low]** Numeric `min`/`max` are skipped when a value is submitted as a JSON
-  string (range checks gate on `JsonValueKind.Number`), so `"150"` passes `Max:100`
-  (`CairnClient.cs:298-309`).
-- [ ] **[Low]** ETag is dropped when the server sends a non-RFC-7232 value (typed
-  `Headers.ETag` returns null), and a weak `W/"…"` validator is echoed back as
-  `If-Match` (RFC 7232 forbids weak comparison there) (`CairnClient.cs:498,506,538`).
-- [ ] **[Low]** `UriTemplate` silently tolerates malformed/zero prefix modifiers
-  (`{v:}`, `{v:abc}` → full value; `{v:0}` → empty) while being strict elsewhere
-  (`UriTemplate.cs:89-98`). Throw `FormatException`.
-- [ ] **[Nit]** `ReadProblemAsync` buffers error bodies up to the full success cap
-  (~2 GB); `SubmitAsync` never validates the parsed `Step`; `GetCollectionAsync`
-  doesn't guard a null `itemsProperty` the way `CollectionResource.FollowAsync` does.
+- [x] **Done** — Empty/whitespace `method` on an action/template is read as `GET`
+  instead of throwing from the `Affordance` ctor (`HypermediaParser.cs`). (#98)
+- [x] **Done** — Multi-select (array) submissions validate each element against the
+  options (`CairnClient.cs`). (#98)
+- [x] **Done** — HAL-FORMS `regex` evaluated with `ECMAScript | CultureInvariant` and
+  `\A…\z` anchors, matching spec-compliant validators (`CairnClient.cs`). (#98)
+- [x] **Done** — Numeric `min`/`max`/`step` also apply to numeric-string values. (#98)
+- [x] **Done** — ETag read from the raw header (non-RFC-7232 values survive); a weak
+  validator is sent as its strong form for `If-Match` (`CairnClient.cs`). (#98)
+- [x] **Done** — `UriTemplate` throws `FormatException` on malformed/zero prefix
+  modifiers (`UriTemplate.cs`). (#98)
+- [x] **Done** — Problem bodies cap at 1 MiB; `GetCollectionAsync` guards a null
+  `itemsProperty`; parsed `Step` is validated. (#98)
 
 ### Tooling / testing / OpenAPI
 
-- [ ] **[Med]** A route parameter whose constraint contains `=` (e.g.
-  `{pwd:regex((?=.*\d))}`) is parsed as optional/nullable — `ParseParameters` scans
-  for `=` over the whole `{...}` body before isolating the constraint — so the
-  generator emits a required value as omittable and links break
-  (`RoutesGenerator.cs:361-372`).
-- [ ] **[Med]** OpenAPI/Swagger advertise `application/hal+json` negotiation and
-  `_links`/`_actions` on every endpoint returning a configured *type*, even endpoints
-  that never opted in via `.WithLinks()`/`[CairnLinks]` — so a generated client asking
-  for `hal+json` gets plain JSON (`HypermediaJsonSchemas.cs:78-86,133-158` and the
-  operation/schema transformers). Root cause: `WithLinks()` leaves no discoverable
-  endpoint metadata to gate on.
-- [ ] **[Low]** The CAIRN001 code fix can rewrite the wrong sub-literal of a
-  concatenated constant route name (`"Get" + "Order"` → `"GetOrders" + "Order"`)
-  (`RouteNameCodeFixProvider.cs:53-59`). Only offer the fix when the span is a single
-  string literal.
-- [ ] **[Low]** The generated XML `<summary>` isn't newline-safe: a route name
-  containing `\n` splits the `///` line into uncompilable C#
-  (`RoutesGenerator.cs:474,558-559`). Escape CR/LF.
-- [ ] **[Low]** `HypermediaSnapshot` ignores `HypermediaOnly` and `_embedded`
-  resource handling for array-root responses (routes them through `WriteValue`, not
-  `WriteResource`), so a snapshot silently keeps data properties it was told to drop
-  (`HypermediaSnapshot.cs:55-61`).
+- [x] **Done** — `RoutesGenerator` isolates the constraint before scanning for `=`, so
+  a regex constraint containing `=` is no longer parsed as optional; generated XML
+  summaries escape CR/LF. (#98)
+- [x] **Done** — OpenAPI/Swagger gate the negotiated `hal+json`/`hal-forms+json` media
+  types on a new discoverable `ICairnLinksMetadata` marker added by
+  `WithLinks()`/`[CairnLinks]`, so opt-out endpoints aren't advertised
+  (`Internal/CairnLinksMetadata.cs`, `HypermediaJsonSchemas.OptedIntoLinks`). (#98)
+- [x] **Done** — CAIRN001 code fix only rewrites a single string literal, never one
+  sub-literal of a concatenation (`RouteNameCodeFixProvider.cs`). (#98)
+- [x] **Done** — `HypermediaSnapshot` routes array-root responses through
+  `WriteResource`, so `HypermediaOnly` and `_embedded` handling apply. (#98)
 
 ## Suggested next steps
 
-The original pre-release list is effectively **cleared** — every server, client, and
-tooling bug is fixed, and the two "rejected" items were deliberate design reversals
-(package validation instead of `PublicAPI.txt`; docs + `helpLinkUri` instead of
-`AnalyzerReleases.md`). What remains is the new-findings backlog and the roadmap.
+The pre-release list and the code-review appendix are both effectively **cleared** —
+PR #98 landed every correctness finding with tests. Two tiny cleanups remain before a
+tag, then it's roadmap work.
 
-1. **Batch a "pre-v1 correctness" PR** (recommended first move). Fold the seven
-   `[Med]` findings above plus the one open **Partial** packaging item (analyzer
-   `Exists()` guards) into a single focused PR. They're all small, contained, and each
-   is a correctness issue a real user would hit: client no-throw escape, multi-select
-   validation, client regex semantics, generator `=`-constraint, OpenAPI over-
-   advertising HAL, root-provider auth-validator crash, and catch-all URL escaping.
-   Land this and the library is genuinely v1-ready.
-2. **Optionally sweep the `[Low]` findings** into a second cleanup PR (or the same
-   one) — none block release, but the ETag/weak-validator, change-token race, and
-   enum-default items are cheap and remove sharp edges.
-3. **Cut v1.0.0.** After step 1 there is no known correctness debt; the package is
-   AOT-annotated, coverage-gated at 95%, supply-chain hardened, and docs are complete.
-4. **Pick 2–3 post-v1 features** by leverage: `IAsyncEnumerable` pagination iterator
+1. **Mop up the last two nits** (one small PR, or fold into the next change):
+   - the **Partial** packaging item — add `Condition="Exists(...)"` to the three
+     analyzer pack items (`Cairn.AspNetCore.csproj:24-26`);
+   - the envelope `SetValue` write-back nit (`CairnLinkRecorder.cs:964`) — skip the
+     write-back or document that envelopes must be request-scoped.
+   Neither blocks release.
+2. **Cut v1.0.0.** There is no known correctness debt left: the package is
+   AOT-annotated, coverage-gated at 95% (line + branch + now a blocking patch gate),
+   supply-chain hardened, and docs are complete. This is the recommended next move.
+3. **Pick 2–3 post-v1 features** by leverage: `IAsyncEnumerable` pagination iterator
    (F1) and `Location`/`ETag` on `ClientResult` (F5) are the most-requested client
    ergonomics; the RFC 8288 `Link` header (F7) is cheap and standards-aligned; the
    OpenAPI `operation.Deprecated`/ETag metadata (F8) improves contract fidelity.
-5. **Plan the v2 breaking window as one major bump.** V1–V4 (`ILinkAuthorizer` +
+4. **Plan the v2 breaking window as one major bump.** V1–V4 (`ILinkAuthorizer` +
    resource, async `ILinkUrlResolver`, formatter reshaping, default `UrlStyle` →
    `PathRelative`) are all breaking and interlock with features F2/F4 — do them
    together so there's a single migration.
-6. **Ecosystem is adoption-driven, not correctness-driven.** If growth is the goal,
+5. **Ecosystem is adoption-driven, not correctness-driven.** If growth is the goal,
    HAL Explorer middleware (E1) + a `dotnet new cairn-api` template (E2) are the
    highest-impact; Siren (E3) and `Cairn.Mcp` (E8) are differentiators but larger bets.
