@@ -10,7 +10,7 @@ namespace Cairn.AspNetCore;
 /// collection, is linked according to its runtime type's configuration.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
-public sealed class CairnLinksAttribute : Attribute, IAsyncResultFilter
+public sealed class CairnLinksAttribute : Attribute, IAsyncResultFilter, ICairnLinksMetadata
 {
     /// <inheritdoc />
     public async Task OnResultExecutionAsync(ResultExecutingContext context, ResultExecutionDelegate next)

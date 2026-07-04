@@ -357,9 +357,11 @@ public sealed class RoutesGenerator : IIncrementalGenerator
 
             // Both optional markers make the parameter optional for callers too: an inline default
             // ("{id=5}" / "{id:int=5}") or a trailing '?' ("{id?}" / "{id:int?}") — the route resolves
-            // without the value either way.
+            // without the value either way. The default-value '=' is only recognized at parenthesis depth 0:
+            // a regex constraint argument such as "{pwd:regex((?=.*\d))}" contains a '=' of its own, and
+            // scanning the whole body for it would misread the parameter as optional and break the link.
             var optional = false;
-            var equals = content.IndexOf('=');
+            var equals = IndexOfTopLevel(content, '=');
             if (equals >= 0)
             {
                 content = content.Substring(0, equals);
@@ -393,6 +395,35 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         }
 
         return string.Join("|", parameters);
+    }
+
+    // The first index of a character at parenthesis depth 0, or -1. A regex constraint argument can carry
+    // '=' (a lookahead like "(?=.*\d)") inside its parentheses; that must not be read as the parameter's
+    // default-value marker.
+    private static int IndexOfTopLevel(string content, char target)
+    {
+        var depth = 0;
+        for (var i = 0; i < content.Length; i++)
+        {
+            var c = content[i];
+            if (c == '(')
+            {
+                depth++;
+            }
+            else if (c == ')')
+            {
+                if (depth > 0)
+                {
+                    depth--;
+                }
+            }
+            else if (c == target && depth == 0)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static string MapConstraint(string constraint) => constraint switch
@@ -555,8 +586,11 @@ public sealed class RoutesGenerator : IIncrementalGenerator
         return result.Length > 0 && char.IsDigit(result[0]) ? "_" + result : result;
     }
 
+    // Escapes for a single-line /// doc comment: the XML metacharacters, plus CR/LF as character references
+    // so a route name containing a newline stays on one line instead of splitting the /// into uncompilable C#.
     private static string XmlEscape(string text)
-        => text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+        => text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
+            .Replace("\r", "&#xD;").Replace("\n", "&#xA;");
 
     private static string Escape(string name)
         => SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None || SyntaxFacts.GetContextualKeywordKind(name) != SyntaxKind.None

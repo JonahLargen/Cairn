@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
 
 namespace Cairn.AspNetCore.Internal;
@@ -12,12 +13,26 @@ namespace Cairn.AspNetCore.Internal;
 /// endpoint is known regardless of where the middleware sits relative to routing, and so the metadata
 /// reaches every endpoint type (MVC controller actions as well as minimal-API handlers).
 /// </summary>
-internal sealed class CairnHeadersMiddleware(RequestDelegate next, EndpointDataSource endpoints)
+internal sealed class CairnHeadersMiddleware
 {
+    private readonly RequestDelegate _next;
+    private readonly EndpointDataSource _endpoints;
+
     // Whether any endpoint carries deprecation metadata, computed once per endpoint-table generation. When
     // none does (the overwhelmingly common case), the per-request OnStarting callback is pure overhead —
     // skip registering it. Invalidated by the endpoint change token, so dynamically added endpoints are seen.
     private volatile object? _anyDeprecated;
+
+    public CairnHeadersMiddleware(RequestDelegate next, EndpointDataSource endpoints)
+    {
+        _next = next;
+        _endpoints = endpoints;
+
+        // ChangeToken.OnChange re-registers after every fire, so invalidation stays live across successive
+        // endpoint changes — unlike a one-shot callback registered inside the scan, which a change racing the
+        // scan can spend before the stale result is published, stranding it.
+        ChangeToken.OnChange(endpoints.GetChangeToken, () => _anyDeprecated = null);
+    }
 
     public Task Invoke(HttpContext context)
     {
@@ -26,7 +41,7 @@ internal sealed class CairnHeadersMiddleware(RequestDelegate next, EndpointDataS
             RegisterHeaderCallback(context);
         }
 
-        return next(context);
+        return _next(context);
     }
 
     private bool AnyDeprecatedEndpoint()
@@ -36,13 +51,8 @@ internal sealed class CairnHeadersMiddleware(RequestDelegate next, EndpointDataS
             return cached;
         }
 
-        // Capture the token guarding the endpoint list before scanning it, so a racing endpoint change can
-        // only clear this computation, never strand a stale one.
-        var token = endpoints.GetChangeToken();
-        token.RegisterChangeCallback(static state => ((CairnHeadersMiddleware)state!)._anyDeprecated = null, this);
-
         var any = false;
-        foreach (var endpoint in endpoints.Endpoints)
+        foreach (var endpoint in _endpoints.Endpoints)
         {
             if (endpoint.Metadata.GetMetadata<DeprecationMetadata>() is not null)
             {

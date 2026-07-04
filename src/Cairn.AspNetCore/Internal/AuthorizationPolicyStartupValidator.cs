@@ -48,16 +48,23 @@ internal sealed class AuthorizationPolicyStartupValidator(IServiceProvider servi
             return;
         }
 
+        // Resolve inside a scope: IAuthorizationService is registered transient and pulls in the app's
+        // authorization handlers, any of which may be scoped (e.g. a resource handler using a DbContext).
+        // Resolving it from the root provider this singleton hosted service holds would throw under
+        // ValidateScopes and abort startup — precisely for apps that use policy-gated Cairn links.
+        using var scope = services.CreateScope();
+        var scoped = scope.ServiceProvider;
+
         // Without a policy provider, authorization isn't wired up at all; the request-time error for that
         // case already tells the user to call AddAuthorization(), so don't duplicate it here.
-        if (services.GetService<IAuthorizationPolicyProvider>() is not { } provider)
+        if (scoped.GetService<IAuthorizationPolicyProvider>() is not { } provider)
         {
             return;
         }
 
         // A replaced IAuthorizationService may resolve policy names by its own rules (never consulting the
         // policy provider), so only the default service's resolution path can be validated ahead of time.
-        if (services.GetService<IAuthorizationService>() is not DefaultAuthorizationService)
+        if (scoped.GetService<IAuthorizationService>() is not DefaultAuthorizationService)
         {
             return;
         }
@@ -75,7 +82,7 @@ internal sealed class AuthorizationPolicyStartupValidator(IServiceProvider servi
             }
             catch (Exception ex)
             {
-                services.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore").LogWarning(
+                scoped.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore").LogWarning(
                     ex,
                     "Cairn: startup validation of authorization policy '{Policy}' was skipped because IAuthorizationPolicyProvider.GetPolicyAsync threw. " +
                     "If the provider resolves policies dynamically after boot, disable this check with CairnOptions.ValidateAuthorizationPolicies = false.",

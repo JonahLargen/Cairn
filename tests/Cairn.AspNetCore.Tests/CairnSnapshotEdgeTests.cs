@@ -34,6 +34,31 @@ public class CairnSnapshotEdgeTests
     }
 
     [Fact]
+    public void An_array_root_of_resources_honors_hypermedia_only_and_embedded()
+    {
+        var json = """
+            [
+              {
+                "id": 1,
+                "name": "widget",
+                "_links": { "self": { "href": "/x/1" } },
+                "_embedded": { "note": { "text": "hi", "_links": { "self": { "href": "/n/9" } } } }
+              }
+            ]
+            """;
+
+        var snapshot = HypermediaSnapshot.Render(json, new HypermediaSnapshotOptions { HypermediaOnly = true });
+
+        // Each array item is a resource: its data properties are dropped, its hypermedia kept, and the
+        // embedded resource is filtered the same way — array roots no longer bypass this via WriteValue.
+        Assert.DoesNotContain("\"name\"", snapshot);
+        Assert.DoesNotContain("\"id\"", snapshot);
+        Assert.DoesNotContain("\"text\"", snapshot);
+        Assert.Contains("\"_links\"", snapshot);
+        Assert.Contains("\"_embedded\"", snapshot);
+    }
+
+    [Fact]
     public void A_single_object_embedded_entry_renders_as_a_resource()
     {
         var json = """{"_embedded":{"customer":{"b":2,"a":1}}}""";

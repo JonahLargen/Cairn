@@ -73,6 +73,32 @@ public class CairnRouteTemplateLinkTests
         Assert.False(links.TryGetProperty("search", out _));
     }
 
+    [Fact]
+    public async Task A_catch_all_parameter_preserves_slashes_when_bound_and_keeps_its_marker_when_unbound()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(o => o.AddLinks(new CatchAllTemplateLinks()));
+
+        await using var app = builder.Build();
+        app.MapGet("/rc/{id:int}", (int id) => TypedResults.Ok(new TemplateOrder(id))).WithName("RcGetOrder").WithLinks();
+        app.MapGet("/docs/{**slug}", (string slug) => TypedResults.Ok(new { slug })).WithName("RcDocs");
+
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var links = JsonDocument.Parse(await client.GetStringAsync("/rc/7")).RootElement.GetProperty("_links");
+
+        // A bound catch-all keeps its '/' separators (not %2F), so the multi-segment value is a real path.
+        Assert.EndsWith("/docs/intro/setup", links.GetProperty("docs").GetProperty("href").GetString());
+
+        // An unbound catch-all stays templated as an RFC 6570 reserved expansion ({+slug}), so the client can
+        // expand a value that spans several path segments with its slashes intact.
+        var browse = links.GetProperty("browse");
+        Assert.EndsWith("/docs/{+slug}", browse.GetProperty("href").GetString());
+        Assert.True(browse.GetProperty("templated").GetBoolean());
+    }
+
     private sealed record TemplateOrder(int Id);
 
     private sealed class SearchTemplateLinks : LinkConfig<TemplateOrder>
@@ -99,6 +125,16 @@ public class CairnRouteTemplateLinkTests
         {
             builder.Self(o => LinkTarget.Route("RmGetOrder", new { id = o.Id }));
             builder.Link("search", _ => LinkTarget.RouteTemplate("NoSuchRoute"));
+        }
+    }
+
+    private sealed class CatchAllTemplateLinks : LinkConfig<TemplateOrder>
+    {
+        public override void Configure(ILinkBuilder<TemplateOrder> builder)
+        {
+            builder.Self(o => LinkTarget.Route("RcGetOrder", new { id = o.Id }));
+            builder.Link("docs", _ => LinkTarget.RouteTemplate("RcDocs", new { slug = "intro/setup" }));
+            builder.Link("browse", _ => LinkTarget.RouteTemplate("RcDocs"));
         }
     }
 }

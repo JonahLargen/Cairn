@@ -100,6 +100,11 @@ public sealed class HypermediaProblem : IResult
     {
         httpContext.Response.StatusCode = Status;
 
+        // Resolve the URL policy once for the whole document; the same resolver and resolution mode apply to
+        // every link and action, so there is no need to look them up per href.
+        var resolver = httpContext.RequestServices.GetService<ILinkUrlResolver>();
+        var strict = httpContext.RequestServices.GetService<CairnOptions>() is { Mode: LinkResolutionMode.Strict };
+
         // When the host opted into the problem-details pipeline (AddProblemDetails), write through it so
         // CustomizeProblemDetails and registered writers see this document like any framework-produced
         // problem. The hypermedia sections ride along as extensions. A writer that declines the request
@@ -109,7 +114,7 @@ public sealed class HypermediaProblem : IResult
             && await problemDetails.TryWriteAsync(new ProblemDetailsContext
             {
                 HttpContext = httpContext,
-                ProblemDetails = ToProblemDetails(httpContext),
+                ProblemDetails = ToProblemDetails(resolver, strict),
             }))
         {
             return;
@@ -144,12 +149,12 @@ public sealed class HypermediaProblem : IResult
             body[key] = value;
         }
 
-        if (BuildLinks(httpContext) is { } links)
+        if (BuildLinks(resolver, strict) is { } links)
         {
             body["_links"] = links;
         }
 
-        if (BuildActions(httpContext) is { } actions)
+        if (BuildActions(resolver, strict) is { } actions)
         {
             body["_actions"] = actions;
         }
@@ -162,7 +167,7 @@ public sealed class HypermediaProblem : IResult
     // The framework-facing form of this document, for the IProblemDetailsService pipeline. The dedicated
     // members map onto ProblemDetails' own properties; declared extensions and the hypermedia sections become
     // extension members (their keys serialize verbatim through the VerbatimKeyDictionary values).
-    private Microsoft.AspNetCore.Mvc.ProblemDetails ToProblemDetails(HttpContext httpContext)
+    private Microsoft.AspNetCore.Mvc.ProblemDetails ToProblemDetails(ILinkUrlResolver? resolver, bool strict)
     {
         var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails
         {
@@ -178,12 +183,12 @@ public sealed class HypermediaProblem : IResult
             problem.Extensions[key] = value;
         }
 
-        if (BuildLinks(httpContext) is { } links)
+        if (BuildLinks(resolver, strict) is { } links)
         {
             problem.Extensions["_links"] = links;
         }
 
-        if (BuildActions(httpContext) is { } actions)
+        if (BuildActions(resolver, strict) is { } actions)
         {
             problem.Extensions["_actions"] = actions;
         }
@@ -193,16 +198,15 @@ public sealed class HypermediaProblem : IResult
 
     // Route-based targets resolve through the host's URL policy; an explicit URI is used as-is even when
     // Cairn isn't registered. An unresolvable target follows the configured resolution mode: dropped in Lax
-    // (problem bodies should degrade, not fail), thrown in Strict.
-    private static string? ResolveHref(HttpContext httpContext, LinkTarget target, string relation)
+    // (problem bodies should degrade, not fail), thrown in Strict. The resolver and mode are looked up once
+    // per document and passed in.
+    private static string? ResolveHref(ILinkUrlResolver? resolver, bool strict, LinkTarget target, string relation)
     {
-        var href = httpContext.RequestServices.GetService<ILinkUrlResolver>() is { } resolver
-            ? resolver.Resolve(target)
-            : (target as ExplicitLinkTarget)?.Href;
+        var href = resolver is not null ? resolver.Resolve(target) : (target as ExplicitLinkTarget)?.Href;
 
         if (string.IsNullOrWhiteSpace(href))
         {
-            if (httpContext.RequestServices.GetService<CairnOptions>() is { Mode: LinkResolutionMode.Strict })
+            if (strict)
             {
                 throw new LinkResolutionException(
                     $"Could not resolve a URL for problem link '{relation}'. " +
@@ -217,7 +221,7 @@ public sealed class HypermediaProblem : IResult
 
     // Mirrors the main formatter: one link per rel emits a HAL link object, several sharing a rel emit a HAL
     // link array in declaration order (rels compare case-insensitively per RFC 8288).
-    private VerbatimKeyDictionary<object?>? BuildLinks(HttpContext httpContext)
+    private VerbatimKeyDictionary<object?>? BuildLinks(ILinkUrlResolver? resolver, bool strict)
     {
         if (_links.Count == 0)
         {
@@ -227,7 +231,7 @@ public sealed class HypermediaProblem : IResult
         var links = new VerbatimKeyDictionary<object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (relation, target, title) in _links)
         {
-            if (ResolveHref(httpContext, target, relation) is not { } href)
+            if (ResolveHref(resolver, strict, target, relation) is not { } href)
             {
                 continue;
             }
@@ -255,7 +259,7 @@ public sealed class HypermediaProblem : IResult
         return links.Count > 0 ? links : null;
     }
 
-    private VerbatimKeyDictionary<object?>? BuildActions(HttpContext httpContext)
+    private VerbatimKeyDictionary<object?>? BuildActions(ILinkUrlResolver? resolver, bool strict)
     {
         if (_actions.Count == 0)
         {
@@ -265,7 +269,7 @@ public sealed class HypermediaProblem : IResult
         var actions = new VerbatimKeyDictionary<object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, target, method) in _actions)
         {
-            if (ResolveHref(httpContext, target, name) is { } href)
+            if (ResolveHref(resolver, strict, target, name) is { } href)
             {
                 actions[name] = new VerbatimKeyDictionary<object?> { ["href"] = href, ["method"] = method };
             }

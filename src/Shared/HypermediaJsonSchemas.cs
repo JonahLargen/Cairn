@@ -132,7 +132,11 @@ internal static class HypermediaJsonSchemas
     /// </summary>
     public static void AddNegotiatedMediaTypes(ApiDescription description, OpenApiOperation operation, ILinkConfigProvider provider, IPaginationEnvelopeProvider? envelopes)
     {
-        if (operation.Responses is not { } responses)
+        // Only an endpoint that opted in (WithLinks()/[CairnLinks]) actually projects hypermedia, so only
+        // those responses negotiate hal+json/hal-forms+json. Without this gate the document would advertise
+        // the HAL media types on every endpoint returning a configured type, and a generated client asking
+        // for hal+json would get plain JSON from an endpoint that never opted in.
+        if (operation.Responses is not { } responses || !OptedIntoLinks(description))
         {
             return;
         }
@@ -155,6 +159,45 @@ internal static class HypermediaJsonSchemas
             content.TryAdd(HalMediaType, new OpenApiMediaType { Schema = json.Schema });
             content.TryAdd(HalFormsMediaType, new OpenApiMediaType { Schema = json.Schema });
         }
+    }
+
+    // Matched by full name because this file is compiled into projects that don't reference Cairn.AspNetCore.
+    private const string LinksMetadataInterface = "Cairn.AspNetCore.Internal.ICairnLinksMetadata";
+
+    // Whether the endpoint opted into Cairn hypermedia. WithLinks() and [CairnLinks] both leave a metadata
+    // object implementing ICairnLinksMetadata in the endpoint metadata; an endpoint that only returns a
+    // configured type but never opted in projects no links, so it negotiates no HAL media types.
+    private static bool OptedIntoLinks(ApiDescription description)
+    {
+        if (description.ActionDescriptor?.EndpointMetadata is not { } metadata)
+        {
+            return false;
+        }
+
+        foreach (var item in metadata)
+        {
+            if (item is not null && ImplementsLinksMarker(item.GetType()))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2070:UnrecognizedReflectionPattern",
+        Justification = "Matches the Cairn links-opt-in marker interface by full name for OpenAPI document generation. A metadata type whose marker interface was trimmed cannot behave as opted-in at runtime either, so treating it as not-opted-in is consistent with actual behavior.")]
+    private static bool ImplementsLinksMarker(Type type)
+    {
+        foreach (var iface in type.GetInterfaces())
+        {
+            if (iface.FullName == LinksMetadataInterface)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // Every hypermedia section is response-only decoration, so each schema below carries readOnly: true —

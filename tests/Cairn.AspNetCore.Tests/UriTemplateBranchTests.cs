@@ -29,15 +29,21 @@ public class UriTemplateBranchTests
         Assert.Contains("op-reserve", thrown.Message);
     }
 
-    [Fact]
-    public async Task A_non_numeric_prefix_modifier_expands_the_whole_value()
+    [Theory]
+    [InlineData("zz")]   // not a number at all
+    [InlineData("")]     // ":" with no length
+    [InlineData("0")]    // zero is outside the 1–9999 range
+    [InlineData("01")]   // a leading zero is not a valid max-length
+    public async Task A_malformed_prefix_modifier_is_a_processing_error(string modifier)
     {
-        var (client, handler) = NewRecordingClient();
+        var (client, _) = NewRecordingClient();
 
-        // ":zz" is not a valid max-length, so no prefix applies and the full value expands.
-        await client.FollowAsync<JsonElement>(new Link("item", "/items/{v:zz}", templated: true), new { v = "abcdef" });
+        // RFC 6570 §2.4.1: a prefix modifier must be a positive max-length (1–9999). A malformed one is a
+        // processing error — not a silent full-value ({v:zz}, {v:}) or empty-value ({v:0}) expansion.
+        var thrown = await Assert.ThrowsAsync<FormatException>(
+            () => client.FollowAsync<JsonElement>(new Link("item", $"/items/{{v:{modifier}}}", templated: true), new { v = "abcdef" }));
 
-        Assert.Equal("/items/abcdef", handler.RequestUri!.AbsolutePath);
+        Assert.Contains("prefix modifier", thrown.Message);
     }
 
     [Fact]

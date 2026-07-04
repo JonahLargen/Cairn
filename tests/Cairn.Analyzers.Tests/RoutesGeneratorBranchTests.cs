@@ -471,6 +471,48 @@ class AmbiguousController
         Assert.Contains("public static global::Cairn.LinkTarget AmbiguousPrefixRoute(int id)", generated);
     }
 
+    [Fact]
+    public void A_regex_constraint_containing_an_equals_sign_stays_required()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/pw/{pwd:regex((?=.*[0-9]))}"", handler).WithName(""GetGated"");
+    }
+}";
+
+        var generated = Run(source);
+
+        // The '=' inside the regex lookahead must not be read as a default-value marker, so the parameter is
+        // required (no nullable '? = null') and links cannot omit it.
+        Assert.Contains("public static global::Cairn.LinkTarget GetGated(string pwd)", generated);
+        Assert.DoesNotContain("string? pwd", generated);
+        AssertCatalogCompiles(generated);
+    }
+
+    [Fact]
+    public void A_route_name_with_a_newline_produces_a_compilable_summary()
+    {
+        const string source = @"
+class Program
+{
+    static void M()
+    {
+        app.MapGet(""/multi"", handler).WithName(""Line\nOne"");
+    }
+}";
+
+        var generated = Run(source);
+
+        // The route name's newline is escaped in the XML <summary>, or the /// line would split into
+        // uncompilable C#. The sanitized method name drops the newline; the summary carries it as a reference.
+        Assert.Contains("public static global::Cairn.LinkTarget LineOne()", generated);
+        Assert.Contains("Line&#xA;One", generated);
+        AssertCatalogCompiles(generated);
+    }
+
     private static string Run(string source) => RunDriver(source).GeneratedTrees.Single().ToString();
 
     // Every generated catalog method starts with this exact prefix, so counting occurrences counts methods.

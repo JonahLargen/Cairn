@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Composition;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
@@ -53,9 +52,36 @@ public sealed class RouteNameCodeFixProvider : CodeFixProvider
     private static LiteralExpressionSyntax? FindLiteral(SyntaxNode? root, Microsoft.CodeAnalysis.Text.TextSpan span)
     {
         var node = root?.FindNode(span, getInnermostNodeForTie: true);
-        var literal = node as LiteralExpressionSyntax
-            ?? node?.DescendantNodesAndSelf().OfType<LiteralExpressionSyntax>().FirstOrDefault();
-        return literal is not null && literal.IsKind(SyntaxKind.StringLiteralExpression) ? literal : null;
+        if (node is null)
+        {
+            return null;
+        }
+
+        // The common case: the diagnostic points straight at the string literal argument.
+        if (node is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
+        {
+            return literal;
+        }
+
+        // A broader span — a third-party analyzer or older Cairn version reporting on the whole invocation —
+        // is fixable only when it wraps EXACTLY ONE string literal. A concatenation like "Get" + "Order"
+        // wraps several, and rewriting just the first ("GetOrders" + "Order") would corrupt the name, so skip
+        // it rather than guess. An interpolated string has no string-literal node at all and is skipped too.
+        LiteralExpressionSyntax? single = null;
+        foreach (var descendant in node.DescendantNodes())
+        {
+            if (descendant is LiteralExpressionSyntax candidate && candidate.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                if (single is not null)
+                {
+                    return null;
+                }
+
+                single = candidate;
+            }
+        }
+
+        return single;
     }
 
     private static async Task<Document> ReplaceAsync(Document document, LiteralExpressionSyntax literal, string value, CancellationToken cancellationToken)

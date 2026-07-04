@@ -102,7 +102,7 @@ public class CairnSwashbuckleEdgeTests
 
         await using var app = builder.Build();
         app.UseSwagger();
-        app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new SwaggerEdgeOrder(id)));
+        app.MapGet("/orders/{id:int}", (int id) => TypedResults.Ok(new SwaggerEdgeOrder(id))).WithLinks();
         app.MapGet("/plain", () => TypedResults.Ok(new EdgePlainNote("hi")));
 
         await app.StartAsync();
@@ -140,8 +140,8 @@ public class CairnSwashbuckleEdgeTests
         await using var app = builder.Build();
         app.UseSwagger();
         app.MapControllers();
-        app.MapGet("/edge/paged-interface", IPagedResource () => new PagedResource<SwaggerEdgeOrder>([new(1)], 1, 10, 25));
-        app.MapGet("/edge/cursor-interface", ICursorPagedResource () => new CursorPage<SwaggerEdgeOrder>([new(1)], Next: "n"));
+        app.MapGet("/edge/paged-interface", IPagedResource () => new PagedResource<SwaggerEdgeOrder>([new(1)], 1, 10, 25)).WithLinks();
+        app.MapGet("/edge/cursor-interface", ICursorPagedResource () => new CursorPage<SwaggerEdgeOrder>([new(1)], Next: "n")).WithLinks();
         app.MapPost("/edge/void", () => TypedResults.NoContent());
         app.MapGet("/edge/hidden", () => TypedResults.Ok(new SwaggerEdgeOrder(1)));
 
@@ -196,6 +196,7 @@ public sealed record SwaggerEdgeOrder(int Id);
 /// <summary>Documents its default response as the linked order type.</summary>
 [ApiController]
 [Route("swedge/orders")]
+[CairnLinks]
 public sealed class SwaggerEdgeOrdersController : ControllerBase
 {
     /// <summary>Returns the order.</summary>

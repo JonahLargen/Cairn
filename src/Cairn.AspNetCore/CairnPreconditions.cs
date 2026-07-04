@@ -42,10 +42,9 @@ public static class CairnPreconditions
         {
             if (!Matches(ifMatch, current, useStrongComparison: true))
             {
-                return TypedResults.Problem(
-                    statusCode: StatusCodes.Status412PreconditionFailed,
-                    title: "Precondition Failed",
-                    detail: "The resource has changed since it was read; refresh it and retry with its current ETag.");
+                return PreconditionFailed(
+                    current,
+                    "The resource has changed since it was read; refresh it and retry with its current ETag.");
             }
         }
 
@@ -56,10 +55,9 @@ public static class CairnPreconditions
             // what makes `PUT ... If-None-Match: *` a create-only request.
             if (Matches(ifNoneMatch, current, useStrongComparison: false))
             {
-                return TypedResults.Problem(
-                    statusCode: StatusCodes.Status412PreconditionFailed,
-                    title: "Precondition Failed",
-                    detail: "The If-None-Match precondition failed: the resource already has a current representation.");
+                return PreconditionFailed(
+                    current,
+                    "The If-None-Match precondition failed: the resource already has a current representation.");
             }
 
             return null;
@@ -74,6 +72,30 @@ public static class CairnPreconditions
         }
 
         return null;
+    }
+
+    // A 412 that echoes the resource's current validator in the ETag header, so the client can immediately
+    // retry with it rather than re-fetching. Omitted when the resource has no current representation (there is
+    // no validator to send). The tag is echoed as-is — a weak validator stays weak on the response's ETag
+    // header (RFC 9110 §8.8.3); only If-Match comparison forbids weak validators, not their transport.
+    private static IResult PreconditionFailed(EntityTagHeaderValue? current, string detail)
+    {
+        var problem = TypedResults.Problem(
+            statusCode: StatusCodes.Status412PreconditionFailed,
+            title: "Precondition Failed",
+            detail: detail);
+
+        return current is null ? problem : new ETagEchoResult(problem, current.ToString());
+    }
+
+    // Sets the ETag response header before delegating to the wrapped problem result.
+    private sealed class ETagEchoResult(IResult inner, string etag) : IResult
+    {
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.Headers.ETag = etag;
+            return inner.ExecuteAsync(httpContext);
+        }
     }
 
     // Whether any listed entity tag matches the current one. `*` matches any current representation, so it

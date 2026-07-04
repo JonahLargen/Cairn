@@ -70,7 +70,7 @@ internal static class HypermediaParser
             {
                 if (IsUsable(entry.Name) && GetString(entry.Value, "href") is { } href && IsUsable(href))
                 {
-                    affordances[entry.Name] = new Affordance(entry.Name, href, GetString(entry.Value, "method") ?? "GET")
+                    affordances[entry.Name] = new Affordance(entry.Name, href, Method(entry.Value))
                     {
                         Title = GetString(entry.Value, "title"),
                     };
@@ -95,7 +95,7 @@ internal static class HypermediaParser
 
                 if (IsUsable(entry.Name) && IsUsable(target))
                 {
-                    affordances[entry.Name] = new Affordance(entry.Name, target!, GetString(entry.Value, "method") ?? "GET")
+                    affordances[entry.Name] = new Affordance(entry.Name, target!, Method(entry.Value))
                     {
                         Title = GetString(entry.Value, "title"),
                         ContentType = GetString(entry.Value, "contentType"),
@@ -230,6 +230,15 @@ internal static class HypermediaParser
     // A malformed entry (null/whitespace relation or href) is skipped rather than throwing from the
     // Link/Affordance constructor, so one bad entry never aborts the whole response.
     private static bool IsUsable(string? value) => !string.IsNullOrWhiteSpace(value);
+
+    // The HAL-FORMS method defaults to GET when absent, and equally when the server sends an empty or
+    // whitespace value: the Affordance constructor rejects a blank method, and parsing a response must never
+    // throw (the client's no-throw-on-response contract catches only JsonException/NotSupportedException).
+    private static string Method(JsonElement element)
+    {
+        var method = GetString(element, "method");
+        return string.IsNullOrWhiteSpace(method) ? "GET" : method;
+    }
 
     // Guard on Object: a relation whose value is a JSON array (a valid HAL multi-link rel) or a scalar must be
     // skipped, not throw — TryGetProperty throws InvalidOperationException on a non-object element.
