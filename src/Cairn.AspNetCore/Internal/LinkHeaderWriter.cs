@@ -68,14 +68,10 @@ internal static class LinkHeaderWriter
     }
 
     // A target may hold anything but the delimiters that close it (angle brackets) and the control characters
-    // that would let a value break out of the header field. An empty href has no target to point at.
+    // that would let a value break out of the header field. (An href is never empty — Link, pagination, and
+    // curie targets are all validated non-empty before they reach here.)
     private static bool IsSafeTarget(string href)
     {
-        if (href.Length == 0)
-        {
-            return false;
-        }
-
         foreach (var c in href)
         {
             if (c < ' ' || c == Delete || c == '<' || c == '>')

@@ -104,26 +104,27 @@ public class CairnLinkHeaderTests
     }
 
     [Fact]
-    public async Task A_quote_in_a_title_is_escaped_per_the_quoted_string_grammar()
+    public async Task A_quote_or_backslash_in_a_title_is_escaped_per_the_quoted_string_grammar()
     {
         await using var app = await StartAsync(
             emitLinkHeader: true,
-            configure: b => b.Self(o => LinkTarget.Route("HdrSelf", new { id = o.Id })).Title("He said \"hi\""));
+            configure: b => b.Self(o => LinkTarget.Route("HdrSelf", new { id = o.Id })).Title("a \"b\" \\ c"));
         using var client = app.GetTestClient();
 
         using var response = await client.GetAsync("/h/1");
         response.EnsureSuccessStatusCode();
 
-        // RFC 7230 quoted-string: the embedded double-quotes are backslash-escaped.
-        Assert.Contains("title=\"He said \\\"hi\\\"\"", LinkHeader(response), StringComparison.Ordinal);
+        // RFC 7230 quoted-string: embedded double-quotes and backslashes are backslash-escaped.
+        Assert.Contains("title=\"a \\\"b\\\" \\\\ c\"", LinkHeader(response), StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task Control_characters_in_an_attribute_are_dropped_so_the_header_cannot_be_injected()
     {
+        // \r and \n are C0 controls; U+007F (DEL) is the high control the writer also strips.
         await using var app = await StartAsync(
             emitLinkHeader: true,
-            configure: b => b.Self(o => LinkTarget.Route("HdrSelf", new { id = o.Id })).Title("a\r\nb"));
+            configure: b => b.Self(o => LinkTarget.Route("HdrSelf", new { id = o.Id })).Title("a\r\n\u007fb"));
         using var client = app.GetTestClient();
 
         using var response = await client.GetAsync("/h/1");
@@ -133,6 +134,7 @@ public class CairnLinkHeaderTests
         Assert.Contains("title=\"ab\"", link, StringComparison.Ordinal);
         Assert.DoesNotContain('\n', link);
         Assert.DoesNotContain('\r', link);
+        Assert.DoesNotContain('\u007f', link);
     }
 
     [Fact]
@@ -218,6 +220,105 @@ public class CairnLinkHeaderTests
         // Plain application/json negotiates no hypermedia, so there are no body links to advertise.
         using var response = await client.GetAsync("/h/1");
         response.EnsureSuccessStatusCode();
+        Assert.False(response.Headers.Contains("Link"));
+    }
+
+    [Fact]
+    public async Task Name_type_profile_and_a_valid_hreflang_ride_along_on_the_link()
+    {
+        await using var app = await StartAsync(
+            emitLinkHeader: true,
+            configure: b => b.Self(o => LinkTarget.Route("HdrSelf", new { id = o.Id }))
+                .Name("primary")
+                .Type("application/json")
+                .Profile("https://schemas.example.com/h")
+                .Hreflang("en-US"));
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/h/1");
+        response.EnsureSuccessStatusCode();
+
+        var link = LinkHeader(response);
+        Assert.Contains("name=\"primary\"", link, StringComparison.Ordinal);
+        Assert.Contains("type=\"application/json\"", link, StringComparison.Ordinal);
+        Assert.Contains("profile=\"https://schemas.example.com/h\"", link, StringComparison.Ordinal);
+        // hreflang is a bare Language-Tag token, not a quoted-string.
+        Assert.Contains("hreflang=en-US", link, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_hreflang_that_is_not_a_language_tag_token_is_omitted_but_the_link_stays()
+    {
+        await using var app = await StartAsync(
+            emitLinkHeader: true,
+            configure: b => b.Self(o => LinkTarget.Route("HdrSelf", new { id = o.Id })).Hreflang("en US"));
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/h/1");
+        response.EnsureSuccessStatusCode();
+
+        var link = LinkHeader(response);
+        // The space makes it un-emittable unquoted, so the attribute is dropped — but the link itself remains.
+        Assert.Contains("rel=\"self\"", link, StringComparison.Ordinal);
+        Assert.DoesNotContain("hreflang", link, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_resource_whose_only_links_are_unrepresentable_emits_no_header()
+    {
+        await using var app = await StartAsync(
+            emitLinkHeader: true,
+            configure: b =>
+            {
+                b.Link("search", _ => LinkTarget.Uri("/h{?q}", templated: true));   // templated: skipped
+                b.Link("bad", _ => LinkTarget.Uri("http://x/a<b"));                  // '<' target: skipped
+            });
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/h/1");
+        response.EnsureSuccessStatusCode();
+
+        // Both links are in the body, but neither can be a header target, so nothing is appended.
+        var links = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.GetProperty("_links");
+        Assert.True(links.TryGetProperty("search", out _));
+        Assert.True(links.TryGetProperty("bad", out _));
+        Assert.False(response.Headers.Contains("Link"));
+    }
+
+    [Fact]
+    public async Task A_control_character_in_an_href_disqualifies_it_as_a_header_target()
+    {
+        await using var app = await StartAsync(
+            emitLinkHeader: true,
+            configure: b =>
+            {
+                b.Self(o => LinkTarget.Route("HdrSelf", new { id = o.Id }));
+                b.Link("ctl", _ => LinkTarget.Uri("http://x/a\u0001b"));   // C0 control in the target
+            });
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/h/1");
+        response.EnsureSuccessStatusCode();
+
+        var link = LinkHeader(response);
+        Assert.Contains("rel=\"self\"", link, StringComparison.Ordinal);
+        Assert.DoesNotContain("rel=\"ctl\"", link, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_resource_with_affordances_but_no_links_emits_no_header()
+    {
+        await using var app = await StartAsync(
+            emitLinkHeader: true,
+            configure: b => b.Affordance("edit", o => LinkTarget.Route("HdrSelf", new { id = o.Id })).Put());
+        using var client = app.GetTestClient();
+
+        using var response = await client.GetAsync("/h/1");
+        response.EnsureSuccessStatusCode();
+
+        // The resource is recorded (it has an affordance) but carries no _links, so there is nothing to advertise.
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.True(body.TryGetProperty("_actions", out _));
         Assert.False(response.Headers.Contains("Link"));
     }
 
