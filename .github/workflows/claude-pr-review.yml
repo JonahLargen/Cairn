@@ -18,7 +18,9 @@ on:
 jobs:
   claude-review:
     # Skip drafts on `opened`; they get their review at `ready_for_review`.
-    if: ${{ !github.event.pull_request.draft }}
+    # Skip PRs from forks: GitHub withholds secrets from fork-triggered runs,
+    # so the review can't run there anyway — skip cleanly instead of failing.
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
