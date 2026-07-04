@@ -57,7 +57,8 @@ jobs:
             -reports:"coverage/**/coverage.cobertura.xml" \
             -targetdir:coverage/report \
             -reporttypes:"TextSummary" \
-            "minimumCoverageThresholds:lineCoverage=95;branchCoverage=95"
+            "minimumCoverageThresholds:lineCoverage=95" \
+            "minimumCoverageThresholds:branchCoverage=95"
           cat coverage/report/Summary.txt
 
       # Feeds the README coverage badge. Tokenless upload works for public repos;

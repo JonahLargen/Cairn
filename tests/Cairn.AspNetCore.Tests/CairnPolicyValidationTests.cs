@@ -65,6 +65,24 @@ public class CairnPolicyValidationTests
     }
 
     [Fact]
+    public async Task Startup_fails_when_a_policy_gated_link_references_an_unknown_policy()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAuthorization();
+        builder.Services.AddCairn(o => o.AddLinks(new LinkTypoGatedLinks()));
+
+        await using var app = builder.Build();
+        app.MapGet("/pv/{id:int}", (int id) => TypedResults.Ok(new PolicyOrder(id))).WithName("PvGetOrder").WithLinks();
+
+        // Policies referenced by Link()/Self() declarations are validated exactly like affordance policies.
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => app.StartAsync());
+
+        Assert.Contains("CanSeeAudti", failure.Message, StringComparison.Ordinal);   // the typo'd name
+        Assert.Contains(nameof(PolicyOrder), failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_policy_provider_that_throws_at_startup_does_not_fail_the_host()
     {
         var builder = WebApplication.CreateBuilder();
@@ -104,6 +122,15 @@ public class CairnPolicyValidationTests
             builder.Affordance("cancel", o => LinkTarget.Route("PvCancel", new { id = o.Id }))
                 .Post()
                 .RequireAuthorization("CanCancle");
+        }
+    }
+
+    private sealed class LinkTypoGatedLinks : LinkConfig<PolicyOrder>
+    {
+        public override void Configure(ILinkBuilder<PolicyOrder> builder)
+        {
+            builder.Self(o => LinkTarget.Route("PvGetOrder", new { id = o.Id }));
+            builder.Link("audit", o => LinkTarget.Uri($"/pv/{o.Id}/audit")).RequireAuthorization("CanSeeAudti");
         }
     }
 }
