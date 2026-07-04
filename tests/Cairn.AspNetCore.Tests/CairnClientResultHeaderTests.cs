@@ -48,6 +48,21 @@ public class CairnClientResultHeaderTests
     }
 
     [Fact]
+    public async Task A_failed_typed_result_has_no_location_and_a_null_etag_shortcut()
+    {
+        var http = Client(new ResponseStub(HttpStatusCode.InternalServerError, location: "/widgets/43", etag: "\"w43\""));
+
+        var result = await new CairnClient(http).InvokeAsync<Widget>(new Affordance("create", "/widgets", "POST"));
+
+        // No Resource on a failure, so the ETag shortcut (Resource?.ETag) collapses to null, and Location — read
+        // only on the success path — stays null too.
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Resource);
+        Assert.Null(result.Location);
+        Assert.Null(result.ETag);
+    }
+
+    [Fact]
     public async Task A_response_without_the_headers_leaves_location_and_etag_null()
     {
         var http = Client(new ResponseStub(HttpStatusCode.NoContent));
