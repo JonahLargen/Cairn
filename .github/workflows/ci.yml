@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# Supersede in-flight runs of the same branch/PR; each push restarts the checks
+# anyway, so finishing the old run is wasted compute.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build & Test
