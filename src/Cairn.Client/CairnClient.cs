@@ -179,7 +179,7 @@ public sealed class CairnClient
             using var response = await SendAsync(affordance, body, ifMatch, token).ConfigureAwait(false);
             if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotModified)
             {
-                return ClientResult.Success((int)response.StatusCode);
+                return ClientResult.Success((int)response.StatusCode, ReadLocation(response), ReadETag(response));
             }
 
             return ClientResult.Failure((int)response.StatusCode, await ReadProblemAsync(response, token).ConfigureAwait(false));
@@ -416,9 +416,18 @@ public sealed class CairnClient
     // The raw ETag header, preserving a value the typed HttpResponseHeaders.ETag parser rejects (a
     // non-RFC-7232 tag still round-trips as an opaque validator on a later conditional request). Null when the
     // response carries no ETag.
-    private static string? ReadETag(HttpResponseMessage response)
+    private static string? ReadETag(HttpResponseMessage response) => FirstHeader(response, "ETag");
+
+    // The raw Location header (RFC 9110 §10.2.2) — for a 201 Created, the URL of the resource just created —
+    // returned verbatim rather than through the typed HttpResponseHeaders.Location Uri: it is commonly relative
+    // and a caller feeds it straight back to GetAsync. Null when the response carries no Location.
+    private static string? ReadLocation(HttpResponseMessage response) => FirstHeader(response, "Location");
+
+    // The first non-blank value of a response header, read unvalidated so a value the typed header parsers
+    // would reject still round-trips verbatim. Null when the header is absent or blank.
+    private static string? FirstHeader(HttpResponseMessage response, string name)
     {
-        if (response.Headers.NonValidated.TryGetValues("ETag", out var values))
+        if (response.Headers.NonValidated.TryGetValues(name, out var values))
         {
             foreach (var value in values)
             {
@@ -581,7 +590,7 @@ public sealed class CairnClient
         // throw about. Surface it as a bodiless success the caller can distinguish via IsNotModified.
         if (response.StatusCode == HttpStatusCode.NotModified)
         {
-            return ClientResult<T>.Success(status, EmptyResource<T>(ReadETag(response)));
+            return ClientResult<T>.Success(status, ReadLocation(response), EmptyResource<T>(ReadETag(response)));
         }
 
         if (!response.IsSuccessStatusCode)
@@ -589,6 +598,7 @@ public sealed class CairnClient
             return ClientResult<T>.Failure(status, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
         }
 
+        var location = ReadLocation(response);
         var etag = ReadETag(response);
         var (document, problem) = await ParseBodyAsync(response, cancellationToken).ConfigureAwait(false);
         if (problem is not null)
@@ -598,7 +608,7 @@ public sealed class CairnClient
 
         if (document is null)
         {
-            return ClientResult<T>.Success(status, EmptyResource<T>(etag));
+            return ClientResult<T>.Success(status, location, EmptyResource<T>(etag));
         }
 
         using (document)
@@ -606,7 +616,7 @@ public sealed class CairnClient
             try
             {
                 // A single JsonDocument binds the typed value and the hypermedia.
-                return ClientResult<T>.Success(status, BuildResource<T>(document.RootElement, etag));
+                return ClientResult<T>.Success(status, location, BuildResource<T>(document.RootElement, etag));
             }
             catch (Exception exception) when (exception is JsonException or NotSupportedException)
             {

@@ -64,8 +64,10 @@ else
 - `IsSuccess` — `true` for a 2xx status, or a `304 Not Modified` answer to a conditional request. When `true`, `Resource` is non-null; otherwise `Problem` is non-null.
 - `Status` — the HTTP status code as an `int`.
 - `IsNotModified` — `true` when the status is `304` (see [Conditional requests](#conditional-requests)).
+- `Location` — the response's `Location` header on success (e.g. the URL a `201 Created` points at), returned verbatim so it feeds straight back into `GetAsync`; otherwise `null`.
 - `Resource` — the `Resource<T>?` on success.
 - `Value` — a shortcut for `Resource?.Value`, otherwise `default`.
+- `ETag` — the response's `ETag` on success, a shortcut for `Resource?.ETag`; otherwise `null`.
 - `Problem` — the parsed `Problem?` on failure.
 - `EnsureSuccess()` — returns the `Resource<T>` on success, or throws `CairnClientException` on an error status.
 
@@ -190,7 +192,7 @@ ClientResult<Order> updated = await order.InvokeAsync<Order>(
     body: new { carrier = "UPS", trackingNumber = "1Z..." });
 ```
 
-`ClientResult` (the no-body result) exposes `IsSuccess`, `Status`, `Problem`, and `EnsureSuccess()`. Invoking an unknown affordance name throws `InvalidOperationException`; guard with `HasAffordance(name)`.
+`ClientResult` (the no-body result) exposes `IsSuccess`, `Status`, `IsNotModified`, `Location`, `ETag`, `Problem`, and `EnsureSuccess()`. `Location` and `ETag` come from the response headers on success — after a `201 Created` from a POST, `Location` is the new resource's URL (feed it to `GetAsync`) and `ETag` is its validator (feed it back as `ifMatch`). Invoking an unknown affordance name throws `InvalidOperationException`; guard with `HasAffordance(name)`.
 
 Affordance names are the wire keys, so mind the HAL-FORMS `default` convention: a template marked [`AsDefault()`](affordances-and-forms.md#the-default-template-asdefault) — or a response's *sole* template — is keyed `"default"` rather than its declared name. Against a HAL-FORMS server (the client's preferred negotiated format), a single-action resource is invoked as `InvokeAsync("default")`.
 
