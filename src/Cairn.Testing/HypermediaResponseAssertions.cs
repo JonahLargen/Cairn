@@ -211,8 +211,9 @@ public sealed class HypermediaResponseAssertions
             actual == count,
             $"Expected the response to embed {count} '{relation}' {(count == 1 ? "resource" : "resources")}, but it embeds {actual}.");
 
-        // With no matching resource there is nothing to drill into, so the chain stays on this response.
-        return resources is { Count: > 0 } ? new HypermediaResponseAssertions(resources[0], this) : this;
+        // With no matching resource there is nothing to drill into, so the chain stays on this response;
+        // otherwise a non-zero count means resources has at least one element to assert on.
+        return actual == 0 ? this : new HypermediaResponseAssertions(resources![0], this);
     }
 
     /// <summary>Asserts the response does not embed any resource under the given relation.</summary>
