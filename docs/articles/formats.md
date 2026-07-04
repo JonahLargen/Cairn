@@ -4,7 +4,7 @@ Cairn projects a resource's `_links`, affordances, and embedded resources into o
 
 ## The three built-in formats
 
-`HypermediaFormat` has three members:
+`HypermediaFormat` has three wire-format members, plus `None` (no hypermedia at all — see [opt-in links](#opt-in-links-only-when-the-client-asks)):
 
 ```csharp
 public enum HypermediaFormat
@@ -12,6 +12,7 @@ public enum HypermediaFormat
     Default,
     Hal,
     HalForms,
+    None,
 }
 ```
 
@@ -20,6 +21,7 @@ public enum HypermediaFormat
 | `HypermediaFormat.Default` | `application/json` | `_links` and `_actions` |
 | `HypermediaFormat.Hal` | `application/hal+json` | `_links` only — affordances are not emitted |
 | `HypermediaFormat.HalForms` | `application/prs.hal-forms+json` | `_links` and `_templates` for affordances |
+| `HypermediaFormat.None` | `application/json` | nothing — the resource serializes exactly as its DTO declares |
 
 `_links` is always present when a resource has links. The difference is how affordances surface:
 
@@ -85,6 +87,42 @@ builder.Services.AddCairn(options =>
     options.NegotiateFormat = false;
     options.DefaultFormat = HypermediaFormat.Hal;
 });
+```
+
+## Opt-in links: only when the client asks
+
+`.WithLinks()` is a *server-side, per-endpoint* opt-in: the developer chooses which endpoints carry hypermedia. But once an endpoint is opted in, it emits links for **every** request — a plain `application/json` caller gets `_links`/`_actions` whether it wants them or not. There is deliberately no media type that means "the resource, with no links": all four negotiable media types above carry hypermedia, differing only in shape.
+
+Sometimes you want the *client* to decide per request — lean `application/json` for callers that just want data, links for callers that ask. Set `DefaultFormat = HypermediaFormat.None` to flip the un-negotiated default from "flat links-and-actions" to "no hypermedia":
+
+```csharp
+builder.Services.AddCairn(options =>
+{
+    options.AddLinks(new OrderLinks());
+    options.DefaultFormat = HypermediaFormat.None;   // hypermedia is opt-in by the client
+});
+```
+
+With `None` as the default, on an opted-in endpoint:
+
+| Request `Accept` | Response |
+| --- | --- |
+| `application/json` | the **bare** resource — no `_links`, no `_actions` |
+| `*/*`, `application/*`, or no `Accept` header | the bare resource (a wildcard expresses no hypermedia preference) |
+| `application/hal+json` | HAL, with `_links` |
+| `application/prs.hal-forms+json` | HAL-FORMS, with `_links` and `_templates` |
+| a registered custom formatter's media type | that format |
+
+So the hypermedia `+json` media types double as the client's "I understand hypermedia" signal — a dumb client gets clean JSON, a hypermedia-aware client asks for HAL/HAL-FORMS and gets the affordances. This is content negotiation used the way HTTP intends it, and it composes with everything else: negotiation still adds `Vary: Accept` (the body shape now depends on the header), and a per-endpoint `.WithHypermediaFormat(...)` override still wins.
+
+`None` is non-breaking: `DefaultFormat` is `HypermediaFormat.Default` unless you change it, so existing apps keep emitting links on `application/json`. Note that under opt-in mode, Cairn's *flat* `_actions` shape (which lives at `application/json`) is not itself negotiable — a client that wants affordances asks for HAL-FORMS. Register a [custom formatter](custom-formats.md) if you want the flat shape available under its own media type.
+
+You can also force `None` on a single endpoint or route group to suppress links there even while the app default emits them:
+
+```csharp
+app.MapGet("/orders/{id}", GetOrder)
+    .WithLinks()
+    .WithHypermediaFormat(HypermediaFormat.None);   // this endpoint never emits hypermedia
 ```
 
 ## Content-Type relabeling

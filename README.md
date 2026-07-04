@@ -188,6 +188,8 @@ The same `LinkConfig<T>` serves three built-in shapes, selected by the request's
 
 HAL-FORMS templates go further than a URL and a method: `Accepts<TInput>()` derives full form field descriptions (types, required flags, ranges, enum options) from your input type's data annotations, so a client can *render the form* without knowing the type. Custom formats such as Siren plug in through `IHypermediaFormatter` and participate in the same negotiation. See [Wire formats](https://jonahlargen.github.io/Cairn/articles/formats.html) and [Affordances & HAL-FORMS](https://jonahlargen.github.io/Cairn/articles/affordances-and-forms.html).
 
+Opt-in cuts a second way, too: set `DefaultFormat = HypermediaFormat.None` and hypermedia becomes opt-in *by the client*. A plain `application/json` request then returns the bare resource, and links appear only when the caller's `Accept` header asks for a hypermedia media type — so callers that just want data aren't paying for links they'll ignore.
+
 ### Pagination links for free
 
 Return a `PagedResource<T>` (offset) or `CursorPage<T>` (keyset) and the envelope gets `self`/`first`/`prev`/`next`/`last` links derived from the request URL — while each item on the page still gets its own links:

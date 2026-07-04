@@ -35,7 +35,12 @@ public sealed class CairnOptions
     /// <summary>How unresolved link targets are handled (default <see cref="LinkResolutionMode.Lax"/>).</summary>
     public LinkResolutionMode Mode { get; set; } = LinkResolutionMode.Lax;
 
-    /// <summary>The wire format used when the request doesn't negotiate one (default <see cref="HypermediaFormat.Default"/>).</summary>
+    /// <summary>
+    /// The wire format used when the request doesn't negotiate one (default <see cref="HypermediaFormat.Default"/>).
+    /// Set to <see cref="HypermediaFormat.None"/> to make hypermedia opt-in by the client: an un-negotiated
+    /// request (plain <c>application/json</c>, a wildcard, or no <c>Accept</c> header) then serializes the bare
+    /// resource, and links appear only when the caller's <c>Accept</c> header names a hypermedia media type.
+    /// </summary>
     public HypermediaFormat DefaultFormat { get; set; } = HypermediaFormat.Default;
 
     /// <summary>How link URLs are rendered (default <see cref="LinkUrlStyle.Absolute"/>).</summary>

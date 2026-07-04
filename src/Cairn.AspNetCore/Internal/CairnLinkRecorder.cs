@@ -57,6 +57,16 @@ internal static class CairnLinkRecorder
         CairnLinkStore.SetFormat(http, format);
         CairnLinkStore.SetFormatter(http, custom);
 
+        // Opt-in negotiation resolved to no hypermedia for this request (DefaultFormat = None, and the caller's
+        // Accept named no hypermedia media type). Serialize the resource untouched: skip the compute pass so the
+        // un-negotiated path carries none of Cairn's per-resource cost, and record nothing so the emit stage's
+        // injected properties are all omitted. ResolveFormat has already appended Vary: Accept, so shared caches
+        // still key on the header that decides whether links are present.
+        if (format == HypermediaFormat.None)
+        {
+            return value;
+        }
+
         var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Cairn.AspNetCore");
 
         // Per-container (registered by AddCairn), so a second host in the same process keeps its own gate.
@@ -374,7 +384,11 @@ internal static class CairnLinkRecorder
         {
             NegotiatedFormat.Hal => (HypermediaFormat.Hal, null),
             NegotiatedFormat.HalForms => (HypermediaFormat.HalForms, null),
-            _ => (HypermediaFormat.Default, null),
+            // Explicit application/json (and the wildcard/no-preference tie that lands on the plain-JSON
+            // candidate): normally Cairn's flat default shape, but no hypermedia at all when the app has opted
+            // into client-negotiated links via DefaultFormat = None — a caller that didn't ask for a hypermedia
+            // media type gets the bare resource.
+            _ => (options.DefaultFormat == HypermediaFormat.None ? HypermediaFormat.None : HypermediaFormat.Default, null),
         };
     }
 
