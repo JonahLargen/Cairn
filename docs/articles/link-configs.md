@@ -149,8 +149,9 @@ builder.Affordance("cancel", o => LinkTarget.Route("CancelOrder", new { id = o.I
 `RequireAuthorization` gates a link on authorization:
 
 ```csharp
-ILinkSpec<T> RequireAuthorization(string policy);  // named policy
-ILinkSpec<T> RequireAuthorization();               // default policy (an authenticated user, by default)
+ILinkSpec<T> RequireAuthorization(string policy);                       // named policy, caller only
+ILinkSpec<T> RequireAuthorization(string policy, Func<T, object?> resource);  // named policy, resource-based
+ILinkSpec<T> RequireAuthorization();                                    // default policy (an authenticated user, by default)
 ```
 
 ```csharp
@@ -163,10 +164,37 @@ builder.Link("audit-log", o => LinkTarget.Route("GetOrderAudit", new { id = o.Id
 
 Authorization gating uses the engine's `ILinkAuthorizer`, which evaluates the policy against the current caller. The default policy admits an authenticated caller. Named policies are validated at startup: when the host uses the default authorization service, a policy name no `AddPolicy(...)` registered fails `app.StartAsync()` with a clear error instead of a request-time 500. If the host resolves policies *dynamically* — a custom `IAuthorizationPolicyProvider` backed by a database or per-tenant store that only materializes policies after boot — disable the startup check with `o.ValidateAuthorizationPolicies = false` (a provider that throws during the startup lookup is skipped with a logged warning rather than failing the host). Authorization-gated affordances also show up on controllers — see [controllers.md](controllers.md) — and a denied transition surfaces as a problem response — see [error-responses.md](error-responses.md).
 
+#### Resource-based authorization
+
+The two-argument overload evaluates the policy against a *resource* — ASP.NET Core [resource-based authorization](https://learn.microsoft.com/aspnet/core/security/authorization/resourcebased), where the policy's handlers receive the object as `context.Resource` (`IAuthorizationService.AuthorizeAsync(user, resource, policy)`). This is how a per-item decision — "may *this* caller edit *this* order?" — rides on each item of a page. Pass `o => o` to authorize against the resource being linked, or select a projection or domain entity your handler expects:
+
+```csharp
+builder.Affordance(IanaLinkRelations.Edit, o => LinkTarget.Route("UpdateOrder", new { id = o.Id }))
+    .RequireAuthorization("EditOrder", o => o);   // handlers receive the order as context.Resource
+```
+
+```csharp
+public sealed class EditOrderHandler : AuthorizationHandler<OperationRequirement, OrderDto>
+{
+    protected override Task HandleRequirementAsync(
+        AuthorizationHandlerContext context, OperationRequirement requirement, OrderDto order)
+    {
+        if (order.OwnerId == context.User.FindFirst("sub")?.Value)
+        {
+            context.Succeed(requirement);
+        }
+
+        return Task.CompletedTask;
+    }
+}
+```
+
+Resource-based decisions are memoized per `(resource, policy)` for the request (by reference — two DTOs that compare equal are still distinct resources), so a resource that exposes several links or affordances gated on one policy evaluates it once. The policy name is validated at startup exactly as the caller-only overload's is.
+
 Two things to keep in mind:
 
-- **The policy sees the caller, not the resource.** It is evaluated once per request per policy (results are memoized, so a 200-item page evaluates each policy once, not 200 times). A policy named `CanCancelThisOrder` still can't see the order — for per-resource decisions, combine a caller check with a resource predicate in `When`, or call `IAuthorizationService.AuthorizeAsync(user, resource, policy)` yourself in a service-aware condition.
-- **Gated links personalize the body.** A response whose links depend on the caller must not be output-cached (ASP.NET Core `OutputCache`, a CDN) without varying by credential — otherwise the first caller's affordance set replays to everyone.
+- **The one-argument overload sees the caller, not the resource.** It is evaluated once per request per policy (results are memoized, so a 200-item page evaluates each policy once, not 200 times). A policy named `CanCancelThisOrder` still can't see the order — reach for the resource-based overload above, combine a caller check with a resource predicate in `When`, or call `IAuthorizationService.AuthorizeAsync(user, resource, policy)` yourself in a service-aware condition.
+- **Gated links personalize the body.** A response whose links depend on the caller (or the resource) must not be output-cached (ASP.NET Core `OutputCache`, a CDN) without varying by credential — otherwise the first caller's affordance set replays to everyone.
 
 ## Service-aware targets and conditions
 

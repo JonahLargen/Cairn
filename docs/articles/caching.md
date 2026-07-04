@@ -31,7 +31,7 @@ Alternatively, disable negotiation (`o.NegotiateFormat = false`) or force one fo
 
 ## Policy-gated links must not be shared-cached
 
-Links and affordances gated with `RequireAuthorization(...)` — and any `When(...)` condition that reads the current user — make the *body* caller-dependent:
+Links and affordances gated with `RequireAuthorization(...)` — whether against the caller alone or a resource (`RequireAuthorization("EditOrder", o => o)`) — and any `When(...)` condition that reads the current user make the *body* caller-dependent:
 
 ```csharp
 builder.Affordance("cancel", o => LinkTarget.Route("CancelOrder", new { id = o.Id }))

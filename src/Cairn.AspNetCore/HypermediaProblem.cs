@@ -1,7 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Text.Json;
 using Cairn.AspNetCore.Internal;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Cairn.AspNetCore;
@@ -13,7 +16,7 @@ namespace Cairn.AspNetCore;
 /// <c>AddProblemDetails()</c>, the document is written through <see cref="IProblemDetailsService"/> so
 /// <c>CustomizeProblemDetails</c> and custom writers apply.
 /// </summary>
-public sealed class HypermediaProblem : IResult
+public sealed class HypermediaProblem : IResult, IEndpointMetadataProvider
 {
     private readonly List<(string Relation, LinkTarget Target, string? Title)> _links = [];
     private readonly List<(string Name, LinkTarget Target, string Method)> _actions = [];
@@ -21,6 +24,26 @@ public sealed class HypermediaProblem : IResult
 
     /// <summary>Creates a problem document with the given HTTP status code.</summary>
     public HypermediaProblem(int status) => Status = status;
+
+    /// <summary>
+    /// Contributes response metadata for endpoints that declare this result type (directly or in a
+    /// <c>Results&lt;...&gt;</c> union), so the OpenAPI document shows the endpoint can answer with an RFC 9457
+    /// <c>application/problem+json</c> document. The concrete <see cref="Status"/> is per-instance and unknowable
+    /// at build time, so — like the framework's own <c>Problem()</c> result — the metadata defaults to
+    /// <c>500</c>; annotate the endpoint with <c>Produces</c>/<c>ProducesProblem</c> for the exact status codes.
+    /// </summary>
+    /// <param name="method">The endpoint's handler method.</param>
+    /// <param name="builder">The endpoint builder to contribute metadata to.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="method"/> or <paramref name="builder"/> is <see langword="null"/>.</exception>
+    static void IEndpointMetadataProvider.PopulateMetadata(MethodInfo method, EndpointBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(method);
+        ArgumentNullException.ThrowIfNull(builder);
+        builder.Metadata.Add(new ProducesResponseTypeMetadata(
+            StatusCodes.Status500InternalServerError,
+            typeof(Microsoft.AspNetCore.Mvc.ProblemDetails),
+            new[] { "application/problem+json" }));
+    }
 
     /// <summary>The HTTP status code, also written as the <c>status</c> member.</summary>
     public int Status { get; }

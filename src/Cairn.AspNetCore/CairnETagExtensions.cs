@@ -1,3 +1,4 @@
+using Cairn.AspNetCore.Internal;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Net.Http.Headers;
@@ -27,6 +28,10 @@ public static class CairnETagExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(etag);
+
+        // Leave a marker in the endpoint metadata so the OpenAPI integrations can document the ETag response
+        // header and the 304 response; the tag itself is derived per response by the filter below.
+        builder.Add(endpoint => endpoint.Metadata.Add(ETagMetadata.Instance));
 
         return builder.AddEndpointFilterFactory((_, next) => async invocation =>
         {
