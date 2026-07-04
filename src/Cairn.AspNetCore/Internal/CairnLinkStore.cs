@@ -170,8 +170,41 @@ internal sealed record HalFormsProperty([property: JsonPropertyName("name")] str
     public HalFormsOptions? Options { get; init; }
 }
 
-/// <summary>A HAL-FORMS <c>options</c> block enumerating a field's selectable values.</summary>
-internal sealed record HalFormsOptions([property: JsonPropertyName("inline")] IReadOnlyList<HalFormsOption> Inline);
+/// <summary>A HAL-FORMS <c>options</c> block describing a field's selectable values, given inline or by reference.</summary>
+internal sealed record HalFormsOptions
+{
+    /// <summary>The values enumerated in the document (HAL-FORMS <c>options.inline</c>); mutually exclusive with <see cref="Link"/>.</summary>
+    [JsonPropertyName("inline")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<HalFormsOption>? Inline { get; init; }
+
+    /// <summary>A link a client dereferences to fetch the values (HAL-FORMS <c>options.link</c>); mutually exclusive with <see cref="Inline"/>.</summary>
+    [JsonPropertyName("link")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HalFormsOptionsLink? Link { get; init; }
+
+    /// <summary>The field of each fetched item shown to the user (HAL-FORMS <c>options.promptField</c>).</summary>
+    [JsonPropertyName("promptField")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PromptField { get; init; }
+
+    /// <summary>The field of each fetched item whose value is submitted (HAL-FORMS <c>options.valueField</c>).</summary>
+    [JsonPropertyName("valueField")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ValueField { get; init; }
+}
+
+/// <summary>The <c>link</c> element inside a HAL-FORMS <c>options</c> block — the reference the values are fetched from.</summary>
+internal sealed record HalFormsOptionsLink([property: JsonPropertyName("href")] string Href)
+{
+    [JsonPropertyName("templated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Templated { get; init; }
+
+    [JsonPropertyName("type")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Type { get; init; }
+}
 
 /// <summary>One selectable value in a HAL-FORMS <c>options.inline</c> list.</summary>
 internal sealed record HalFormsOption(

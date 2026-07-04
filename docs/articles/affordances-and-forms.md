@@ -142,6 +142,7 @@ Each serializable instance property of the input type becomes one template prope
 | `[Display(Prompt = ...)]` | `placeholder` | from `Display.GetPrompt()` |
 | `[Editable(false)]` or `[ReadOnly(true)]` | `readOnly: true` | |
 | enum-typed property | `options.inline` | one entry per member; `prompt` is the member name, `value` is the wire form the binder accepts — numeric by default, the exact serialized string when a `JsonStringEnumConverter` applies (declared on the enum or added to the serializer options) |
+| `[HalFormsOptionsLink(href)]` | `options.link` | *options by reference* — the values are fetched from `href` instead of listed inline; see [Options by reference](#options-by-reference) |
 | `[Range(min, max)]` | `min` / `max` | bounds converted to numbers |
 | `[StringLength]` or `[MaxLength]` | `maxLength` | `StringLength.MaximumLength` preferred, else `MaxLength.Length` |
 | `[StringLength(MinimumLength = ...)]` or `[MinLength]` | `minLength` | omitted when zero |
@@ -166,6 +167,37 @@ When no `[EmailAddress]` attribute is present, `type` is inferred from the unwra
 | any other type | (no `type` emitted) |
 
 Properties and their derived schema are cached per input type and serializer contract — and per UI culture when any prompt is localizable — so the annotations on a given type are read once.
+
+### Options by reference
+
+An `enum` or `bool` property enumerates its selectable values inline (`options.inline`). When the value set is large, dynamic, or already exposed by another endpoint, annotate the property with `[HalFormsOptionsLink]` to emit **options by reference** — a HAL-FORMS `options.link` the client dereferences to fetch the list — instead of an inline enumeration:
+
+```csharp
+public sealed class AssignTicketInput
+{
+    // The client GETs /users to populate the picker, reading each item's "name" and "id".
+    [HalFormsOptionsLink("/users", ValueField = "id", PromptField = "name")]
+    public string Assignee { get; init; } = "";
+}
+```
+
+renders the field as:
+
+```json
+{
+  "name": "assignee",
+  "type": "text",
+  "options": {
+    "link": { "href": "/users" },
+    "promptField": "name",
+    "valueField": "id"
+  }
+}
+```
+
+`Href` is emitted verbatim — a relative or absolute URI, or a URI template when `Templated = true` (which adds `"templated": true` to the link). It is **not** resolved through the route table: the field schema is computed once per input type and reused across requests, so it holds no per-request URL state. Point it at a stable path (or template) the client can resolve against the response.
+
+HAL-FORMS `options` carry either an inline list or a link, never both, so `[HalFormsOptionsLink]` takes precedence over the automatic inline derivation — an `enum` property with the attribute emits the link, not its members. The optional `Type` (a media-type hint on the link), `ValueField`, and `PromptField` are omitted when unset. The [typed client](client.md) reads the href back as `AffordanceField.OptionsLink`.
 
 ## The default template: `AsDefault()`
 
