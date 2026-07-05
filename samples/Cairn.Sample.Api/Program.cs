@@ -1,60 +1,72 @@
+using System.Text.Json.Serialization;
 using Cairn.AspNetCore;
+using Cairn.AspNetCore.Explorer;
 using Cairn.Sample.Api;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.AddSingleton<Store>();
+
+// Serialize enums by name (Pending, Standard, …) rather than as integers, so responses — and the explorer's
+// state pills and options lists — read as words.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddCairn(options =>
 {
+    options.AddLinks(new RootLinks());
     options.AddLinks(new OrderLinks());
+    options.AddLinks(new OrdersLinks());
     options.AddLinks(new CustomerLinks());
+    options.AddLinks(new CustomersLinks());
 });
 
 var app = builder.Build();
 
+// The browsable HAL Explorer, mounted at /explorer. It is served in Development only by default; open it and
+// start from the API root, then navigate entirely by following links and running the forms.
+app.UseCairnExplorer(options => options.Title = "Cairn Sample API Explorer");
+
 // Controllers opt in the same way — see CustomersController and its [CairnLinks].
 app.MapControllers();
 
+// The API entry point — links onward to the collections. This is where the explorer opens.
+app.MapGet("/", () => TypedResults.Ok(new RootDto()))
+    .WithName("GetRoot")
+    .WithLinks();
+
 var orders = app.MapGroup("/orders");
 
-// A plain record gains a self link and a state-conditional 'cancel' affordance.
-orders.MapGet("/{id:int}", (int id) => TypedResults.Ok(new OrderDto(id, OrderStatus.Pending)))
+// The orders collection — items surface in _embedded.orders, and a 'create' form is advertised.
+orders.MapGet("/", (Store store) => TypedResults.Ok(new OrdersResource(store.Orders())))
+    .WithName("GetOrders")
+    .WithLinks();
+
+// A single order — self, a cross-link to its customer, and a state-conditional 'cancel' affordance.
+orders.MapGet("/{id:int}", Results<Ok<OrderDto>, NotFound> (int id, Store store) =>
+        store.Order(id) is { } order ? TypedResults.Ok(order) : TypedResults.NotFound())
     .WithName("GetOrderById")
     .WithLinks();
 
-// A collection — each item is linked by its runtime type.
-orders.MapGet("/", () => TypedResults.Ok(new[]
+// Place an order — returns 201 with a Location the explorer follows to the new resource.
+orders.MapPost("/", (CreateOrderInput input, Store store, LinkGenerator links, HttpContext http) =>
     {
-        new OrderDto(1, OrderStatus.Pending),
-        new OrderDto(2, OrderStatus.Shipped),
-    }))
-    .WithLinks();
+        var order = store.Place(input.CustomerId, input.Quantity, input.Speed);
+        var location = links.GetPathByName(http, "GetOrderById", new { id = order.Id });
+        return TypedResults.Created(location, order);
+    })
+    .WithName("CreateOrder");
 
-// A paged envelope — the page gets self/first/prev/next/last links; each item its own.
-orders.MapGet("/paged", (int page = 1) => TypedResults.Ok(
-        new PagedResource<OrderDto>(
-            [new OrderDto(1, OrderStatus.Pending), new OrderDto(2, OrderStatus.Shipped)],
-            page,
-            PageSize: 10,
-            TotalCount: 25)))
-    .WithLinks();
-
-// A cursor/keyset page — you supply the opaque cursors; Cairn emits self/next/prev and links each item.
-orders.MapGet("/cursor", () => TypedResults.Ok(
-        new CursorPage<OrderDto>(
-            [new OrderDto(3, OrderStatus.Pending), new OrderDto(4, OrderStatus.Shipped)],
-            Next: "eyJpZCI6NH0",
-            Prev: "eyJpZCI6Mn0")))
-    .WithLinks();
-
-// A Results<,> union — links are attached to the inner value when present.
-orders.MapGet("/find/{id:int}", Results<Ok<OrderDto>, NotFound> (int id) =>
-        id > 0 ? TypedResults.Ok(new OrderDto(id, OrderStatus.Shipped)) : TypedResults.NotFound())
-    .WithLinks();
-
-// The target the 'cancel' affordance points at.
-orders.MapPost("/{id:int}/cancel", (int id) => TypedResults.NoContent())
+// The target the 'cancel' affordance points at — 204 on success, so the explorer reloads the order and shows
+// it flipped to Cancelled with the affordance gone.
+orders.MapPost("/{id:int}/cancel", Results<NoContent, NotFound> (int id, CancelOrderInput input, Store store) =>
+        store.Cancel(id) ? TypedResults.NoContent() : TypedResults.NotFound())
     .WithName("CancelOrder");
+
+// The customers collection — items surface in _embedded.customers.
+app.MapGet("/customers", (Store store) => TypedResults.Ok(new CustomersResource(store.Customers())))
+    .WithName("GetCustomers")
+    .WithLinks();
 
 app.Run();
