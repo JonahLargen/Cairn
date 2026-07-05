@@ -8,6 +8,7 @@
   <Folder Name="/src/">
     <Project Path="src/Cairn.Analyzers/Cairn.Analyzers.csproj" />
     <Project Path="src/Cairn.AspNetCore/Cairn.AspNetCore.csproj" />
+    <Project Path="src/Cairn.AspNetCore.Explorer/Cairn.AspNetCore.Explorer.csproj" />
     <Project Path="src/Cairn.Client/Cairn.Client.csproj" />
     <Project Path="src/Cairn.CodeFixes/Cairn.CodeFixes.csproj" />
     <Project Path="src/Cairn.Core/Cairn.Core.csproj" />
@@ -19,6 +20,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Cairn.Analyzers.Tests/Cairn.Analyzers.Tests.csproj" />
     <Project Path="tests/Cairn.AspNetCore.Tests/Cairn.AspNetCore.Tests.csproj" />
+    <Project Path="tests/Cairn.AspNetCore.Explorer.Tests/Cairn.AspNetCore.Explorer.Tests.csproj" />
     <Project Path="tests/Cairn.Core.Tests/Cairn.Core.Tests.csproj" />
   </Folder>
 </Solution>
