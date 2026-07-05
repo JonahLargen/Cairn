@@ -142,7 +142,7 @@ builder.Affordance("cancel", o => LinkTarget.Route("CancelOrder", new { id = o.I
     .When(o => !o.IsCancelled);
 ```
 
-`IAffordanceSpec<T>` exposes the same three `When` overloads.
+`IAffordanceSpec<T>` and the `IEmbedSpec<T>` returned by `Embed`/`EmbedMany` expose the same three `When` overloads — see [conditional and authorized embeds](embedded-resources.md#conditional-and-authorized-embeds).
 
 ### RequireAuthorization
 

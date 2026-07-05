@@ -83,6 +83,25 @@ public sealed class LineItemLinks : LinkConfig<LineItem>
 }
 ```
 
+### Conditional and authorized embeds
+
+`Embed` and `EmbedMany` return an `IEmbedSpec<T>` that gates the embed with the same `When` and `RequireAuthorization` overloads as [links and affordances](link-configs.md#conditions). When a gate fails the relation is omitted from `_embedded` entirely — a gated-out `EmbedMany` emits no array, not an empty one — and the child resolver is never invoked, so an expensive lookup only runs when the embed is actually included.
+
+```csharp
+public override void Configure(ILinkBuilder<Order> builder)
+{
+    builder.Self(o => LinkTarget.Route("orders.get", new { id = o.Id }));
+
+    // Only embed the customer when the caller is authorized to see it.
+    builder.Embed("customer", o => o.Customer).RequireAuthorization("CanSeeCustomers");
+
+    // Only embed line items for orders that have them.
+    builder.EmbedMany("items", o => o.Items).When(o => o.Items.Count > 0);
+}
+```
+
+Like link and affordance policies, an embed policy sees the caller and not the resource (evaluated once per request, memoized), and any policy name it references is validated at startup. See [RequireAuthorization](link-configs.md#requireauthorization) for the caller-vs-resource distinction and the note on output caching personalized responses.
+
 ## Multiple links per relation (link arrays)
 
 `Links(LinkRelation relation, Func<T, IEnumerable<LinkTarget>> targets)` emits several links that share one relation, as a HAL link array. Use it to point one relation at many destinations — for example one `item` link per child.

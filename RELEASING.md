@@ -27,7 +27,9 @@ Versioning and publishing are fully tag-driven. There is no version number in th
      `multiple.intoto.jsonl` / `multiple.sigstore.json` (see below).
 4. **Move the compatibility baseline forward.** After the packages are live, set
    `PackageValidationBaselineVersion` in `src/Directory.Build.props` to the version you just shipped, so
-   the next cycle's builds validate against it. Commit it as the first change of the new cycle.
+   the next cycle's builds validate against it. If last cycle carried a `CompatibilitySuppressions.xml` for
+   an intentional break, delete it now — the new baseline contains that API, so the entries are stale. Commit
+   both as the first change of the new cycle.
 
 Aside from that one tracked edit (the baseline bump), a release is just a tag — no version numbers in
 csproj, no manual GitHub release, no separate "bump version" commit.
@@ -37,8 +39,29 @@ csproj, no manual GitHub release, no separate "bump version" commit.
 `EnablePackageValidation` (in `src/Directory.Build.props`) makes every `dotnet pack` compare the packed
 assemblies against `PackageValidationBaselineVersion` (the last released version) downloaded from NuGet.org.
 A removed or re-signatured public member fails the pack instead of shipping a `MissingMethodException` to
-consumers. When you intend a breaking change, that is a major-version decision — bump the version deliberately
-rather than working around the check.
+consumers. Additive changes — new members, types, or overloads (including default interface methods) — pass;
+only breaks are flagged.
+
+**Shipping an intentional breaking change.** The baseline is a published NuGet package, so you cannot bump it
+to a version that does not exist yet. A `CompatibilitySuppressions.xml` bridges that gap: it records the
+breaks you accept so the pack goes green now, and is removed once the baseline catches up. The full cycle:
+
+1. Make the change, then generate the acknowledgement file and commit it alongside the change:
+
+   ```sh
+   dotnet pack Cairn.slnx -c Release /p:ApiCompatGenerateSuppressionFile=true
+   ```
+
+   This writes `src/Cairn.<Package>/CompatibilitySuppressions.xml` listing each accepted diff (`CP0002` for a
+   removed/changed member, `CP0006` for an added interface member). The suppression is scoped to exactly those
+   diffs — any *other* break still fails the pack. With it committed, both PR CI and the release pack are green.
+2. Release as usual (below). The release still validates against the old baseline, so the file must be present
+   for the packages to publish.
+3. In the step-4 baseline bump, the new baseline already contains the changed API, so the suppression entries
+   are now stale — delete the file(s) in that same commit.
+
+This is deliberate, not a silent workaround: the check still forces every break to be recorded, and pre-1.0
+(`0.x`) breaks are allowed under SemVer as long as they are intentional.
 
 ### Build provenance
 

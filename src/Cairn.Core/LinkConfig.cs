@@ -54,7 +54,8 @@ public interface ILinkBuilder<T>
     /// <c>[JsonIgnore]</c> (or the DTO doesn't expose it).
     /// </summary>
     /// <typeparam name="TChild">The embedded resource type.</typeparam>
-    void Embed<TChild>(LinkRelation relation, Func<T, TChild?> resource) where TChild : class;
+    /// <returns>A spec for gating the embed with <c>When</c>/<c>RequireAuthorization</c>.</returns>
+    IEmbedSpec<T> Embed<TChild>(LinkRelation relation, Func<T, TChild?> resource) where TChild : class;
 
     /// <summary>
     /// Embeds a collection of related resources under the given relation in HAL <c>_embedded</c> (always an
@@ -62,7 +63,8 @@ public interface ILinkBuilder<T>
     /// the resource appear twice unless the property is marked <c>[JsonIgnore]</c>.
     /// </summary>
     /// <typeparam name="TChild">The embedded item type.</typeparam>
-    void EmbedMany<TChild>(LinkRelation relation, Func<T, IEnumerable<TChild>?> resources);
+    /// <returns>A spec for gating the embed with <c>When</c>/<c>RequireAuthorization</c>.</returns>
+    IEmbedSpec<T> EmbedMany<TChild>(LinkRelation relation, Func<T, IEnumerable<TChild>?> resources);
 }
 
 /// <summary>Configures a single link.</summary>
@@ -206,4 +208,29 @@ public interface IAffordanceSpec<T>
 
     /// <summary>Includes the affordance only when the caller satisfies the default authorization policy (an authenticated user, by default).</summary>
     IAffordanceSpec<T> RequireAuthorization();
+}
+
+/// <summary>Configures a single embedded-resource declaration.</summary>
+/// <typeparam name="T">The resource type.</typeparam>
+public interface IEmbedSpec<T>
+{
+    /// <summary>Embeds only when the predicate holds for the resource. Skipping an embed omits its relation from <c>_embedded</c> entirely.</summary>
+    IEmbedSpec<T> When(Func<T, bool> condition);
+
+    /// <summary>Embeds only when the predicate holds, with access to the request's services.</summary>
+    IEmbedSpec<T> When(Func<T, LinkContext, bool> condition);
+
+    /// <summary>Embeds only when the async predicate holds, with access to the request's services.</summary>
+    IEmbedSpec<T> When(Func<T, LinkContext, ValueTask<bool>> condition);
+
+    /// <summary>
+    /// Embeds only when the caller satisfies the named authorization policy. The policy is evaluated against the
+    /// caller alone (memoized per request) — it cannot see the resource. For per-resource decisions, use
+    /// <see cref="When(Func{T, LinkContext, ValueTask{bool}})"/> and call
+    /// <c>IAuthorizationService.AuthorizeAsync(user, resource, policy)</c> yourself.
+    /// </summary>
+    IEmbedSpec<T> RequireAuthorization(string policy);
+
+    /// <summary>Embeds only when the caller satisfies the default authorization policy (an authenticated user, by default).</summary>
+    IEmbedSpec<T> RequireAuthorization();
 }
