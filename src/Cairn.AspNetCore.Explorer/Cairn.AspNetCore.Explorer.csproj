@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <Description>A browsable, self-documenting HAL Explorer for Cairn — middleware that serves an embedded, dependency-free UI for navigating a hypermedia API's links, embedded resources, and HAL-FORMS actions. Development-only by default.</Description>
+    <PackageTags>$(PackageTags);explorer;hal-browser;developer-tools</PackageTags>
+
+    <!-- No baseline package is published yet; enable package validation against a baseline after the first
+         release (bump PackageValidationBaselineVersion in src/Directory.Build.props once this ships). -->
+    <EnablePackageValidation>false</EnablePackageValidation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cairn.AspNetCore\Cairn.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <!-- The whole UI ships as a single self-contained HTML document embedded in the assembly, so the package
+       has no static-asset dependency and makes no external (CDN) request at runtime. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\explorer.html" LogicalName="Cairn.AspNetCore.Explorer.Assets.explorer.html" />
+  </ItemGroup>
+
+</Project>

@@ -36,6 +36,8 @@
   href: route-safety.md
 - name: OpenAPI &amp; Swagger
   href: openapi.md
+- name: Browsable API explorer
+  href: explorer.md
 - name: Testing
   href: testing.md
 - name: Packages
