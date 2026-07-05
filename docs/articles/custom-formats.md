@@ -48,6 +48,17 @@ From there the format is selected like any other — see [formats.md](formats.md
 
 `Properties` is read once at startup, so the property names are fixed for the formatter's lifetime; the value delegates run per resource. Registering two formatters with the same media type throws an `ArgumentException`.
 
+## What the extension point can (and can't) express
+
+An `IHypermediaFormatter` **injects sibling properties** next to the resource's own fields — the same mechanism the built-in formats use. That covers any format whose hypermedia sits *alongside* the data, but it deliberately cannot **restructure** the document: it can't move the resource's own fields under a wrapper key.
+
+That distinction matters for *enveloping* formats, which don't place their metadata beside the data — they wrap it:
+
+- **Siren** nests the resource's fields under `properties`, with `class`/`entities`/`actions`/`links` as siblings.
+- **JSON:API** nests them under `data.attributes`, and adds a required `type`/`id` identity plus `relationships`.
+
+So the `SirenFormatter` above is a **useful approximation, not wire-conformant Siren**: it emits `links` and `actions`, but the resource's fields stay at the top level instead of moving under `properties`. That is exactly what you want for a house format a client *you* control already understands — and it will *not* satisfy a generic Siren consumer. Fully conformant enveloping formats (Siren, JSON:API) are better served by a dedicated, format-first library than by this extension point; on .NET, [JsonApiDotNetCore](https://www.jsonapi.net) is the established home for JSON:API.
+
 ## Related
 
 - [Wire formats & negotiation](formats.md) — the built-in formats and resolution precedence.
