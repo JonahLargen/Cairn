@@ -24,8 +24,9 @@ For updates, evaluate the request's conditional headers against the resource's c
 
 ```csharp
 app.MapPut("/orders/{id:int}", (int id, OrderDto dto, HttpRequest req, IOrderRepo repo) =>
-    CairnPreconditions.Evaluate(req, repo.Get(id)?.Version, requireIfMatch: true)
-        ?? Results.NoContent());
+        CairnPreconditions.Evaluate(req, repo.Get(id)?.Version, requireIfMatch: true)
+            ?? Results.NoContent())
+   .WithPreconditions(requireIfMatch: true);
 ```
 
 Pass `null` for the tag when the resource has no current representation (it doesn't exist yet). `Evaluate` checks both write preconditions per RFC 9110 §13:
@@ -33,6 +34,8 @@ Pass `null` for the tag when the resource has no current representation (it does
 - **`If-Match`** — `null` when a listed tag strongly matches the current one (weak tags never match a write precondition), or `*` and the resource exists; otherwise **412 Precondition Failed** (as `application/problem+json`) — the client's copy is stale, or the resource is gone.
 - **`If-None-Match`** — **412** when a listed tag weakly matches, or `*` and the resource exists. This is what makes `PUT ... If-None-Match: *` the standard create-only request: it succeeds only when nothing is there to overwrite.
 - With no conditional header at all, `null` — unless `requireIfMatch: true`, in which case **428 Precondition Required** forces clients to send one. A create guarded by `If-None-Match: *` satisfies the requirement.
+
+`Evaluate` runs inside the handler, so the [OpenAPI integrations](openapi.md) can't see it on their own. `WithPreconditions(...)` — the chained call above — leaves endpoint metadata they pick up, documenting a **412 Precondition Failed** response (as `application/problem+json`, echoing the current validator in an `ETag` header) and, with `requireIfMatch: true`, a **428 Precondition Required** response. It is a documentation marker only, with no runtime effect: you still call `Evaluate` to enforce the preconditions — pass the same `requireIfMatch` to both so the document and the behavior agree.
 
 ## Answering OPTIONS: `UseCairnOptionsHandler`
 
