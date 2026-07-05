@@ -12,6 +12,7 @@ Cairn ships as a small set of focused NuGet packages. Most applications install 
 | `Cairn.Testing` | Test assertion helpers for links, affordances, templates, and snapshots — no third-party assertion library required. | In a test project asserting on hypermedia output. |
 | `Cairn.OpenApi` | Surfaces hypermedia links and affordances in the OpenAPI document via `Microsoft.AspNetCore.OpenApi` (.NET 10 only). | When you generate OpenAPI with `Microsoft.AspNetCore.OpenApi`. |
 | `Cairn.Swashbuckle` | Surfaces hypermedia links and affordances in the Swagger/OpenAPI document via schema and operation filters. Requires Swashbuckle.AspNetCore 10.0 or later. | When you generate OpenAPI with Swashbuckle (the choice on .NET 8/9). |
+| `Cairn.AspNetCore.Explorer` | A browsable HAL Explorer — middleware (`UseCairnExplorer()`) that serves an embedded, dependency-free UI for navigating the API's links, embedded resources, and HAL-FORMS actions. Development-only by default. | When you want an interactive console for exploring a Cairn API. |
 
 ## Cairn.Core
 
@@ -72,6 +73,20 @@ dotnet add package Cairn.Swashbuckle
 ```
 
 See [OpenAPI & Swagger](openapi.md).
+
+## Cairn.AspNetCore.Explorer
+
+A browsable HAL Explorer for the API. `UseCairnExplorer()` mounts an in-browser console (default `/explorer`) that navigates the live API by following links and running HAL-FORMS actions as forms. The UI is a single embedded HTML document with no external dependency, and it is served in the `Development` environment only unless you opt in.
+
+```bash
+dotnet add package Cairn.AspNetCore.Explorer
+```
+
+```csharp
+app.UseCairnExplorer();
+```
+
+See [Browsable API explorer](explorer.md).
 
 ## Targeting
 

@@ -328,6 +328,30 @@ public class CairnOpenApiTests
     }
 
     [Fact]
+    public async Task Precondition_endpoint_documents_the_412_and_428_responses()
+    {
+        using var document = await GetDocumentAsync();
+
+        // WithPreconditions(requireIfMatch: true) documents a 412 (application/problem+json, echoing the
+        // current validator in an ETag header) and a 428.
+        var required = PutOperation(document, "/precondition").GetProperty("responses");
+        var preconditionFailed = required.GetProperty("412");
+        Assert.True(preconditionFailed.GetProperty("content").TryGetProperty("application/problem+json", out _));
+        Assert.Equal("string", preconditionFailed.GetProperty("headers").GetProperty("ETag").GetProperty("schema").GetProperty("type").GetString());
+        Assert.True(required.TryGetProperty("428", out _));
+
+        // WithPreconditions() (no required conditional header) documents the 412 but not the 428.
+        var basic = PutOperation(document, "/precondition-basic").GetProperty("responses");
+        Assert.True(basic.TryGetProperty("412", out _));
+        Assert.False(basic.TryGetProperty("428", out _));
+
+        // An endpoint without WithPreconditions documents neither.
+        var plain = Operation(document, "/plain").GetProperty("responses");
+        Assert.False(plain.TryGetProperty("412", out _));
+        Assert.False(plain.TryGetProperty("428", out _));
+    }
+
+    [Fact]
     public async Task HypermediaProblem_in_a_result_union_documents_the_problem_json_response()
     {
         using var document = await GetDocumentAsync();
@@ -389,6 +413,10 @@ public class CairnOpenApiTests
         // WithETag/WithDeprecation are endpoint conventions independent of links, documented on the operation.
         app.MapGet("/etag/{id:int}", (int id) => TypedResults.Ok(new DocPlainNote($"n{id}"))).WithETag((DocPlainNote n) => n.Text);
         app.MapGet("/deprecated/{id:int}", (int id) => TypedResults.Ok(new DocPlainNote($"n{id}"))).WithDeprecation();
+        // WithPreconditions documents the 412 (and 428 when a conditional header is required) a write that
+        // calls CairnPreconditions.Evaluate returns.
+        app.MapPut("/precondition", () => TypedResults.NoContent()).WithPreconditions(requireIfMatch: true);
+        app.MapPut("/precondition-basic", () => TypedResults.NoContent()).WithPreconditions();
         // A HypermediaProblem in the result union documents the application/problem+json response.
         app.MapGet("/problem/{id:int}", Results<Ok<DocOrder>, HypermediaProblem> (int id)
             => id > 0 ? TypedResults.Ok(new DocOrder(id)) : new HypermediaProblem(404)).WithName("DocProblem");
@@ -401,6 +429,9 @@ public class CairnOpenApiTests
 
     private static JsonElement Operation(JsonDocument document, string path)
         => document.RootElement.GetProperty("paths").GetProperty(path).GetProperty("get");
+
+    private static JsonElement PutOperation(JsonDocument document, string path)
+        => document.RootElement.GetProperty("paths").GetProperty(path).GetProperty("put");
 
     private static JsonElement SchemaProperties(JsonDocument document, string schema)
         => document.RootElement

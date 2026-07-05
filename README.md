@@ -79,7 +79,7 @@ Most hypermedia libraries want to own your whole API: base classes on your DTOs,
 - **Opt-in per endpoint.** `.WithLinks()` on a minimal-API endpoint or `[CairnLinks]` on a controller action. Everything else is byte-for-byte unchanged.
 - **Affordances that authorize.** An action can be advertised only when the resource is in the right state *and* the caller satisfies an ASP.NET Core authorization policy — the same policy that guards the endpoint itself.
 - **One config, three formats.** Declare links once; serve Cairn's flat default shape, HAL, or HAL-FORMS via `Accept`-header negotiation, or plug in your own format.
-- **Tooling that keeps it honest.** Roslyn analyzers catch broken route names and unconfigured types at compile time, a source generator gives you a typed `Routes.*` catalog instead of magic strings, and dedicated packages cover OpenAPI/Swagger docs, test assertions, and a typed client.
+- **Tooling that keeps it honest.** Roslyn analyzers catch broken route names and unconfigured types at compile time, a source generator gives you a typed `Routes.*` catalog instead of magic strings, and dedicated packages cover OpenAPI/Swagger docs, a browsable HAL explorer, test assertions, and a typed client.
 
 ## Quick start
 
@@ -244,6 +244,16 @@ Link targets reference routes by name, and magic strings rot. `Cairn.AspNetCore`
 
 See [Route safety](https://jonahlargen.github.io/Cairn/articles/route-safety.html).
 
+### Browse your API
+
+`Cairn.AspNetCore.Explorer` serves a **HAL Explorer** — an in-browser console that navigates your live API the way a hypermedia client does: follow `_links`, drill into `_embedded`, and run HAL-FORMS actions as real forms.
+
+```csharp
+app.UseCairnExplorer();   // browse at /explorer — Development only by default
+```
+
+The UI is a single embedded HTML document (no CDN, no build step) and fetches on the same origin with the caller's credentials, so it shows exactly the links and actions the current user is authorized to see. See [Browsable API explorer](https://jonahlargen.github.io/Cairn/articles/explorer.html).
+
 ### Also in the box
 
 - **[Embedded resources](https://jonahlargen.github.io/Cairn/articles/embedded-resources.html)** — HAL `_embedded`, link arrays, and CURIEs.
@@ -277,6 +287,7 @@ One structural caveat: **streaming responses (`IAsyncEnumerable<T>`) don't get l
 | [`Cairn.Testing`](https://www.nuget.org/packages/Cairn.Testing) | Assertions and snapshots for links and affordances. | net8.0 · net9.0 · net10.0 |
 | [`Cairn.Swashbuckle`](https://www.nuget.org/packages/Cairn.Swashbuckle) | Hypermedia in Swashbuckle Swagger documents. | net8.0 · net9.0 · net10.0 |
 | [`Cairn.OpenApi`](https://www.nuget.org/packages/Cairn.OpenApi) | Hypermedia in `Microsoft.AspNetCore.OpenApi` documents. | net10.0 |
+| [`Cairn.AspNetCore.Explorer`](https://www.nuget.org/packages/Cairn.AspNetCore.Explorer) | A browsable HAL Explorer UI (`UseCairnExplorer()`), served from the app. Development-only by default. | net8.0 · net9.0 · net10.0 |
 
 `Cairn.OpenApi` builds on the schema-transformer pipeline that only exists in this shape on .NET 10; on .NET 8/9, use `Cairn.Swashbuckle` instead. Details in [Packages](https://jonahlargen.github.io/Cairn/articles/packages.html).
 

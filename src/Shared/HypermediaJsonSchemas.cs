@@ -234,10 +234,39 @@ internal static class HypermediaJsonSchemas
         }
     }
 
+    /// <summary>
+    /// Documents the write preconditions an endpoint with <c>WithPreconditions(...)</c> evaluates via
+    /// <c>CairnPreconditions.Evaluate</c>: a <c>412 Precondition Failed</c> response (RFC 9110 §13) — as
+    /// <c>application/problem+json</c>, echoing the resource's current validator in an <c>ETag</c> header the
+    /// client can retry with — and, when the endpoint requires a conditional header, a <c>428 Precondition
+    /// Required</c> response. Both are per-instance problem documents whose exact shape is unknowable at build
+    /// time, so each is described with the standard RFC 9457 members.
+    /// </summary>
+    public static void DocumentPreconditions(ApiDescription description, OpenApiOperation operation)
+    {
+        if (operation.Responses is not { } responses || !HasEndpointMetadata(description, PreconditionMetadataName))
+        {
+            return;
+        }
+
+        // An If-Match/If-None-Match condition that doesn't hold against the resource's current state fails with
+        // 412 (RFC 9110 §13.1). TryAdd so an endpoint that declared its own 412 (e.g. via ProducesProblem) wins.
+        responses.TryAdd("412", PreconditionFailedResponse());
+
+        // WithPreconditions(requireIfMatch: true) additionally makes a write carrying no conditional header fail
+        // with 428 (RFC 6585 §3), matching Evaluate's requireIfMatch path.
+        if (HasEndpointMetadata(description, PreconditionRequiredMetadataName))
+        {
+            responses.TryAdd("428", PreconditionRequiredResponse());
+        }
+    }
+
     // Matched by full name because this file is compiled into projects that don't reference Cairn.AspNetCore.
     private const string LinksMetadataInterface = "Cairn.AspNetCore.Internal.ICairnLinksMetadata";
     private const string DeprecationMetadataName = "Cairn.AspNetCore.Internal.DeprecationMetadata";
     private const string ETagMetadataName = "Cairn.AspNetCore.Internal.ETagMetadata";
+    private const string PreconditionMetadataName = "Cairn.AspNetCore.Internal.PreconditionMetadata";
+    private const string PreconditionRequiredMetadataName = "Cairn.AspNetCore.Internal.PreconditionRequiredMetadata";
 
     // Whether the endpoint opted into Cairn hypermedia. WithLinks() and [CairnLinks] both leave a metadata
     // object implementing ICairnLinksMetadata in the endpoint metadata; an endpoint that only returns a
@@ -449,6 +478,46 @@ internal static class HypermediaJsonSchemas
     {
         Description = "Entity tag of the returned representation (RFC 9110 §8.8.3). Echo it in If-None-Match to make a conditional request.",
         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+    };
+
+    // The media type CairnPreconditions.Evaluate writes a precondition failure as: an RFC 9457 problem document.
+    private const string ProblemJsonMediaType = "application/problem+json";
+
+    // The 412 Evaluate returns when a conditional header doesn't hold. It echoes the resource's current
+    // validator in an ETag header (present only when the resource exists) so the client can retry immediately,
+    // and carries a problem+json body.
+    private static OpenApiResponse PreconditionFailedResponse() => new()
+    {
+        Description = "Precondition Failed — an If-Match/If-None-Match condition did not hold against the resource's current state (RFC 9110 §13). When the resource exists, the ETag header carries its current validator to retry with.",
+        Headers = new Dictionary<string, IOpenApiHeader>(StringComparer.Ordinal) { ["ETag"] = ETagHeader() },
+        Content = ProblemJsonContent(),
+    };
+
+    // The 428 Evaluate returns when a write requiring a conditional header carries none.
+    private static OpenApiResponse PreconditionRequiredResponse() => new()
+    {
+        Description = "Precondition Required — the request carried no conditional header, but this endpoint requires an If-Match to guard against lost updates (RFC 6585 §3).",
+        Content = ProblemJsonContent(),
+    };
+
+    private static Dictionary<string, OpenApiMediaType> ProblemJsonContent() => new(StringComparer.Ordinal)
+    {
+        [ProblemJsonMediaType] = new OpenApiMediaType { Schema = ProblemDetailsSchema() },
+    };
+
+    // The standard RFC 9457 members a problem+json body carries; the concrete values are per-occurrence.
+    private static OpenApiSchema ProblemDetailsSchema() => new()
+    {
+        Type = JsonSchemaType.Object,
+        Description = "An RFC 9457 problem detail document.",
+        Properties = new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal)
+        {
+            ["type"] = new OpenApiSchema { Type = JsonSchemaType.String },
+            ["title"] = new OpenApiSchema { Type = JsonSchemaType.String },
+            ["status"] = new OpenApiSchema { Type = JsonSchemaType.Integer },
+            ["detail"] = new OpenApiSchema { Type = JsonSchemaType.String },
+            ["instance"] = new OpenApiSchema { Type = JsonSchemaType.String },
+        },
     };
 
     // A HAL-FORMS template field, derived from the affordance input type's data annotations.

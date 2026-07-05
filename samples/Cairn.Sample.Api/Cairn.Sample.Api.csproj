@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cairn.AspNetCore\Cairn.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\Cairn.AspNetCore.Explorer\Cairn.AspNetCore.Explorer.csproj" />
     <ProjectReference Include="..\..\src\Cairn.Analyzers\Cairn.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Cairn.SourceGenerators\Cairn.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
