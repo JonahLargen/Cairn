@@ -1,19 +1,21 @@
 # Cairn — Action List
 
 Originally reviewed at `main` = `aba3217` (released `v0.6.6` = `3b9e051`).
-**Status re-checked at `main` = `9b07b56` (PR #100)** — the tree is ~33 PRs past the
-original review. Each item is marked **done** / **partial** / **rejected**. Fix
-waves landed in PRs #70 (release blockers, polymorphic links), #71 (server
-hardening/caching/HAL-FORMS), #72 (client/analyzer/generator/testing), #92
-(trimming/AOT), **#98 (this review's own code-review findings)**, and **#99/#101
-(the two leftover nits)**, plus supply-chain PRs #73/#93/#95 and coverage PRs
-#94/#97/#98. **Everything on this list is now done or a deliberate rejection —
-only the Features / Ecosystem / v2 roadmap remains open.**
+**Status re-checked at `main` = `ea7a3d8`** — ~42 PRs past the original review, latest
+release `v0.9.0`. Each item is marked **done** / **partial** / **rejected**. Waves:
+#70 (release blockers, polymorphic links), #71 (server hardening/caching/HAL-FORMS),
+#72 (client/analyzer/generator/testing), #92 (trimming/AOT), **#98 (this review's own
+code-review findings)**, **#99/#101 (the two leftover nits)**, and **#102–#110 (the
+entire Features backlog)**, plus supply-chain PRs #73/#93/#95 and coverage PRs
+#94/#97/#98. **The whole original list plus all nine Features are now done — the only
+open work is the Ecosystem projects and the v2 breaking-window cleanup.**
 
-> Also shipped since the review, *not* from this list: **#100** added client-opt-in
-> hypermedia via `HypermediaFormat.None` (a plain `application/json` caller gets the
-> bare resource; links come only when negotiated) plus an `application/vnd.cairn+json`
-> media type for the flat shape and a `WithHypermediaFormat(...)` per-endpoint override.
+> Also shipped, *not* from this list: **#100** added client-opt-in hypermedia via
+> `HypermediaFormat.None` (plain `application/json` → bare resource) + an
+> `application/vnd.cairn+json` media type and a `WithHypermediaFormat(...)` override.
+> **#104/#109** introduced intentional binary breaks (Embed/EmbedMany return types,
+> auth overloads) staged in `src/Cairn.Core/CompatibilitySuppressions.xml` — retire
+> them and bump `PackageValidationBaselineVersion` on the next release.
 
 ## Before the next release
 
@@ -151,30 +153,43 @@ only the Features / Ecosystem / v2 roadmap remains open.**
 
 ## Features
 
-*None of the enhancement items below have been implemented — this is the remaining
-value-add backlog. (`V5` of the AOT work is the one exception, marked in v2.)*
+**The entire Features backlog shipped in PRs #102–#110** (landed on `main` above
+v0.9.0). All nine below are done.
 
-- [ ] **Open** — Client pagination iterator: `IAsyncEnumerable<Resource<TItem>>`
-  walking `next` to exhaustion, with page/item caps. (Only manual single-hop
-  `FollowAsync("next")` exists today, `CollectionResource.cs:55-78`.)
-- [ ] **Open** — Resource-based authorization overload evaluating
-  `AuthorizeAsync(user, resource, policy)` (needs the v2 `ILinkAuthorizer` seam).
-- [ ] **Open** — `When()`/`RequireAuthorization()` on `Embed`/`EmbedMany` (they
-  currently return `void`, `LinkConfig.cs:57,65`).
-- [ ] **Open** — Per-request base-URI resolver (`Func<HttpContext, Uri>`) for
-  multi-tenant hosts; also apply `TransformUrl` to pagination links and explicit
-  hrefs (today it touches only route links).
-- [ ] **Open** — Surface `Location` and `ETag` on `ClientResult` (`ClientResult.cs`).
-- [ ] **Open** — HAL-FORMS `options.link` (options by reference) on the server (the
-  client can already parse it).
-- [ ] **Open** — Emit the HTTP `Link` header (RFC 8288) for body links (only the
-  deprecation link is emitted today).
-- [ ] **Open** — OpenAPI enhancements (all unbuilt): set `operation.Deprecated`;
-  `ETagMetadata` on `WithETag`; `IEndpointMetadataProvider` on `HypermediaProblem`;
-  typed `_embedded` schemas; per-format schema variants.
-- [ ] **Open** — Cairn.Testing assertions: `NotHaveTemplate`, embedded-count,
-  `.And`-chain continuity from embedded assertions, status/content-type/ETag helpers,
-  `WithContentType` on affordance assertions.
+- [x] **Done** — Client pagination iterator: `CollectionResource.EnumerateItemsAsync`
+  yields an `IAsyncEnumerable<Resource<TItem>>` walking the pagination relation to
+  exhaustion, with exact `maxItems`/`maxPages` caps, lazy per-page fetch, templated-
+  `next` expansion, and eager argument validation. Trim/AOT-clean. (#102)
+- [x] **Done** — Resource-based authorization: `RequireAuthorization(policy, o => resource)`
+  on `ILinkSpec<T>`/`IAffordanceSpec<T>`, evaluated via
+  `IAuthorizationService.AuthorizeAsync(user, resource, policy)` and memoized per
+  (resource, policy). Adds a non-breaking `ILinkAuthorizer` resource seam (see V1). (#109)
+- [x] **Done** — `When()`/`RequireAuthorization()` on `Embed`/`EmbedMany`: both now
+  return `IEmbedSpec<T>` (deriving `HypermediaSpec<T>`); a gated-out embed omits its
+  relation from `_embedded`. Intentional binary break, recorded in
+  `CompatibilitySuppressions.xml`. (#104)
+- [x] **Done** — Per-request base-URI resolver `CairnOptions.ResolvePublicBaseUri`
+  (`Func<HttpContext, Uri?>`) for multi-tenant hosts, and `TransformUrl` now post-
+  processes **every** emitted URL — explicit `LinkTarget.Uri` hrefs and pagination
+  links included, not just route links. (#108)
+- [x] **Done** — `Location` and `ETag` surfaced on `ClientResult` and `ClientResult<T>`
+  (`ClientResult.cs:41,50,…`), populated from response headers on success. (#103)
+- [x] **Done** — HAL-FORMS `options.link` emitted server-side via the new
+  `[HalFormsOptionsLink]` attribute (`Cairn.Core`), taking precedence over inline
+  enum/bool derivation per the HAL-FORMS inline-XOR-link rule. (#106)
+- [x] **Done** — HTTP `Link` header (RFC 8288) for the context resource's body links,
+  opt-in via `CairnOptions.EmitLinkHeader`; templated/curie links and header-unsafe
+  hrefs are skipped, values escaped against injection. (#105)
+- [x] **Done** — OpenAPI enhancements: per-format schema variants (`allOf` layering
+  `_actions`/`_templates`), typed `_embedded` schemas, `operation.deprecated`,
+  `ETagMetadata` on `WithETag` (ETag header + 304), and `IEndpointMetadataProvider` on
+  `HypermediaProblem` (problem+json response). (#110)
+  - [ ] Not in #110: documenting the `Deprecation`/`Sunset` **response headers** (only
+    the `operation.deprecated` flag is set) and the `412` response for `WithETag`.
+- [x] **Done** — Cairn.Testing assertions: `NotHaveTemplate`, `HaveEmbedded(rel,count)`
+  /`NotHaveEmbedded`, `.And` continuity across the `_embedded` boundary,
+  `HttpResponseMessage.Should()` transport helpers (`HaveStatusCode`/`HaveContentType`
+  /`HaveETag`), and `WithContentType` on affordance assertions. (#107)
 
 ## Ecosystem
 
@@ -191,12 +206,21 @@ value-add backlog. (`V5` of the AOT work is the one exception, marked in v2.)*
 
 ## v2 (breaking window)
 
-- [ ] **Open** — `ILinkAuthorizer`: add `ClaimsPrincipal` and a resource parameter.
-- [ ] **Open** — `ILinkUrlResolver`: make async and pass request context.
+- [ ] **Partial** — `ILinkAuthorizer` gained the resource parameter as a **non-breaking
+  default-interface method** `AuthorizeAsync(object? resource, string policy, …)` in
+  #109 (delegates to the caller-only overload). The clean breaking version still
+  remains for the v2 window:
+  - [ ] Fold the resource overload into the primary signature (drop the default-method
+    seam) and add explicit `ClaimsPrincipal` to the interface.
+- [ ] **Open** — `ILinkUrlResolver`: make async and pass request context (`Resolve` is
+  still sync, `LinkContext.cs:17`). Note: the multi-tenant per-request motivation was
+  delivered non-breakingly via `ResolvePublicBaseUri` (F4/#108); this item is now just
+  the interface cleanup.
 - [ ] **Open** — `IHypermediaFormatter`: allow document reshaping; decouple
-  `CairnOptions.DefaultFormat` from the `HypermediaFormat` enum.
+  `CairnOptions.DefaultFormat` from the `HypermediaFormat` enum. (Note: #100 added a
+  `None` member to that enum, so the coupling is slightly deeper now.)
 - [ ] **Open** — Default `UrlStyle` to `PathRelative` (still `Absolute`,
-  `CairnOptions.cs:42`).
+  `CairnOptions.cs:47`).
 - [x] **Done** — Trimming/AOT posture declared and annotated for Cairn.Core and
   Cairn.Client (`IsAotCompatible=true` + attributes, `docs/articles/aot.md`). (#92)
 
@@ -262,25 +286,25 @@ Kept here as a record — every box below is checked.
 
 ## Suggested next steps
 
-The pre-release list, the code-review appendix, **and** both leftover nits are now
-fully **cleared** (#98 landed every correctness finding with tests; #99/#101 closed
-the two nits). There is no known correctness debt left. What remains is purely the
-roadmap.
+The original list, the code-review appendix, both leftover nits, **and the entire
+Features backlog (#102–#110)** are now done. The only open work is the Ecosystem
+projects and the v2 breaking-window cleanup — neither blocks a release.
 
-1. **Cut v1.0.0 — this is the move.** Nothing blocks a tag: the package is
-   AOT-annotated, coverage-gated at 95% (line + branch + a blocking patch gate),
-   supply-chain hardened, and docs are complete. If you want a shakedown first, the
-   only pre-tag call worth making is whether to flip `DefaultFormat` to the new
-   `HypermediaFormat.None` (opt-in links, #100) as the v1 default — a behavior choice,
-   not a bug.
-2. **Pick 2–3 post-v1 features** by leverage: `IAsyncEnumerable` pagination iterator
-   (F1) and `Location`/`ETag` on `ClientResult` (F5) are the most-requested client
-   ergonomics; the RFC 8288 `Link` header (F7) is cheap and standards-aligned; the
-   OpenAPI `operation.Deprecated`/ETag metadata (F8) improves contract fidelity.
-3. **Plan the v2 breaking window as one major bump.** V1–V4 (`ILinkAuthorizer` +
-   resource, async `ILinkUrlResolver`, formatter reshaping, default `UrlStyle` →
-   `PathRelative`) are all breaking and interlock with features F2/F4 — do them
-   together so there's a single migration.
-4. **Ecosystem is adoption-driven, not correctness-driven.** If growth is the goal,
-   HAL Explorer middleware (E1) + a `dotnet new cairn-api` template (E2) are the
-   highest-impact; Siren (E3) and `Cairn.Mcp` (E8) are differentiators but larger bets.
+1. **Cut the 1.0 release — this is the move.** No correctness or feature debt remains:
+   AOT-annotated, 95% line+branch+patch coverage, supply-chain hardened, docs complete.
+   One concrete release chore first: #104/#109 staged intentional binary breaks in
+   `src/Cairn.Core/CompatibilitySuppressions.xml` — after tagging, bump
+   `PackageValidationBaselineVersion` to the new version and delete the suppressions so
+   the baseline tracks the real surface again (procedure is in RELEASING.md).
+2. **Two small slivers, whenever convenient (not blockers):** document the
+   `Deprecation`/`Sunset` response headers and the `412` in OpenAPI (the rest of F8
+   shipped in #110); fold the `ILinkAuthorizer` resource seam into a clean signature
+   during the v2 window.
+3. **Run the v2 breaking window as one major bump.** V1 is half-done (the resource
+   parameter exists as a non-breaking default-interface method); V2–V4 (async
+   `ILinkUrlResolver`, `IHypermediaFormatter` reshaping + `DefaultFormat` decoupling,
+   default `UrlStyle` → `PathRelative`) are still breaking — do them together for a
+   single migration.
+4. **Ecosystem is now the main frontier**, and it's adoption-driven: HAL Explorer
+   middleware (E1) + a `dotnet new cairn-api` template (E2) are the highest-leverage for
+   growth; Siren (E3) and `Cairn.Mcp` (E8) are bigger differentiator bets.
