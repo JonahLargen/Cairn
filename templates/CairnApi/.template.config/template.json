@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Jonah Largen",
+  "classifications": [ "Web", "WebAPI", "API", "Hypermedia", "HATEOAS" ],
+  "identity": "Cairn.Api.CSharp",
+  "name": "Cairn Hypermedia API",
+  "shortName": "cairn-api",
+  "description": "An ASP.NET Core minimal API wired for Cairn hypermedia (HATEOAS): clean DTOs, separate link configurations, a state-conditional affordance, compile-checked routes, and an optional browsable HAL explorer.",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "CairnApi",
+  "preferNameDirectory": true,
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "description": "The target framework for the project.",
+      "datatype": "choice",
+      "choices": [
+        { "choice": "net10.0", "description": "Target .NET 10.0" },
+        { "choice": "net9.0", "description": "Target .NET 9.0" },
+        { "choice": "net8.0", "description": "Target .NET 8.0 (LTS)" }
+      ],
+      "replaces": "net10.0",
+      "defaultValue": "net10.0"
+    },
+    "explorer": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "true",
+      "description": "Include the browsable HAL Explorer (Cairn.AspNetCore.Explorer), mounted at /explorer in Development."
+    },
+    "openapi": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "false",
+      "description": "Document the hypermedia in Swagger via Cairn.Swashbuckle and serve the Swagger UI in Development."
+    }
+  },
+  "primaryOutputs": [
+    { "path": "CairnApi.csproj" }
+  ],
+  "postActions": [
+    {
+      "id": "restore",
+      "description": "Restore NuGet packages required by this project.",
+      "manualInstructions": [ { "text": "Run 'dotnet restore'" } ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
+    }
+  ]
+}

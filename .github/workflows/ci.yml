@@ -80,6 +80,12 @@ jobs:
           name: nuget-packages
           path: artifacts/*nupkg
 
+      # Prove the `dotnet new cairn-api` template still scaffolds a project that compiles against the
+      # packages just built (in artifacts/). Guards against the template rotting as the library APIs
+      # change. Runs after Pack so artifacts/ holds both the template and the libraries it references.
+      - name: Test cairn-api template
+        run: ./eng/test-template.sh artifacts
+
   docs:
     name: Docs build
     runs-on: ubuntu-latest

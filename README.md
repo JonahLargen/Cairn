@@ -83,7 +83,14 @@ Most hypermedia libraries want to own your whole API: base classes on your DTOs,
 
 ## Quick start
 
-Install the ASP.NET Core package:
+Starting a new API? Scaffold one already wired for hypermedia:
+
+```bash
+dotnet new install Cairn.Templates
+dotnet new cairn-api -o Orders.Api
+```
+
+That gives you the wiring below already in place — see [Project template](https://jonahlargen.github.io/Cairn/articles/template.html). To add Cairn to an existing API, install the ASP.NET Core package:
 
 ```bash
 dotnet add package Cairn.AspNetCore
@@ -288,6 +295,7 @@ One structural caveat: **streaming responses (`IAsyncEnumerable<T>`) don't get l
 | [`Cairn.Swashbuckle`](https://www.nuget.org/packages/Cairn.Swashbuckle) | Hypermedia in Swashbuckle Swagger documents. | net8.0 · net9.0 · net10.0 |
 | [`Cairn.OpenApi`](https://www.nuget.org/packages/Cairn.OpenApi) | Hypermedia in `Microsoft.AspNetCore.OpenApi` documents. | net10.0 |
 | [`Cairn.AspNetCore.Explorer`](https://www.nuget.org/packages/Cairn.AspNetCore.Explorer) | A browsable HAL Explorer UI (`UseCairnExplorer()`), served from the app. Development-only by default. | net8.0 · net9.0 · net10.0 |
+| [`Cairn.Templates`](https://www.nuget.org/packages/Cairn.Templates) | `dotnet new cairn-api` — scaffolds a minimal API wired for hypermedia. Installed with `dotnet new install`. | scaffolds net8.0 · net9.0 · net10.0 |
 
 `Cairn.OpenApi` builds on the schema-transformer pipeline that only exists in this shape on .NET 10; on .NET 8/9, use `Cairn.Swashbuckle` instead. Details in [Packages](https://jonahlargen.github.io/Cairn/articles/packages.html).
 
