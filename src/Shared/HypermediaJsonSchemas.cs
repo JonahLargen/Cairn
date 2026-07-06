@@ -189,15 +189,55 @@ internal static class HypermediaJsonSchemas
     }
 
     /// <summary>
-    /// Marks <paramref name="operation"/> deprecated when its endpoint declared deprecation via
-    /// <c>WithDeprecation(...)</c> — the same signal the runtime uses to emit the <c>Deprecation</c> header —
-    /// so the OpenAPI document carries <c>deprecated: true</c> and tooling flags the endpoint.
+    /// Documents an endpoint that declared deprecation via <c>WithDeprecation(...)</c>: sets
+    /// <c>deprecated: true</c> on <paramref name="operation"/> so tooling flags it, and — mirroring the headers
+    /// <c>CairnHeadersMiddleware</c> emits — documents a <c>Deprecation</c> response header (RFC 9745) on every
+    /// response, a <c>Sunset</c> header (RFC 8594) when a sunset date was supplied, and a <c>Link</c> header with
+    /// <c>rel="deprecation"</c> when a documentation URL was supplied. The headers land on every response because
+    /// the middleware emits them regardless of status code, so a client sees the deprecation on any outcome —
+    /// including the conditional/error responses (<c>304</c>/<c>412</c>/<c>428</c>) the other transformers add,
+    /// which is why this runs after them.
     /// </summary>
-    public static void MarkDeprecated(ApiDescription description, OpenApiOperation operation)
+    public static void DocumentDeprecation(ApiDescription description, OpenApiOperation operation)
     {
-        if (HasEndpointMetadata(description, DeprecationMetadataName))
+        if (GetEndpointMetadata(description, DeprecationMetadataName) is not { } metadata)
         {
-            operation.Deprecated = true;
+            return;
+        }
+
+        operation.Deprecated = true;
+
+        if (operation.Responses is not { } responses)
+        {
+            return;
+        }
+
+        // Sunset and Link are optional (WithDeprecation emits them only when a sunset date / documentation URL
+        // was supplied), so their presence is read off the precomputed metadata rather than assumed.
+        var sunset = ReadStringMember(metadata, "Sunset");
+        var link = ReadStringMember(metadata, "Link");
+
+        foreach (var (_, response) in responses)
+        {
+            // The middleware sets the deprecation headers in Response.OnStarting regardless of status, so each
+            // concrete response documents them; a reference response is not ours to mutate. TryAdd so an
+            // endpoint that declared its own header wins.
+            if (response is not OpenApiResponse concrete)
+            {
+                continue;
+            }
+
+            concrete.Headers ??= new Dictionary<string, IOpenApiHeader>(StringComparer.Ordinal);
+            concrete.Headers.TryAdd("Deprecation", DeprecationHeader());
+            if (sunset is not null)
+            {
+                concrete.Headers.TryAdd("Sunset", SunsetHeader());
+            }
+
+            if (link is not null)
+            {
+                concrete.Headers.TryAdd("Link", DeprecationLinkHeader());
+            }
         }
     }
 
@@ -301,21 +341,30 @@ internal static class HypermediaJsonSchemas
         return false;
     }
 
-    // Whether the endpoint carries a Cairn metadata object of the given type, matched by full name because
-    // this file is compiled into projects that don't reference Cairn.AspNetCore. WithDeprecation and WithETag
-    // each leave such an object so the document generators can describe the header behavior they configure.
+    // Whether the endpoint carries a Cairn metadata object of the given type. WithDeprecation and WithETag each
+    // leave such an object so the document generators can describe the header behavior they configure.
     private static bool HasEndpointMetadata(ApiDescription description, string metadataTypeFullName)
+        => GetEndpointMetadata(description, metadataTypeFullName) is not null;
+
+    // The Cairn metadata object of the given type carried by the endpoint, or null. Matched by full name
+    // because this file is compiled into projects that don't reference Cairn.AspNetCore.
+    private static object? GetEndpointMetadata(ApiDescription description, string metadataTypeFullName)
     {
         foreach (var item in description.ActionDescriptor.EndpointMetadata)
         {
             if (item.GetType().FullName == metadataTypeFullName)
             {
-                return true;
+                return item;
             }
         }
 
-        return false;
+        return null;
     }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
+        Justification = "Reads WithDeprecation's precomputed Sunset/Link header values off the endpoint's deprecation metadata for OpenAPI document generation. A property trimmed off the metadata type could not have been emitted as a header at runtime either, so reading it as absent (null) is consistent with actual behavior.")]
+    private static string? ReadStringMember(object metadata, string propertyName)
+        => metadata.GetType().GetProperty(propertyName)?.GetValue(metadata) as string;
 
     // A 2xx status key; the entity tag applies to a returned representation, so only success responses carry
     // the ETag header. Non-numeric keys ("default") and error statuses are skipped.
@@ -477,6 +526,29 @@ internal static class HypermediaJsonSchemas
     private static OpenApiHeader ETagHeader() => new()
     {
         Description = "Entity tag of the returned representation (RFC 9110 §8.8.3). Echo it in If-None-Match to make a conditional request.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+    };
+
+    // The Deprecation response header WithDeprecation emits (RFC 9745): a structured-field Date — @ followed by
+    // the seconds-since-epoch at which the endpoint became deprecated.
+    private static OpenApiHeader DeprecationHeader() => new()
+    {
+        Description = "Marks this endpoint as deprecated (RFC 9745): a structured-field Date — an '@' followed by the number of seconds since the Unix epoch at which the endpoint became deprecated.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+    };
+
+    // The Sunset response header WithDeprecation emits when a sunset date is configured (RFC 8594).
+    private static OpenApiHeader SunsetHeader() => new()
+    {
+        Description = "The date after which this endpoint is expected to become unresponsive (RFC 8594), as an HTTP-date.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+    };
+
+    // The Link response header WithDeprecation emits when a documentation URL is configured: a web link
+    // (RFC 8288) with rel="deprecation".
+    private static OpenApiHeader DeprecationLinkHeader() => new()
+    {
+        Description = "A Link header (RFC 8288) with rel=\"deprecation\" pointing at documentation for this endpoint's deprecation.",
         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
     };
 
