@@ -11,9 +11,15 @@
 set -euo pipefail
 
 FEED="$(cd "${1:-artifacts}" && pwd)"
-TEMPLATE_NUPKG="$(ls "$FEED"/Cairn.Templates.*.nupkg | head -1)"
 
-if [ -z "${TEMPLATE_NUPKG:-}" ]; then
+# nullglob so an unmatched pattern expands to nothing (not the literal glob), which keeps the
+# guard below reachable under `set -euo pipefail` — `ls ... | head` would abort the script on the
+# failed glob before the guard, or SIGPIPE-fail if the feed held more than one match.
+shopt -s nullglob
+template_nupkgs=("$FEED"/Cairn.Templates.*.nupkg)
+TEMPLATE_NUPKG="${template_nupkgs[0]:-}"
+
+if [ -z "$TEMPLATE_NUPKG" ]; then
   echo "No Cairn.Templates.*.nupkg found in $FEED" >&2
   exit 1
 fi
