@@ -300,14 +300,37 @@ public class CairnOpenApiTests
     }
 
     [Fact]
-    public async Task Deprecated_endpoint_is_marked_deprecated_in_the_document()
+    public async Task Deprecated_endpoint_is_marked_deprecated_and_documents_the_deprecation_header()
     {
         using var document = await GetDocumentAsync();
 
-        // WithDeprecation sets deprecated: true; an endpoint without it carries no (or false) flag.
-        Assert.True(Operation(document, "/deprecated/{id}").GetProperty("deprecated").GetBoolean());
+        // WithDeprecation sets deprecated: true and documents the Deprecation response header (RFC 9745). With
+        // no sunset/link configured, only that header is documented.
+        var deprecated = Operation(document, "/deprecated/{id}");
+        Assert.True(deprecated.GetProperty("deprecated").GetBoolean());
+        var headers = deprecated.GetProperty("responses").GetProperty("200").GetProperty("headers");
+        Assert.Equal("string", headers.GetProperty("Deprecation").GetProperty("schema").GetProperty("type").GetString());
+        Assert.False(headers.TryGetProperty("Sunset", out _));
+        Assert.False(headers.TryGetProperty("Link", out _));
+
+        // An endpoint without WithDeprecation carries no (or false) flag and no Deprecation header.
         var plain = Operation(document, "/plain");
         Assert.False(plain.TryGetProperty("deprecated", out var flag) && flag.GetBoolean());
+        Assert.False(plain.GetProperty("responses").GetProperty("200").TryGetProperty("headers", out var plainHeaders)
+            && plainHeaders.TryGetProperty("Deprecation", out _));
+    }
+
+    [Fact]
+    public async Task Deprecated_endpoint_with_sunset_and_link_documents_all_three_headers()
+    {
+        using var document = await GetDocumentAsync();
+        var headers = Operation(document, "/deprecated-sunset/{id}").GetProperty("responses").GetProperty("200").GetProperty("headers");
+
+        // WithDeprecation(sunset:, link:) additionally documents the Sunset (RFC 8594) and rel="deprecation"
+        // Link (RFC 8288) headers the middleware emits when those are configured.
+        Assert.Equal("string", headers.GetProperty("Deprecation").GetProperty("schema").GetProperty("type").GetString());
+        Assert.Equal("string", headers.GetProperty("Sunset").GetProperty("schema").GetProperty("type").GetString());
+        Assert.Equal("string", headers.GetProperty("Link").GetProperty("schema").GetProperty("type").GetString());
     }
 
     [Fact]
@@ -413,6 +436,10 @@ public class CairnOpenApiTests
         // WithETag/WithDeprecation are endpoint conventions independent of links, documented on the operation.
         app.MapGet("/etag/{id:int}", (int id) => TypedResults.Ok(new DocPlainNote($"n{id}"))).WithETag((DocPlainNote n) => n.Text);
         app.MapGet("/deprecated/{id:int}", (int id) => TypedResults.Ok(new DocPlainNote($"n{id}"))).WithDeprecation();
+        // WithDeprecation with a sunset date and documentation link additionally documents the Sunset and
+        // rel="deprecation" Link response headers.
+        app.MapGet("/deprecated-sunset/{id:int}", (int id) => TypedResults.Ok(new DocPlainNote($"n{id}")))
+            .WithDeprecation(sunset: new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero), link: "https://example.com/deprecations/orders");
         // WithPreconditions documents the 412 (and 428 when a conditional header is required) a write that
         // calls CairnPreconditions.Evaluate returns.
         app.MapPut("/precondition", () => TypedResults.NoContent()).WithPreconditions(requireIfMatch: true);
