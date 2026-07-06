@@ -17,6 +17,7 @@ FEED="$(cd "${1:-artifacts}" && pwd)"
 # failed glob before the guard, or SIGPIPE-fail if the feed held more than one match.
 shopt -s nullglob
 template_nupkgs=("$FEED"/Cairn.Templates.*.nupkg)
+shopt -u nullglob   # scope nullglob to the glob above; leave later expansions (e.g. $args) unaffected
 TEMPLATE_NUPKG="${template_nupkgs[0]:-}"
 
 if [ -z "$TEMPLATE_NUPKG" ]; then
