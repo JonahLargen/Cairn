@@ -5,6 +5,9 @@
   <Folder Name="/samples/">
     <Project Path="samples/Cairn.Sample.Api/Cairn.Sample.Api.csproj" />
   </Folder>
+  <Folder Name="/templates/">
+    <Project Path="templates/Cairn.Templates.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Cairn.Analyzers/Cairn.Analyzers.csproj" />
     <Project Path="src/Cairn.AspNetCore/Cairn.AspNetCore.csproj" />

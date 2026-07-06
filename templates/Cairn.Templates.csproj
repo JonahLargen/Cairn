@@ -1,0 +1,83 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A `dotnet new` template pack. It ships template *content* as package files (under content/),
+       not a compiled assembly, so the compiler runs over nothing and there is no build output. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+
+    <PackageType>Template</PackageType>
+    <PackageId>Cairn.Templates</PackageId>
+    <Title>Cairn project templates</Title>
+    <Description>`dotnet new` templates for Cairn. Scaffold an ASP.NET Core minimal API wired for hypermedia (HATEOAS) with `dotnet new cairn-api`.</Description>
+    <PackageTags>dotnet-new;templates;template;hateoas;hypermedia;rest;api;hal;aspnetcore;cairn</PackageTags>
+
+    <IsPackable>true</IsPackable>
+    <IncludeContentInPack>true</IncludeContentInPack>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <ContentTargetFolders>content</ContentTargetFolders>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+
+    <!-- A content-only package legitimately has no lib/ assembly and no dependencies. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+
+    <!-- Tag-driven versioning via MinVer, identical to the libraries, so the template pack and the
+         Cairn packages a generated project references always share a version (see InjectCairnVersion). -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
+
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/JonahLargen/Cairn</PackageProjectUrl>
+
+    <!-- The placeholder version stamped into the scaffolded project's package references; the
+         InjectCairnVersion target rewrites it to this pack's own version before packing. -->
+    <CairnVersionToken>0.0.0-CAIRN-VERSION</CairnVersionToken>
+    <!-- Staged under obj/ (BaseIntermediateOutputPath is set in the SDK props, so it is available
+         this early; IntermediateOutputPath is not — it is computed later, in the SDK targets). -->
+    <StagedTemplateCsproj>$(BaseIntermediateOutputPath)cairn-template/CairnApi.csproj</StagedTemplateCsproj>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Nothing to compile; this project only packages template content. -->
+    <Compile Remove="**\*" />
+
+    <!-- The template content. The scaffolded .csproj is excluded here and re-added by
+         InjectCairnVersion after its placeholder version is rewritten. -->
+    <Content Include="CairnApi\**\*"
+             Exclude="CairnApi\**\bin\**;CairnApi\**\obj\**;CairnApi\CairnApi.csproj" />
+    <Content Include="$(StagedTemplateCsproj)" PackagePath="content/CairnApi/CairnApi.csproj" Pack="true" />
+
+    <!-- Package-level (not template) metadata files. -->
+    <None Include="$(MSBuildThisFileDirectory)../icon.png" Pack="true" PackagePath="\" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)../icon.png')" />
+    <None Include="README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <!-- Rewrite the placeholder version in the scaffolded project's .csproj to this pack's version, so a
+       freshly created project references the matching Cairn packages. Runs before pack collects files
+       (and before build), with the version MinVer computed. -->
+  <Target Name="InjectCairnVersion"
+          DependsOnTargets="MinVer"
+          BeforeTargets="_GetPackageFiles;BeforeBuild;Build">
+    <PropertyGroup>
+      <_TemplateCsprojSource>$(MSBuildProjectDirectory)/CairnApi/CairnApi.csproj</_TemplateCsprojSource>
+      <_TemplateCsprojText>$([System.IO.File]::ReadAllText('$(_TemplateCsprojSource)'))</_TemplateCsprojText>
+      <_TemplateCsprojText>$(_TemplateCsprojText.Replace('$(CairnVersionToken)', '$(PackageVersion)'))</_TemplateCsprojText>
+    </PropertyGroup>
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(StagedTemplateCsproj)'))" />
+    <WriteLinesToFile File="$(StagedTemplateCsproj)"
+                      Lines="$(_TemplateCsprojText)"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true" />
+  </Target>
+
+</Project>

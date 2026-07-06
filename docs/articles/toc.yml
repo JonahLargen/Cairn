@@ -2,6 +2,8 @@
   href: hateoas.md
 - name: Getting started
   href: getting-started.md
+- name: Project template
+  href: template.md
 - name: Link configurations
   href: link-configs.md
 - name: Wire formats &amp; negotiation

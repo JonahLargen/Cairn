@@ -1,0 +1,11 @@
+## Build output
+bin/
+obj/
+
+## Rider / Visual Studio
+.idea/
+.vs/
+*.user
+
+## Local settings
+appsettings.*.local.json

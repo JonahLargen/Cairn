@@ -13,6 +13,7 @@ Cairn ships as a small set of focused NuGet packages. Most applications install 
 | `Cairn.OpenApi` | Surfaces hypermedia links and affordances in the OpenAPI document via `Microsoft.AspNetCore.OpenApi` (.NET 10 only). | When you generate OpenAPI with `Microsoft.AspNetCore.OpenApi`. |
 | `Cairn.Swashbuckle` | Surfaces hypermedia links and affordances in the Swagger/OpenAPI document via schema and operation filters. Requires Swashbuckle.AspNetCore 10.0 or later. | When you generate OpenAPI with Swashbuckle (the choice on .NET 8/9). |
 | `Cairn.AspNetCore.Explorer` | A browsable HAL Explorer — middleware (`UseCairnExplorer()`) that serves an embedded, dependency-free UI for navigating the API's links, embedded resources, and HAL-FORMS actions. Development-only by default. | When you want an interactive console for exploring a Cairn API. |
+| `Cairn.Templates` | A `dotnet new` template pack. `dotnet new cairn-api` scaffolds a minimal API already wired for hypermedia. | When starting a new Cairn API. Installed with `dotnet new install`, not `dotnet add package`. |
 
 ## Cairn.Core
 
@@ -87,6 +88,17 @@ app.UseCairnExplorer();
 ```
 
 See [Browsable API explorer](explorer.md).
+
+## Cairn.Templates
+
+A `dotnet new` template pack. Unlike the other packages you install it into the template engine, not into a project:
+
+```bash
+dotnet new install Cairn.Templates
+dotnet new cairn-api -o Orders.Api
+```
+
+`cairn-api` scaffolds a minimal API already wired for hypermedia — link configs registered, endpoints named and opted in, a state-conditional affordance, and an optional HAL Explorer. The pack ships at the same version as the libraries, and a generated project references that matching version. See [Project template](template.md).
 
 ## Targeting
 
