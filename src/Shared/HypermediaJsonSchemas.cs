@@ -200,17 +200,12 @@ internal static class HypermediaJsonSchemas
     /// </summary>
     public static void DocumentDeprecation(ApiDescription description, OpenApiOperation operation)
     {
-        if (GetEndpointMetadata(description, DeprecationMetadataName) is not { } metadata)
+        if (operation.Responses is not { } responses || GetEndpointMetadata(description, DeprecationMetadataName) is not { } metadata)
         {
             return;
         }
 
         operation.Deprecated = true;
-
-        if (operation.Responses is not { } responses)
-        {
-            return;
-        }
 
         // Sunset and Link are optional (WithDeprecation emits them only when a sunset date / documentation URL
         // was supplied), so their presence is read off the precomputed metadata rather than assumed.
@@ -362,9 +357,9 @@ internal static class HypermediaJsonSchemas
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
-        Justification = "Reads WithDeprecation's precomputed Sunset/Link header values off the endpoint's deprecation metadata for OpenAPI document generation. A property trimmed off the metadata type could not have been emitted as a header at runtime either, so reading it as absent (null) is consistent with actual behavior.")]
+        Justification = "Reads WithDeprecation's precomputed Sunset/Link header values off the endpoint's deprecation metadata for OpenAPI document generation. The metadata type declares both properties and the deprecation middleware references them directly, so the linker preserves them — GetProperty resolves them whenever the endpoint has the metadata this reads from.")]
     private static string? ReadStringMember(object metadata, string propertyName)
-        => metadata.GetType().GetProperty(propertyName)?.GetValue(metadata) as string;
+        => metadata.GetType().GetProperty(propertyName)!.GetValue(metadata) as string;
 
     // A 2xx status key; the entity tag applies to a returned representation, so only success responses carry
     // the ETag header. Non-numeric keys ("default") and error statuses are skipped.
