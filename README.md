@@ -8,7 +8,7 @@
 [![Coverage](https://img.shields.io/codecov/c/github/JonahLargen/Cairn?logo=codecov&label=Coverage)](https://app.codecov.io/gh/JonahLargen/Cairn)
 [![CI](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml/badge.svg)](https://github.com/JonahLargen/Cairn/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/JonahLargen/Cairn/badge)](https://scorecard.dev/viewer/?uri=github.com/JonahLargen/Cairn)
-[![License: MIT](https://img.shields.io/github/license/JonahLargen/Cairn?label=license&color=green)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0%20%7C%2010.0-512BD4)
 
 [Documentation](https://jonahlargen.github.io/Cairn) ·
