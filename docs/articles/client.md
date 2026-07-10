@@ -114,6 +114,31 @@ Template expansion implements RFC 6570 levels 1–4 (`{var}`, `{+var}`, `{#var}`
 
 A malformed template fails fast with a `FormatException` rather than silently mis-expanding: applying a prefix modifier to a composite (list or map) value — for example `{list:3}` — is a processing error under RFC 6570 §2.4.1, and the op-reserve operators reserved for future extensions (`=`, `,`, `!`, `@`, `|`, per §2.2) cannot be processed. Both throw when the template is expanded (following a templated link).
 
+### Multi-hop traversal
+
+`FollowAsync` is one hop. `TraverseAsync<TNext>` is [Traverson](https://github.com/traverson/traverson)-style sugar for a chain of hops: it follows each relation in turn — reading the intermediate responses only for their hypermedia — and binds just the final response, so you don't fetch-and-unwrap at every step. Start from the client (which GETs a start URL first) or from a resource already in hand:
+
+```csharp
+// GET /, follow "orders", then "next", then "item" — bind only the last response.
+ClientResult<OrderItem> item = await client.TraverseAsync<OrderItem>("/", "orders", "next", "item");
+
+// Or from a resource already fetched — no refetch of the starting document:
+Resource<Root> root = (await client.GetAsync<Root>("/")).EnsureSuccess();
+ClientResult<OrderItem> item = await root.TraverseAsync<OrderItem>("orders", "next", "item");
+```
+
+`CollectionResource<TItem>` exposes the same method, so a chain can start from a collection's own links (e.g. `orders.TraverseAsync<Report>("next", "summary")`).
+
+The semantics compose from the single-hop pieces:
+
+- The no-throw error model holds per hop: an HTTP error status — or a hop body that isn't valid JSON — at *any* hop ends the traversal with that hop's failure result, whose `Status` and `Problem` describe the failing hop.
+- A resource along the chain that lacks the next relation throws `InvalidOperationException`, matching single-hop `FollowAsync`; the message names the missing relation and the path that reached it (e.g. after following `'orders' -> 'next'`).
+- Relations match case-insensitively (RFC 8288), and a relation carrying a HAL link array follows its first link — the same view `Links` exposes.
+- A templated link along the chain expands with no variables, so its optional expressions collapse per RFC 6570 (a templated `next` of `/orders{?page}` follows as `/orders`), matching pagination's `FollowAsync`. A hop that needs variables must be followed hop-by-hop with `FollowAsync(relation, variables)`.
+- The [`AllowLink` policy](#ssrf-protection) is enforced on every hop, and the whole traversal runs under one `HttpClient.Timeout` budget, like any single exchange.
+
+Passing no relations (or a null/empty relation) throws `ArgumentException` before anything is sent. To pass a `CancellationToken`, supply the relations as an array: `TraverseAsync<OrderItem>(["orders", "next", "item"], token)`.
+
 ## Collections
 
 `GetCollectionAsync<TItem>` reads a collection where each item is a navigable resource, returning a `CollectionResult<TItem>`. `itemsProperty` names the array property on an envelope (default `items`); a bare JSON array is read directly.
@@ -128,7 +153,7 @@ foreach (Resource<Order> item in orders.Items)
 }
 ```
 
-`CollectionResource<TItem>` carries the collection's own hypermedia — `Items`, `Links`, `LinksFor(relation)`, `HasLink`, `Affordances`, `HasAffordance`, `ETag`, `InvokeAsync` — plus `FollowAsync(relation, itemsProperty = "items")` to page to another `CollectionResult<TItem>` of the same item type:
+`CollectionResource<TItem>` carries the collection's own hypermedia — `Items`, `Links`, `LinksFor(relation)`, `HasLink`, `Affordances`, `HasAffordance`, `ETag`, `InvokeAsync`, [`TraverseAsync`](#multi-hop-traversal) — plus `FollowAsync(relation, itemsProperty = "items")` to page to another `CollectionResult<TItem>` of the same item type:
 
 ```csharp
 if (orders.HasLink("next"))

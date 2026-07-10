@@ -222,6 +222,9 @@ if (order.HasAffordance("cancel"))
 {
     await order.InvokeAsync("cancel");
 }
+
+// Traverson-style multi-hop: follow a chain of relations in one call.
+var item = await client.TraverseAsync<OrderItem>("/", "orders", "next", "item");
 ```
 
 See [The typed client](https://jonahlargen.github.io/Cairn/articles/client.html).

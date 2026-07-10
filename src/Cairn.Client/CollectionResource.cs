@@ -79,6 +79,36 @@ public sealed class CollectionResource<TItem>
             : throw new InvalidOperationException($"The collection has no '{relation}' link.");
 
     /// <summary>
+    /// Traverson-style multi-hop navigation: follows each relation in <paramref name="relations"/> in turn —
+    /// the first from this collection's links, each subsequent one from the resource the previous link led
+    /// to — binding only the final response to <typeparamref name="TNext"/>. Does not throw on an HTTP error
+    /// status: a failing hop ends the traversal with that hop's failure result.
+    /// </summary>
+    /// <remarks>
+    /// Intermediate hops are read for hypermedia only. A templated link along the chain expands with no
+    /// variables, so its optional expressions collapse per RFC 6570 (matching
+    /// <see cref="FollowAsync(string, string, CancellationToken)"/>); a hop that needs variables must be
+    /// followed hop-by-hop. The configured link policy is enforced on every hop.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="relations"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="relations"/> is empty, or contains a null or empty relation.</exception>
+    /// <exception cref="InvalidOperationException">This collection, or a resource along the chain, has no link with the next relation.</exception>
+    public Task<ClientResult<TNext>> TraverseAsync<TNext>(params string[] relations)
+        => TraverseAsync<TNext>(relations, CancellationToken.None);
+
+    /// <summary>Traverson-style multi-hop navigation with a <see cref="CancellationToken"/>: see <see cref="TraverseAsync{TNext}(string[])"/>.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="relations"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="relations"/> is empty, or contains a null or empty relation.</exception>
+    /// <exception cref="InvalidOperationException">This collection, or a resource along the chain, has no link with the next relation.</exception>
+    public Task<ClientResult<TNext>> TraverseAsync<TNext>(string[] relations, CancellationToken cancellationToken)
+    {
+        CairnClient.ValidateRelations(relations);
+        return Links.TryGetValue(relations[0], out var link)
+            ? _client.TraverseFromAsync<TNext>(link, relations, cancellationToken)
+            : throw new InvalidOperationException($"The collection has no '{relations[0]}' link.");
+    }
+
+    /// <summary>
     /// Streams every item across pages as an asynchronous sequence: yields this page's items, then follows the
     /// <paramref name="relation"/> link (default <c>next</c>) to the following page and yields its items, and so
     /// on until a page carries no such link — walking the collection to exhaustion. Each page is fetched lazily,
