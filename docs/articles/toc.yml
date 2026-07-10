@@ -40,6 +40,8 @@
   href: openapi.md
 - name: Browsable API explorer
   href: explorer.md
+- name: MCP server for AI agents
+  href: mcp.md
 - name: Testing
   href: testing.md
 - name: Packages

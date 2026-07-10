@@ -13,6 +13,7 @@ Cairn ships as a small set of focused NuGet packages. Most applications install 
 | `Cairn.OpenApi` | Surfaces hypermedia links and affordances in the OpenAPI document via `Microsoft.AspNetCore.OpenApi` (.NET 10 only). | When you generate OpenAPI with `Microsoft.AspNetCore.OpenApi`. |
 | `Cairn.Swashbuckle` | Surfaces hypermedia links and affordances in the Swagger/OpenAPI document via schema and operation filters. Requires Swashbuckle.AspNetCore 10.0 or later. | When you generate OpenAPI with Swashbuckle (the choice on .NET 8/9). |
 | `Cairn.AspNetCore.Explorer` | A browsable HAL Explorer — middleware (`UseCairnExplorer()`) that serves an embedded, dependency-free UI for navigating the API's links, embedded resources, and HAL-FORMS actions. Development-only by default. | When you want an interactive console for exploring a Cairn API. |
+| `Cairn.Mcp` | A Model Context Protocol server surface: exposes the state- and authorization-gated affordances your link configurations declare as MCP tools, via the official MCP C# SDK. | When AI agents should discover and invoke your API's actions under the same gates as any hypermedia client. |
 | `Cairn.Templates` | A `dotnet new` template pack. `dotnet new cairn-api` scaffolds a minimal API already wired for hypermedia. | When starting a new Cairn API. Installed with `dotnet new install`, not `dotnet add package`. |
 
 ## Cairn.Core
@@ -88,6 +89,24 @@ app.UseCairnExplorer();
 ```
 
 See [Browsable API explorer](explorer.md).
+
+## Cairn.Mcp
+
+A [Model Context Protocol](https://modelcontextprotocol.io) server surface for the API, built on the official MCP C# SDK (`ModelContextProtocol.AspNetCore`). `WithCairnAffordances(...)` on `AddMcpServer()` turns each affordance a link configuration declares into an MCP tool (`order_cancel`), plus a `{resource}_get` state-inspection tool per resource. `tools/list` is filtered per caller by the affordances' authorization policies, and a call re-runs the same state and authorization gates a hypermedia response applies before invoking the affordance's own endpoint over HTTP.
+
+```bash
+dotnet add package Cairn.Mcp
+```
+
+```csharp
+builder.Services.AddMcpServer()
+    .WithHttpTransport(o => o.Stateless = true)
+    .WithCairnAffordances(mcp => mcp.AddResource<OrderDto>("order", LoadOrderAsync));
+
+app.MapMcp("/mcp");
+```
+
+See [MCP server for AI agents](mcp.md).
 
 ## Cairn.Templates
 

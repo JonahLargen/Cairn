@@ -108,5 +108,6 @@ Read these three in order — they build on each other:
 | `Cairn.Testing` | `HypermediaResponse`, `.Should()` assertions, and `HypermediaSnapshot`. |
 | `Cairn.OpenApi` | `AddCairnHypermedia()` for the built-in OpenAPI generator (.NET 10 only). |
 | `Cairn.Swashbuckle` | `AddCairnHypermedia()` for Swashbuckle/Swagger. |
+| `Cairn.Mcp` | `WithCairnAffordances()` — state/auth-gated affordances as Model Context Protocol tools for AI agents. |
 
 Most apps start with just `Cairn.AspNetCore` (it references `Cairn.Core`). Details and framework targets are in [Packages](articles/packages.md).

@@ -43,6 +43,73 @@ public interface IEmbeddedResourceReportingConfig
 }
 
 /// <summary>
+/// Describes an affordance a link configuration declares — the declaration-time facts (name, method, input
+/// type, gates) that exist before any resource instance is available. Tool and document generators
+/// (e.g. Cairn.Mcp) read this to describe actions statically; the target URL is not included because it is
+/// computed per instance.
+/// </summary>
+/// <param name="Name">The name identifying the action (the relation).</param>
+/// <param name="Method">The HTTP method used to invoke the action.</param>
+public sealed record AffordanceSchema(LinkRelation Name, string Method)
+{
+    /// <summary>The name identifying the action (the relation).</summary>
+    /// <exception cref="ArgumentException">The value is <c>default(LinkRelation)</c>.</exception>
+    public LinkRelation Name { get; init; } = ThrowIfDefaultName(Name);
+
+    /// <summary>The HTTP method used to invoke the action.</summary>
+    /// <exception cref="ArgumentException">The value is null or whitespace.</exception>
+    public string Method { get; init; } = !string.IsNullOrWhiteSpace(Method)
+        ? Method
+        : throw new ArgumentException("Affordance method must not be null or whitespace.", nameof(Method));
+
+    /// <summary>The declared input type the action accepts (<c>Accepts&lt;TInput&gt;()</c>), if any.</summary>
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
+    public Type? Input { get; init; }
+
+    /// <summary>The declared human-readable title, if any.</summary>
+    public string? Title { get; init; }
+
+    /// <summary>The declared content type the action's input is submitted as, if any.</summary>
+    public string? ContentType { get; init; }
+
+    /// <summary>Whether the affordance is marked as the resource's primary action (<c>AsDefault()</c>).</summary>
+    public bool IsDefault { get; init; }
+
+    /// <summary>
+    /// The authorization policy gating the affordance, or <see langword="null"/> when it has no policy gate.
+    /// The empty string is the sentinel for the host's default policy (<c>RequireAuthorization()</c>).
+    /// </summary>
+    public string? Policy { get; init; }
+
+    /// <summary>
+    /// Whether <see cref="Policy"/> is evaluated against a resource object (resource-based authorization) and
+    /// therefore cannot be decided from the caller alone.
+    /// </summary>
+    public bool PolicyIsResourceBased { get; init; }
+
+    /// <summary>Whether the affordance is gated by a <c>When</c> predicate (its availability depends on resource state).</summary>
+    public bool HasCondition { get; init; }
+
+    private static LinkRelation ThrowIfDefaultName(LinkRelation name)
+    {
+        name.ThrowIfDefault(nameof(Name));
+        return name;
+    }
+}
+
+/// <summary>
+/// A compiled config that can report the affordances it declares. Tool and document generators query this
+/// (over <see cref="ICompiledLinkConfig"/>) to describe actions without a resource instance; the runtime wire
+/// never needs it. Kept separate from <see cref="ICompiledLinkConfig"/> so consumers that only build links
+/// are unaffected.
+/// </summary>
+public interface IAffordanceReportingConfig
+{
+    /// <summary>The affordances declared by the configuration, in declaration order.</summary>
+    IReadOnlyList<AffordanceSchema> Affordances { get; }
+}
+
+/// <summary>
 /// An in-memory registry of link configurations keyed by resource type. Lookup honors inheritance: a
 /// resource type with no config of its own uses the config of its nearest registered base class (so a
 /// <c>LinkConfig&lt;OrderDto&gt;</c> also covers <c>RushOrderDto : OrderDto</c>). Interfaces are not
