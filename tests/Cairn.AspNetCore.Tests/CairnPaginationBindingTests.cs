@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Primitives;
 
 namespace Cairn.AspNetCore.Tests;
 
@@ -141,14 +142,47 @@ public class CairnPaginationBindingTests
 
         await using var app = builder.Build();
         app.MapGet("/plain", (PageRequest paging) => new { paging.Page, paging.PageSize });
+        app.MapGet("/plain-feed", (CursorRequest paging) => new { paging.Cursor, paging.Limit });
 
         await app.StartAsync();
         using var client = app.GetTestClient();
 
         var body = JsonDocument.Parse(await client.GetStringAsync("/plain?page=2")).RootElement;
-
         Assert.Equal(2, body.GetProperty("page").GetInt32());
         Assert.Equal(20, body.GetProperty("pageSize").GetInt32());
+
+        var feed = JsonDocument.Parse(await client.GetStringAsync("/plain-feed?cursor=c9")).RootElement;
+        Assert.Equal("c9", feed.GetProperty("cursor").GetString());
+        Assert.Equal(20, feed.GetProperty("limit").GetInt32());
+    }
+
+    [Fact]
+    public async Task BindAsync_rejects_a_malformed_value_by_returning_null_even_without_logging()
+    {
+        // BindAsync converts the client error into null (the framework then rejects with its standard 400);
+        // a bare service provider proves the reason-logging is optional rather than assumed.
+        var context = new DefaultHttpContext { RequestServices = new ServiceCollection().BuildServiceProvider() };
+        context.Request.QueryString = new QueryString("?page=abc");
+        Assert.Null(await PageRequest.BindAsync(context, parameter: null!));
+
+        context.Request.QueryString = new QueryString("?cursor=a&cursor=b");
+        Assert.Null(await CursorRequest.BindAsync(context, parameter: null!));
+    }
+
+    [Fact]
+    public void A_parameter_present_with_no_values_binds_the_fallback()
+    {
+        // A query collection can carry a key with an empty StringValues (not reachable through URL parsing,
+        // but reachable through the IQueryFeature); it means "not supplied".
+        var context = new DefaultHttpContext { RequestServices = new ServiceCollection().BuildServiceProvider() };
+        context.Request.Query = new QueryCollection(new Dictionary<string, StringValues>
+        {
+            ["page"] = default,
+            ["cursor"] = default,
+        });
+
+        Assert.Equal(1, PageRequest.Bind(context).Page);
+        Assert.Null(CursorRequest.Bind(context).Cursor);
     }
 
     [Fact]
