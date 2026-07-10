@@ -296,12 +296,81 @@ internal static class HypermediaJsonSchemas
         }
     }
 
+    /// <summary>
+    /// Documents the query parameters an endpoint binding <c>PageRequest</c>/<c>CursorRequest</c> reads.
+    /// The binding is a <c>BindAsync</c> parameter ApiExplorer cannot see into, so without this the operation
+    /// would advertise no pagination inputs at all; the parameter names and bounds the binding resolved from
+    /// <c>CairnOptions</c> travel on endpoint metadata it populates at map time. A parameter the endpoint
+    /// already documents under the same name is the author's — theirs wins.
+    /// </summary>
+    public static void DocumentPaginationBinding(ApiDescription description, OpenApiOperation operation)
+    {
+        if (GetEndpointMetadata(description, PageBindingMetadataName) is { } page)
+        {
+            AddQueryParameter(
+                operation,
+                ReadStringMember(page, "PageParameter")!,
+                JsonSchemaType.Integer,
+                "The 1-based page number of the requested page (default 1).");
+            AddQueryParameter(
+                operation,
+                ReadStringMember(page, "PageSizeParameter")!,
+                JsonSchemaType.Integer,
+                PageSizeDescription("page size", ReadIntMember(page, "DefaultPageSize")!.Value, ReadIntMember(page, "MaxPageSize")));
+        }
+
+        if (GetEndpointMetadata(description, CursorBindingMetadataName) is { } cursor)
+        {
+            AddQueryParameter(
+                operation,
+                ReadStringMember(cursor, "CursorParameter")!,
+                JsonSchemaType.String,
+                "The opaque cursor of the requested page; omit it for the first page.");
+            AddQueryParameter(
+                operation,
+                ReadStringMember(cursor, "LimitParameter")!,
+                JsonSchemaType.Integer,
+                PageSizeDescription("limit", ReadIntMember(cursor, "DefaultLimit")!.Value, ReadIntMember(cursor, "MaxLimit")));
+        }
+    }
+
+    private static string PageSizeDescription(string noun, int defaultSize, int? max)
+        => max is { } cap
+            ? $"The {noun} of the requested page (default {defaultSize.ToString(CultureInfo.InvariantCulture)}; values above {cap.ToString(CultureInfo.InvariantCulture)} are clamped to it)."
+            : $"The {noun} of the requested page (default {defaultSize.ToString(CultureInfo.InvariantCulture)}).";
+
+    private static void AddQueryParameter(OpenApiOperation operation, string name, JsonSchemaType type, string description)
+    {
+        operation.Parameters ??= [];
+
+        // Query keys bind case-insensitively in ASP.NET Core, so a parameter the endpoint already documents
+        // under any casing of this name describes the same input — the author's description wins.
+        foreach (var existing in operation.Parameters)
+        {
+            if (existing.In == ParameterLocation.Query && string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        operation.Parameters.Add(new OpenApiParameter
+        {
+            Name = name,
+            In = ParameterLocation.Query,
+            Required = false,
+            Description = description,
+            Schema = new OpenApiSchema { Type = type },
+        });
+    }
+
     // Matched by full name because this file is compiled into projects that don't reference Cairn.AspNetCore.
     private const string LinksMetadataInterface = "Cairn.AspNetCore.Internal.ICairnLinksMetadata";
     private const string DeprecationMetadataName = "Cairn.AspNetCore.Internal.DeprecationMetadata";
     private const string ETagMetadataName = "Cairn.AspNetCore.Internal.ETagMetadata";
     private const string PreconditionMetadataName = "Cairn.AspNetCore.Internal.PreconditionMetadata";
     private const string PreconditionRequiredMetadataName = "Cairn.AspNetCore.Internal.PreconditionRequiredMetadata";
+    private const string PageBindingMetadataName = "Cairn.AspNetCore.Internal.PageBindingMetadata";
+    private const string CursorBindingMetadataName = "Cairn.AspNetCore.Internal.CursorBindingMetadata";
 
     // Whether the endpoint opted into Cairn hypermedia. WithLinks() and [CairnLinks] both leave a metadata
     // object implementing ICairnLinksMetadata in the endpoint metadata; an endpoint that only returns a
@@ -357,9 +426,14 @@ internal static class HypermediaJsonSchemas
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
-        Justification = "Reads WithDeprecation's precomputed Sunset/Link header values off the endpoint's deprecation metadata for OpenAPI document generation. The metadata type declares both properties and the deprecation middleware references them directly, so the linker preserves them — GetProperty resolves them whenever the endpoint has the metadata this reads from.")]
+        Justification = "Reads precomputed values off Cairn's endpoint metadata (deprecation headers, pagination binding parameters) for OpenAPI document generation. The deprecation metadata's properties are referenced directly by the deprecation middleware, and the binding metadata types are annotated with DynamicallyAccessedMemberTypes.PublicProperties, so the linker preserves them — GetProperty resolves them whenever the endpoint has the metadata this reads from.")]
     private static string? ReadStringMember(object metadata, string propertyName)
         => metadata.GetType().GetProperty(propertyName)!.GetValue(metadata) as string;
+
+    [UnconditionalSuppressMessage("Trimming", "IL2075:UnrecognizedReflectionPattern",
+        Justification = "Reads the page-size bounds off Cairn's pagination binding metadata for OpenAPI document generation. The metadata types are annotated with DynamicallyAccessedMemberTypes.PublicProperties, so the linker preserves the properties — GetProperty resolves them whenever the endpoint has the metadata this reads from.")]
+    private static int? ReadIntMember(object metadata, string propertyName)
+        => metadata.GetType().GetProperty(propertyName)!.GetValue(metadata) as int?;
 
     // A 2xx status key; the entity tag applies to a returned representation, so only success responses carry
     // the ETag header. Non-numeric keys ("default") and error statuses are skipped.

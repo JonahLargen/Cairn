@@ -209,7 +209,7 @@ Return a `PagedResource<T>` (offset) or `CursorPage<T>` (keyset) and the envelop
 }
 ```
 
-Existing envelope types can join in without being changed, via `AddPaging<T>`. See [Pagination](https://jonahlargen.github.io/Cairn/articles/pagination.html).
+The request side is covered too: declare a `PageRequest` (or `CursorRequest`) handler parameter and the paging query parameters bind under the same names the links swap — with a configurable default and cap, and the bound values flowing back into the envelope via `paging.ToResource(items, total)`. Existing envelope types can join in without being changed, via `AddPaging<T>`. See [Pagination](https://jonahlargen.github.io/Cairn/articles/pagination.html).
 
 ### A typed client that walks the links
 
