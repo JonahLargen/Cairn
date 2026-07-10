@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Cairn;
 using Cairn.AspNetCore;
 using Microsoft.AspNetCore.Builder;
@@ -8,7 +9,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace Cairn.AspNetCore.Tests;
 
-public class CairnAlpsTests
+public partial class CairnAlpsTests
 {
     [Fact]
     public async Task The_index_lists_every_registered_profile_with_deterministic_names_and_hrefs()
@@ -88,7 +89,7 @@ public class CairnAlpsTests
         var document = JsonDocument.Parse(await client.GetStringAsync("/alps/alps-order")).RootElement;
         var nested = Descriptor(document, "cancel").GetProperty("descriptor");
 
-        Assert.Equal(2, nested.GetArrayLength());
+        Assert.Equal(3, nested.GetArrayLength());
 
         // 'reason' is new to the document: declared inline.
         Assert.Equal("reason", nested[0].GetProperty("id").GetString());
@@ -97,6 +98,23 @@ public class CairnAlpsTests
         // 'status' is already declared as a resource field: referenced by fragment, not re-declared.
         Assert.Equal("#status", nested[1].GetProperty("href").GetString());
         Assert.False(nested[1].TryGetProperty("id", out _));
+
+        // 'self' is taken by a non-field descriptor (the self link), so the input field moves to a
+        // suffixed id and keeps its wire name.
+        Assert.Equal("self-input", nested[2].GetProperty("id").GetString());
+        Assert.Equal("self", nested[2].GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task An_action_without_object_shaped_input_nests_no_descriptors()
+    {
+        await using var app = await StartAsync();
+        using var client = app.GetTestClient();
+
+        var document = JsonDocument.Parse(await client.GetStringAsync("/alps/alps-order")).RootElement;
+
+        // Accepts<int> has an int contract, but not an object one — and int has no fields to describe.
+        Assert.False(Descriptor(document, "noop").TryGetProperty("descriptor", out _));
     }
 
     [Fact]
@@ -112,6 +130,45 @@ public class CairnAlpsTests
         var link = Descriptor(document, "status-link");
         Assert.Equal("safe", link.GetProperty("type").GetString());
         Assert.Equal("status", link.GetProperty("name").GetString());
+
+        // An affordance colliding with a field gets the action suffix.
+        var action = Descriptor(document, "status-action");
+        Assert.Equal("idempotent", action.GetProperty("type").GetString());
+        Assert.Equal("status", action.GetProperty("name").GetString());
+
+        // When the kind suffix is taken too ('note', 'note-link', and 'note-link-2' are all fields), the id
+        // walks the numbered candidates until one is free.
+        var note = Descriptor(document, "note-link-3");
+        Assert.Equal("safe", note.GetProperty("type").GetString());
+        Assert.Equal("note", note.GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task A_links_declared_profile_uri_rides_along_as_a_profile_link()
+    {
+        await using var app = await StartAsync();
+        using var client = app.GetTestClient();
+
+        var document = JsonDocument.Parse(await client.GetStringAsync("/alps/alps-order")).RootElement;
+
+        var link = Descriptor(document, "invoice").GetProperty("link")[0];
+        Assert.Equal("profile", link.GetProperty("rel").GetString());
+        Assert.Equal("https://schemas.example.com/invoice", link.GetProperty("href").GetString());
+    }
+
+    [Fact]
+    public async Task An_embed_of_an_unregistered_child_carries_its_doc_but_no_profile_link()
+    {
+        await using var app = await StartAsync();
+        using var client = app.GetTestClient();
+
+        var document = JsonDocument.Parse(await client.GetStringAsync("/alps/alps-order")).RootElement;
+
+        var tags = Descriptor(document, "tags");
+        Assert.Equal("semantic", tags.GetProperty("type").GetString());
+        Assert.False(tags.TryGetProperty("name", out _));   // no collision: the id is the relation itself
+        Assert.Contains("Embedded collection of AlpsTag resources", tags.GetProperty("doc").GetProperty("value").GetString(), StringComparison.Ordinal);
+        Assert.False(tags.TryGetProperty("link", out _));   // AlpsTag has no registered config, so no profile to point at
     }
 
     [Fact]
@@ -176,6 +233,155 @@ public class CairnAlpsTests
         response.EnsureSuccessStatusCode();
     }
 
+    [Fact]
+    public async Task Default_names_kebab_case_acronyms_digits_underscores_and_generics()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(options =>
+        {
+            options.AddLinks(new NoLinks<HALDocument>());
+            options.AddLinks(new NoLinks<OrderDTO>());
+            options.AddLinks(new NoLinks<Grid2Cell>());
+            options.AddLinks(new NoLinks<My_Tag>());
+            options.AddLinks(new NoLinks<Box<Inner>>());
+            options.AddLinks(new IntListLinks());
+        });
+
+        await using var app = builder.Build();
+        app.MapCairnAlps();
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var profiles = JsonDocument.Parse(await client.GetStringAsync("/alps")).RootElement.GetProperty("profiles");
+        var names = profiles.EnumerateArray().Select(p => p.GetProperty("name").GetString()).ToList();
+
+        Assert.Contains("hal-document", names);   // acronym run before a word
+        Assert.Contains("order-dto", names);      // trailing acronym run
+        Assert.Contains("grid2-cell", names);     // digit before an upper starts a word
+        Assert.Contains("my_tag", names);         // underscores pass through and start no word
+        Assert.Contains("box-inner", names);      // generic arity stripped, type arguments appended
+        Assert.Contains("int-list", names);
+    }
+
+    [Fact]
+    public async Task A_resource_without_an_object_contract_carries_no_field_descriptors()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(options => options.AddLinks(new IntListLinks()));
+
+        await using var app = builder.Build();
+        app.MapCairnAlps();
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        // A List<int>-derived resource serializes as an array — there are no fields to describe, but the
+        // declared links are still there.
+        var document = JsonDocument.Parse(await client.GetStringAsync("/alps/int-list")).RootElement;
+        var descriptor = Assert.Single(Descriptors(document));
+        Assert.Equal("self", descriptor.GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task The_request_path_base_is_carried_into_index_and_cross_profile_hrefs()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddCairn(options =>
+        {
+            options.AddLinks(new AlpsCustomerLinks());
+            options.AddLinks(new AlpsOrderLinks());
+        });
+
+        await using var app = builder.Build();
+        app.UsePathBase("/base");
+        app.UseRouting();
+        app.MapCairnAlps();
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var index = JsonDocument.Parse(await client.GetStringAsync("/base/alps")).RootElement;
+        Assert.Equal("/base/alps/alps-customer", index.GetProperty("profiles")[0].GetProperty("href").GetString());
+
+        var document = JsonDocument.Parse(await client.GetStringAsync("/base/alps/alps-order")).RootElement;
+        var embed = Descriptor(document, "customer-embedded");
+        Assert.Equal("/base/alps/alps-customer", embed.GetProperty("link")[0].GetProperty("href").GetString());
+
+        // The same host answers un-prefixed requests too; those documents keep un-prefixed hrefs.
+        var bare = JsonDocument.Parse(await client.GetStringAsync("/alps")).RootElement;
+        Assert.Equal("/alps/alps-customer", bare.GetProperty("profiles")[0].GetProperty("href").GetString());
+    }
+
+    [Fact]
+    public async Task Mapping_without_AddCairn_fails_on_first_request_with_guidance()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+
+        await using var app = builder.Build();
+        app.MapCairnAlps();
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetAsync("/alps"));
+        Assert.Contains("AddCairn", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_empty_profile_name_from_the_callback_fails_loudly()
+    {
+        await using var app = await StartAsync(alps => alps.ProfileName = _ => "  ");
+        using var client = app.GetTestClient();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetAsync("/alps"));
+        Assert.Contains("non-empty profile name", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_path_option_rejects_relative_and_empty_values_and_trims_a_trailing_slash()
+    {
+        var options = new CairnAlpsOptions();
+
+        Assert.Throws<ArgumentException>(() => options.Path = "alps");
+        Assert.Throws<ArgumentException>(() => options.Path = "/");
+        Assert.Throws<ArgumentException>(() => options.Path = "   ");
+
+        options.Path = "/meta/profiles/";
+        Assert.Equal("/meta/profiles", options.Path);
+    }
+
+    [Fact]
+    public async Task Under_a_source_gen_only_resolver_input_fields_fall_back_to_reflection_wire_names()
+    {
+        await using var app = await StartSourceGenOnlyAsync(camelCase: true);
+        using var client = app.GetTestClient();
+
+        var document = JsonDocument.Parse(await client.GetStringAsync("/alps/fallback-resource")).RootElement;
+
+        // The resolver has no contract for the resource type, so the profile carries no field descriptors...
+        Assert.DoesNotContain(Descriptors(document), d => d.TryGetProperty("id", out var id) && id.GetString() == "id");
+
+        // ...but the annotated input type still describes its fields: [JsonPropertyName] verbatim, the
+        // options' naming policy for the rest.
+        var nested = Descriptor(document, "submit").GetProperty("descriptor");
+        Assert.Equal("why", nested[0].GetProperty("id").GetString());
+        Assert.Equal("other", nested[1].GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task The_reflection_fallback_uses_the_declared_name_when_there_is_no_naming_policy()
+    {
+        await using var app = await StartSourceGenOnlyAsync(camelCase: false);
+        using var client = app.GetTestClient();
+
+        var document = JsonDocument.Parse(await client.GetStringAsync("/alps/fallback-resource")).RootElement;
+
+        var nested = Descriptor(document, "submit").GetProperty("descriptor");
+        Assert.Equal("why", nested[0].GetProperty("id").GetString());
+        Assert.Equal("Other", nested[1].GetProperty("id").GetString());
+    }
+
     private static IEnumerable<JsonElement> Descriptors(JsonElement document)
         => document.GetProperty("alps").GetProperty("descriptor").EnumerateArray();
 
@@ -198,11 +404,25 @@ public class CairnAlpsTests
         return app;
     }
 
-    private sealed record AlpsOrder(int Id, string Status, AlpsCustomer Customer);
+    private sealed record AlpsOrder(int Id, string Status, AlpsCustomer Customer)
+    {
+        // Occupy the 'note' relation's id and its first two collision candidates, so the 'note' link has to
+        // walk all the way to the numbered suffixes.
+        [JsonPropertyName("note")]
+        public string? Note { get; init; }
+
+        [JsonPropertyName("note-link")]
+        public string? NoteLink { get; init; }
+
+        [JsonPropertyName("note-link-2")]
+        public string? NoteLink2 { get; init; }
+    }
 
     private sealed record AlpsCustomer(int Id);
 
-    private sealed record CancelInput(string Reason, string Status);
+    private sealed record AlpsTag(string Value);
+
+    private sealed record CancelInput(string Reason, string Status, string Self);
 
     private sealed class AlpsOrderLinks : LinkConfig<AlpsOrder>
     {
@@ -213,6 +433,9 @@ public class CairnAlpsTests
                 .Title("The customer")
                 .Deprecated("https://docs.example.com/gone");
             builder.Link("status", o => LinkTarget.Uri($"/orders/{o.Id}/status"));
+            builder.Link("note", o => LinkTarget.Uri($"/orders/{o.Id}/note"));
+            builder.Link("invoice", o => LinkTarget.Uri($"/orders/{o.Id}/invoice"))
+                .Profile("https://schemas.example.com/invoice");
 
             builder.Affordance("cancel", o => LinkTarget.Uri($"/orders/{o.Id}/cancel"))
                 .Post()
@@ -221,8 +444,11 @@ public class CairnAlpsTests
                 .When(o => o.Status == "Pending");
             builder.Affordance("archive", o => LinkTarget.Uri($"/orders/{o.Id}")).Delete();
             builder.Affordance("refresh", o => LinkTarget.Uri($"/orders/{o.Id}")).Get();
+            builder.Affordance("status", o => LinkTarget.Uri($"/orders/{o.Id}/status")).Put();
+            builder.Affordance("noop", o => LinkTarget.Uri($"/orders/{o.Id}/noop")).Accepts<int>();
 
             builder.Embed("customer", o => o.Customer);
+            builder.EmbedMany("tags", _ => Array.Empty<AlpsTag>());
         }
     }
 
@@ -231,4 +457,74 @@ public class CairnAlpsTests
         public override void Configure(ILinkBuilder<AlpsCustomer> builder)
             => builder.Self(c => LinkTarget.Uri($"/customers/{c.Id}"));
     }
+
+    // --- default-naming fixtures ---
+
+    private sealed record HALDocument(int Id);
+
+    private sealed record OrderDTO(int Id);
+
+    private sealed record Grid2Cell(int Id);
+
+    private sealed record My_Tag(int Id);
+
+    private sealed record Box<T>(T Value);
+
+    private sealed record Inner(int Id);
+
+    private sealed class IntList : List<int>;
+
+    private sealed class NoLinks<T> : LinkConfig<T>
+    {
+        public override void Configure(ILinkBuilder<T> builder)
+        {
+        }
+    }
+
+    private sealed class IntListLinks : LinkConfig<IntList>
+    {
+        public override void Configure(ILinkBuilder<IntList> builder)
+            => builder.Self(_ => LinkTarget.Uri("/ints"));
+    }
+
+    // --- source-gen-only resolver fixtures ---
+
+    private static async Task<WebApplication> StartSourceGenOnlyAsync(bool camelCase)
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+
+        // A resolver that knows neither the resource nor the input type — the shape of a source-gen-only
+        // host whose JsonSerializerContext doesn't cover a Cairn-configured type.
+        builder.Services.ConfigureHttpJsonOptions(options =>
+        {
+            options.SerializerOptions.TypeInfoResolver = LimitedJsonContext.Default;
+            if (!camelCase)
+            {
+                options.SerializerOptions.PropertyNamingPolicy = null;
+            }
+        });
+        builder.Services.AddCairn(options => options.AddLinks(new FallbackLinks()));
+
+        var app = builder.Build();
+        app.MapCairnAlps();
+        await app.StartAsync();
+        return app;
+    }
+
+    private sealed record FallbackResource(int Id);
+
+    private sealed record FallbackInput([property: JsonPropertyName("why")] string Reason, string Other);
+
+    private sealed class FallbackLinks : LinkConfig<FallbackResource>
+    {
+        public override void Configure(ILinkBuilder<FallbackResource> builder)
+        {
+            builder.Self(r => LinkTarget.Uri($"/fallback/{r.Id}"));
+            builder.Affordance("submit", r => LinkTarget.Uri($"/fallback/{r.Id}/submit")).Accepts<FallbackInput>();
+        }
+    }
+
+    [JsonSerializable(typeof(int))]
+    private sealed partial class LimitedJsonContext : JsonSerializerContext;
 }

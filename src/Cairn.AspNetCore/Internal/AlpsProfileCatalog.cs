@@ -35,12 +35,12 @@ internal sealed class AlpsProfileCatalog
         var naming = profileName ?? DefaultProfileName;
         var entries = new List<Entry>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (type, config) in registry.Snapshot.OrderBy(pair => pair.Key.FullName ?? pair.Key.Name, StringComparer.Ordinal))
+        foreach (var (type, config) in registry.Snapshot.OrderBy(pair => pair.Key.ToString(), StringComparer.Ordinal))
         {
             var name = naming(type);
             if (string.IsNullOrWhiteSpace(name))
             {
-                throw new InvalidOperationException($"Cairn: the ALPS ProfileName callback returned an empty name for {type.FullName ?? type.Name}. Every registered resource type needs a non-empty profile name.");
+                throw new InvalidOperationException($"Cairn: the ALPS ProfileName callback returned an empty name for {type}. Every registered resource type needs a non-empty profile name.");
             }
 
             // Two types that map to one name (same type name in different namespaces, or a coarse custom
@@ -75,7 +75,7 @@ internal sealed class AlpsProfileCatalog
         var documents = new Dictionary<string, byte[]>(_entries.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var entry in _entries)
         {
-            index.Add(new AlpsIndexEntry(entry.Name, entry.ResourceType.FullName ?? entry.ResourceType.Name, HrefOf(entry)));
+            index.Add(new AlpsIndexEntry(entry.Name, entry.ResourceType.ToString(), HrefOf(entry)));
             var document = AlpsProfileGenerator.Build(entry.ResourceType, entry.Config, _serializer, ProfileHref);
             documents[entry.Name] = JsonSerializer.SerializeToUtf8Bytes(document, AlpsJsonContext.Default.AlpsDocumentRoot);
         }
@@ -124,7 +124,7 @@ internal sealed class AlpsProfileCatalog
                     var boundary = i > 0
                         && (char.IsLower(name[i - 1]) || char.IsDigit(name[i - 1])
                             || (char.IsUpper(name[i - 1]) && i + 1 < name.Length && char.IsLower(name[i + 1])));
-                    if (boundary && builder.Length > 0 && builder[^1] != '-')
+                    if (boundary)
                     {
                         builder.Append('-');
                     }

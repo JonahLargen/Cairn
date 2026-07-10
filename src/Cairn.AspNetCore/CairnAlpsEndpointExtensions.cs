@@ -57,14 +57,16 @@ public static class CairnAlpsEndpointExtensions
         // so the package stays trim-/AOT-analysis clean under IsAotCompatible.
         var group = endpoints.MapGroup(options.Path);
 
+        // PathString.ToString() is the request's path base as a plain string ("" when there is none).
         group.MapGet("", (RequestDelegate)(context =>
-            WriteAsync(context, catalog.Value.IndexFor(context.Request.PathBase.Value ?? string.Empty), "application/json")))
+            WriteAsync(context, catalog.Value.IndexFor(context.Request.PathBase.ToString()), "application/json")))
             .ExcludeFromDescription();
 
         group.MapGet("/{profile}", (RequestDelegate)(context =>
         {
-            var profile = context.Request.RouteValues["profile"] as string;
-            var document = profile is null ? null : catalog.Value.DocumentFor(context.Request.PathBase.Value ?? string.Empty, profile);
+            // The pattern guarantees the route value: a request without it doesn't match this endpoint.
+            var profile = (string)context.Request.RouteValues["profile"]!;
+            var document = catalog.Value.DocumentFor(context.Request.PathBase.ToString(), profile);
             if (document is null)
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;

@@ -12,7 +12,7 @@ public class DeclarationReportingTests
         var reporting = Assert.IsAssignableFrom<IDeclarationReportingConfig>(config);
         var links = reporting.DeclaredLinks;
 
-        Assert.Equal(3, links.Count);
+        Assert.Equal(4, links.Count);
 
         Assert.Equal("self", links[0].Relation.Value);
         Assert.Null(links[0].Title);
@@ -30,6 +30,10 @@ public class DeclarationReportingTests
 
         Assert.Equal("item", links[2].Relation.Value);
         Assert.True(links[2].Multi);
+
+        // A When-gated link is conditional, just like a policy-gated one.
+        Assert.Equal("receipt", links[3].Relation.Value);
+        Assert.True(links[3].Conditional);
 
         // The projection is memoized: a second read returns the same instance.
         Assert.Same(links, reporting.DeclaredLinks);
@@ -102,6 +106,7 @@ public class DeclarationReportingTests
                 .Hreflang("en-US")
                 .Profile("https://schemas.example.com/customer");
             builder.Links("item", o => o.Related.Select(r => LinkTarget.Uri($"/orders/{r.Id}")));
+            builder.Link("receipt", o => LinkTarget.Uri($"/orders/{o.Id}/receipt")).When(o => o.Status == "Paid");
 
             builder.Affordance("cancel", o => LinkTarget.Uri($"/orders/{o.Id}/cancel"))
                 .Post()
