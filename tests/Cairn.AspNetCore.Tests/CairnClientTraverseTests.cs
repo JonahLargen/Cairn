@@ -145,6 +145,39 @@ public class CairnClientTraverseTests
     }
 
     [Fact]
+    public async Task A_blank_intermediate_hop_body_is_linkless_and_fails_on_the_next_relation()
+    {
+        var handler = new RoutingHandler(new Dictionary<string, string>
+        {
+            ["/"] = Root,
+            ["/orders"] = "",   // a 200 with no body: a linkless success, not a parse failure.
+        });
+        var client = new CairnClient(Client(handler));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => client.TraverseAsync<Order>("/", "orders", "next", "item"));
+
+        Assert.Contains("'next'", exception.Message);     // the traversal failed on the relation lookup...
+        Assert.Contains("'orders'", exception.Message);   // ...naming the hop the blank body was fetched from.
+    }
+
+    [Fact]
+    public async Task A_missing_first_relation_on_a_collection_throws_the_collection_message()
+    {
+        var handler = new RoutingHandler(new Dictionary<string, string>
+        {
+            ["/orders"] = """{"items":[],"_links":{"self":{"href":"/orders"}}}""",
+        });
+        var client = new CairnClient(Client(handler));
+        var orders = (await client.GetCollectionAsync<Order>("/orders")).EnsureSuccess();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => orders.TraverseAsync<Order>("nope", "item"));
+
+        Assert.Equal("The collection has no 'nope' link.", exception.Message);
+    }
+
+    [Fact]
     public async Task A_missing_relation_mid_chain_throws_naming_the_relation_and_the_path()
     {
         var handler = new RoutingHandler(new Dictionary<string, string>
