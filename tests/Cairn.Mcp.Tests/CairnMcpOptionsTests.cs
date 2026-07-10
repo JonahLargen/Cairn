@@ -71,15 +71,16 @@ public class CairnMcpOptionsTests
     [Fact]
     public async Task Tool_names_sanitize_characters_mcp_disallows()
     {
-        // A curie-style relation like "acme:archive" is legal hypermedia but not a legal tool name.
+        // A curie-style relation like "acme:archive:v2" is legal hypermedia but not a legal tool name; dashes
+        // and underscores pass through untouched.
         await using var app = await McpTestApp.StartAsync(
-            options => options.AddResource<Gizmo>("gizmo", (_, _) => new ValueTask<Gizmo?>(new Gizmo(1))),
+            options => options.AddResource<Gizmo>("giz-mo", (_, _) => new ValueTask<Gizmo?>(new Gizmo(1))),
             configureCairn: options => options.AddLinks(new GizmoLinks()));
         await using var client = await McpTestApp.ConnectAsync(app);
 
         var tools = await client.ListToolsAsync();
 
-        Assert.Contains(tools, t => t.Name == "gizmo_acme-archive");
+        Assert.Contains(tools, t => t.Name == "giz-mo_acme-archive-v2");
     }
 
     public sealed record Unconfigured;
@@ -102,7 +103,7 @@ public class CairnMcpOptionsTests
         public override void Configure(ILinkBuilder<Gizmo> builder)
         {
             builder.Self(g => LinkTarget.Uri($"/gizmos/{g.Id}"));
-            builder.Affordance("acme:archive", g => LinkTarget.Uri($"/gizmos/{g.Id}/archive")).Post();
+            builder.Affordance("acme:archive:v2", g => LinkTarget.Uri($"/gizmos/{g.Id}/archive")).Post();
         }
     }
 }

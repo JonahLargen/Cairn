@@ -31,6 +31,49 @@ public class CairnMcpEdgeTests
     }
 
     [Fact]
+    public async Task A_whitespace_id_argument_is_an_error()
+    {
+        await using var app = await McpTestApp.StartAsync();
+        await using var client = await McpTestApp.ConnectAsync(app);
+
+        var result = await client.CallToolAsync("order_cancel", new Dictionary<string, object?> { ["id"] = "   " });
+
+        Assert.True(result.IsError);
+        Assert.Contains("'id' argument", TextOf(result));
+    }
+
+    [Fact]
+    public async Task An_available_affordance_called_with_no_arguments_still_reaches_its_endpoint()
+    {
+        await using var app = await McpTestApp.StartAsync();
+        await using var client = await McpTestApp.ConnectAsync(app);
+
+        // orders_create is always advertised; with no arguments at all the invoker submits an empty JSON
+        // object and the endpoint answers for itself — surfaced as a tool error carrying the status.
+        var result = await client.CallToolAsync("orders_create");
+
+        Assert.True(result.IsError);
+        Assert.Contains("failed with HTTP 400", TextOf(result));
+    }
+
+    [Fact]
+    public async Task Forgetting_add_cairn_entirely_fails_the_first_request_with_guidance()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddMcpServer()
+            .WithHttpTransport(options => options.Stateless = true)
+            .WithCairnAffordances(options =>
+                options.AddResource<Widget>("widget", (_, _) => new ValueTask<Widget?>(new Widget(1))));
+
+        await using var app = builder.Build();
+        app.MapMcp("/mcp");
+        await app.StartAsync();
+
+        await Assert.ThrowsAnyAsync<Exception>(() => McpTestApp.ConnectAsync(app));
+    }
+
+    [Fact]
     public async Task A_null_id_argument_is_an_error()
     {
         await using var app = await McpTestApp.StartAsync();
@@ -145,6 +188,166 @@ public class CairnMcpEdgeTests
         Assert.True(properties.TryGetProperty("Rush", out _));
         Assert.True(properties.TryGetProperty("custom_name", out _));
         Assert.False(properties.TryGetProperty("rush", out _));
+    }
+
+    [Fact]
+    public async Task The_reflection_fallback_honors_the_options_naming_policy()
+    {
+        // Same source-gen-only resolver, but with the default camelCase policy left in place: fallback names
+        // go through the policy instead of keeping their declared casing.
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.ConfigureHttpJsonOptions(options =>
+            options.SerializerOptions.TypeInfoResolver = McpTestJsonContext.Default);
+        builder.Services.AddCairn(options => options.AddLinks(new WidgetLinks()));
+        builder.Services.AddMcpServer()
+            .WithHttpTransport(options => options.Stateless = true)
+            .WithCairnAffordances(options =>
+                options.AddResource<Widget>("widget", (_, _) => new ValueTask<Widget?>(new Widget(1))));
+
+        await using var app = builder.Build();
+        app.MapMcp("/mcp");
+        await app.StartAsync();
+        await using var client = await McpTestApp.ConnectAsync(app);
+
+        var retag = (await client.ListToolsAsync()).Single(t => t.Name == "widget_retag");
+
+        Assert.True(retag.JsonSchema.GetProperty("properties").TryGetProperty("rush", out _));
+    }
+
+    [Fact]
+    public async Task A_custom_list_handler_returning_no_tools_passes_through_the_filter()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddMcpServer()
+            .WithHttpTransport(options => options.Stateless = true)
+            .WithListToolsHandler((_, _) => new ValueTask<ListToolsResult>(new ListToolsResult { Tools = [] }))
+            .WithCairnAffordances(_ => { });
+
+        await using var app = builder.Build();
+        app.MapMcp("/mcp");
+        await app.StartAsync();
+        await using var client = await McpTestApp.ConnectAsync(app);
+
+        Assert.Empty(await client.ListToolsAsync());
+    }
+
+    [Fact]
+    public async Task A_custom_list_handler_without_a_tool_collection_passes_through_the_filter()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddMcpServer()
+            .WithHttpTransport(options => options.Stateless = true)
+            .WithListToolsHandler((_, _) => new ValueTask<ListToolsResult>(new ListToolsResult
+            {
+                Tools = [new Tool { Name = "phantom" }],
+            }))
+            .WithCairnAffordances(_ => { });
+
+        await using var app = builder.Build();
+        app.MapMcp("/mcp");
+        await app.StartAsync();
+        await using var client = await McpTestApp.ConnectAsync(app);
+
+        Assert.Contains(await client.ListToolsAsync(), t => t.Name == "phantom");
+    }
+
+    [Fact]
+    public async Task Tools_refuse_a_transport_that_supplies_no_service_provider()
+    {
+        var tool = BuildWidgetTool();
+        var context = new RequestContext<CallToolRequestParams>(new FakeMcpServer(), ToolCallRequest(), new CallToolRequestParams { Name = "widget_retag" })
+        {
+            Services = null,
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => tool.InvokeAsync(context).AsTask());
+
+        Assert.Contains("no service provider", exception.Message);
+    }
+
+    [Fact]
+    public async Task Tools_refuse_to_run_outside_an_http_request()
+    {
+        var tool = BuildWidgetTool();
+
+        // No IHttpContextAccessor registered at all…
+        await using var bare = new ServiceCollection().BuildServiceProvider();
+        var withoutAccessor = new RequestContext<CallToolRequestParams>(new FakeMcpServer(), ToolCallRequest(), new CallToolRequestParams { Name = "widget_retag" })
+        {
+            Services = bare,
+        };
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => tool.InvokeAsync(withoutAccessor).AsTask());
+        Assert.Contains("No HTTP request is active", exception.Message);
+
+        // …and an accessor with no active request both fail the same way.
+        var services = new ServiceCollection();
+        services.AddHttpContextAccessor();
+        await using var idle = services.BuildServiceProvider();
+        var withoutRequest = new RequestContext<CallToolRequestParams>(new FakeMcpServer(), ToolCallRequest(), new CallToolRequestParams { Name = "widget_retag" })
+        {
+            Services = idle,
+        };
+        exception = await Assert.ThrowsAsync<InvalidOperationException>(() => tool.InvokeAsync(withoutRequest).AsTask());
+        Assert.Contains("No HTTP request is active", exception.Message);
+    }
+
+    private static ModelContextProtocol.Server.McpServerTool BuildWidgetTool()
+    {
+        var services = new ServiceCollection();
+        services.AddCairn(options => options.AddLinks(new WidgetLinks()));
+        services.AddMcpServer().WithCairnAffordances(options =>
+            options.AddResource<Widget>("widget", (_, _) => new ValueTask<Widget?>(new Widget(1))));
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ModelContextProtocol.Server.McpServerOptions>>().Value;
+        Assert.True(options.ToolCollection!.TryGetPrimitive("widget_retag", out var tool));
+        return tool;
+    }
+
+    private static ModelContextProtocol.Protocol.JsonRpcRequest ToolCallRequest()
+        => new() { Method = "tools/call" };
+
+    /// <summary>The minimal <see cref="McpServer"/> stand-in its protected constructor exists for.</summary>
+#pragma warning disable MCPEXP002 // The protected McpServer constructor is experimental; it exists for exactly this kind of test double.
+    private sealed class FakeMcpServer : McpServer
+    {
+        public override ClientCapabilities ClientCapabilities => new();
+
+        public override Implementation ClientInfo => new() { Name = "test", Version = "0" };
+
+        public override McpServerOptions ServerOptions => new();
+
+        public override IServiceProvider Services => EmptyProvider.Instance;
+
+        public override ModelContextProtocol.Protocol.LoggingLevel? LoggingLevel => null;
+
+        public override string? SessionId => null;
+
+        public override string? NegotiatedProtocolVersion => null;
+
+        public override Task RunAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public override Task SendMessageAsync(ModelContextProtocol.Protocol.JsonRpcMessage message, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public override Task<ModelContextProtocol.Protocol.JsonRpcResponse> SendRequestAsync(ModelContextProtocol.Protocol.JsonRpcRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public override IAsyncDisposable RegisterNotificationHandler(string method, Func<ModelContextProtocol.Protocol.JsonRpcNotification, CancellationToken, ValueTask> handler)
+            => throw new NotSupportedException();
+
+        public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
+#pragma warning restore MCPEXP002
+
+        private sealed class EmptyProvider : IServiceProvider
+        {
+            public static readonly EmptyProvider Instance = new();
+
+            public object? GetService(Type serviceType) => null;
+        }
     }
 
     [Fact]

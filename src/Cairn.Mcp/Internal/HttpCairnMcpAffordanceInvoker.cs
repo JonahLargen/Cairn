@@ -40,7 +40,7 @@ internal sealed class HttpCairnMcpAffordanceInvoker : ICairnMcpAffordanceInvoker
 
         var method = new HttpMethod(affordance.Method);
         using var request = new HttpRequestMessage(method, TargetOf(affordance.Href, call.HttpContext.Request, call.Arguments, method));
-        if (method != HttpMethod.Get && method != HttpMethod.Head)
+        if (method != HttpMethod.Get)
         {
             request.Content = new StringContent(JsonBody(call.Arguments), Encoding.UTF8, "application/json");
         }
@@ -62,15 +62,17 @@ internal sealed class HttpCairnMcpAffordanceInvoker : ICairnMcpAffordanceInvoker
             response.Content.Headers.ContentType?.ToString());
     }
 
-    // The engine resolved the href for the MCP request itself, so a relative href is relative to this host;
-    // GET/HEAD inputs travel as query parameters (a body would be dropped), everything else as JSON.
+    // The engine resolved the href for the MCP request itself, so a rooted path (LinkUrlStyle.PathRelative)
+    // resolves against the host this MCP request arrived on — checked by shape rather than Uri.TryCreate,
+    // which on Unix parses "/orders/1" as an absolute file:// URI. GET inputs travel as query parameters
+    // (a body would be dropped, matching HAL-FORMS semantics); everything else goes as JSON.
     private static Uri TargetOf(string href, HttpRequest mcpRequest, IReadOnlyDictionary<string, JsonElement> arguments, HttpMethod method)
     {
-        var url = Uri.TryCreate(href, UriKind.Absolute, out var absolute)
-            ? absolute
-            : new Uri(new Uri($"{mcpRequest.Scheme}://{mcpRequest.Host}", UriKind.Absolute), href);
+        var url = href.StartsWith('/')
+            ? new Uri(new Uri($"{mcpRequest.Scheme}://{mcpRequest.Host}", UriKind.Absolute), href)
+            : new Uri(href, UriKind.Absolute);
 
-        if ((method == HttpMethod.Get || method == HttpMethod.Head) && arguments.Count > 0)
+        if (method == HttpMethod.Get && arguments.Count > 0)
         {
             var query = new Dictionary<string, string?>(StringComparer.Ordinal);
             foreach (var (name, value) in arguments)

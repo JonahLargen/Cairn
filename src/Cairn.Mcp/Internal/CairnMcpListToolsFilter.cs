@@ -34,7 +34,8 @@ internal static class CairnMcpListToolsFilter
                     decisions ??= new(StringComparer.Ordinal);
                     if (!decisions.TryGetValue(policy, out var authorized))
                     {
-                        authorized = await AuthorizedAsync(context.User, policy, context.Services, cancellationToken).ConfigureAwait(false);
+                        // The ASP.NET Core transport Cairn.Mcp requires always populates the request's services.
+                        authorized = await AuthorizedAsync(context.User, policy, context.Services!, cancellationToken).ConfigureAwait(false);
                         decisions[policy] = authorized;
                     }
 
@@ -60,18 +61,12 @@ internal static class CairnMcpListToolsFilter
             return result;
         };
 
-    // Mirrors Cairn's request-time authorizer: no way to evaluate means not authorized (links are gated off,
-    // not exposed), and a missing IAuthorizationService is a configuration error worth surfacing.
-    private static async ValueTask<bool> AuthorizedAsync(ClaimsPrincipal? user, string policy, IServiceProvider? services, CancellationToken cancellationToken)
+    // Mirrors Cairn's request-time authorizer: the policy is evaluated against the caller alone, and a missing
+    // IAuthorizationService surfaces as the framework's own resolution failure (AddAuthorization is absent).
+    private static async ValueTask<bool> AuthorizedAsync(ClaimsPrincipal? user, string policy, IServiceProvider services, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (services is null)
-        {
-            return false;
-        }
-
-        var authorization = services.GetService<IAuthorizationService>()
-            ?? throw new InvalidOperationException("An affordance declares RequireAuthorization but IAuthorizationService is not registered. Call services.AddAuthorization().");
+        var authorization = services.GetRequiredService<IAuthorizationService>();
 
         user ??= new ClaimsPrincipal(new ClaimsIdentity());
         if (policy.Length == 0)

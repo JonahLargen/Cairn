@@ -48,6 +48,40 @@ public class CairnMcpSchemaTests
         // A parameterless [MaxLength] (provider-defined maximum) and a non-numeric [Range] add no constraints.
         Assert.False(properties.GetProperty("unbounded").TryGetProperty("maxLength", out _));
         Assert.False(properties.GetProperty("flagged").TryGetProperty("minimum", out _));
+
+        // [MinLength] works standalone; a zero minimum (explicit, or StringLength's default) adds nothing.
+        Assert.Equal(2, properties.GetProperty("pair").GetProperty("minLength").GetInt32());
+        Assert.False(properties.GetProperty("loose").TryGetProperty("minLength", out _));
+        Assert.False(properties.GetProperty("capped").TryGetProperty("minLength", out _));
+        Assert.Equal(8, properties.GetProperty("capped").GetProperty("maxLength").GetInt32());
+    }
+
+    [Fact]
+    public async Task Injected_hypermedia_contract_properties_never_become_schema_fields()
+    {
+        // widget_clone accepts Widget, whose serializer contract carries Cairn's injected _links/_actions
+        // properties — synthetic members with no PropertyInfo behind them, which the schema must skip.
+        await using var app = await McpTestApp.StartAsync(
+            options => options.AddResource<Widget>("widget", (_, _) => new ValueTask<Widget?>(new Widget(1))),
+            configureCairn: options => options.AddLinks(new WidgetLinks()));
+        await using var client = await McpTestApp.ConnectAsync(app);
+
+        var clone = (await client.ListToolsAsync()).Single(t => t.Name == "widget_clone");
+
+        var properties = clone.JsonSchema.GetProperty("properties");
+        Assert.True(properties.TryGetProperty("id", out _));
+        Assert.False(properties.TryGetProperty("_links", out _));
+        Assert.False(properties.TryGetProperty("_actions", out _));
+    }
+
+    [Fact]
+    public async Task An_enum_converter_that_writes_neither_string_nor_number_falls_back_to_numeric_values()
+    {
+        var schema = await RetagSchemaAsync();
+        var odd = schema.GetProperty("properties").GetProperty("odd");
+
+        Assert.Equal("integer", odd.GetProperty("type").GetString());
+        Assert.Equal([0L, 1L], odd.GetProperty("enum").EnumerateArray().Select(e => e.GetInt64()).ToArray());
     }
 
     [Fact]
@@ -167,6 +201,36 @@ public sealed class RetagRequest
 
     [JsonPropertyName("custom_name")]
     public string? Renamed { get; init; }
+
+    [MinLength(2)]
+    public List<int>? Pair { get; init; }
+
+    [MinLength(0)]
+    public string? Loose { get; init; }
+
+    [StringLength(8)]
+    public string? Capped { get; init; }
+
+    public OddEnum Odd { get; init; }
+
+    public string? Sink { set { _ = value; } }   // set-only: skipped by the reflection fallback
+}
+
+/// <summary>An enum whose converter emits neither a string nor a number, forcing the numeric fallback.</summary>
+[JsonConverter(typeof(OddEnumConverter))]
+public enum OddEnum
+{
+    No = 0,
+    Yes = 1,
+}
+
+public sealed class OddEnumConverter : JsonConverter<OddEnum>
+{
+    public override OddEnum Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.GetBoolean() ? OddEnum.Yes : OddEnum.No;
+
+    public override void Write(Utf8JsonWriter writer, OddEnum value, JsonSerializerOptions options)
+        => writer.WriteBooleanValue(value == OddEnum.Yes);
 }
 
 public sealed class WidgetLinks : LinkConfig<Widget>
@@ -177,5 +241,8 @@ public sealed class WidgetLinks : LinkConfig<Widget>
         builder.Affordance("retag", w => LinkTarget.Uri($"/widgets/{w.Id}/retag"))
             .Put()
             .Accepts<RetagRequest>();
+        builder.Affordance("clone", w => LinkTarget.Uri($"/widgets/{w.Id}/clone"))
+            .Post()
+            .Accepts<Widget>();   // an input type that itself carries hypermedia (it has a LinkConfig)
     }
 }

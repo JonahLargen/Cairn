@@ -71,7 +71,7 @@ internal sealed class CairnAffordanceTool : CairnMcpTool
         }
 
         var arguments = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-        if (request.Params?.Arguments is { } supplied)
+        if (request.Params.Arguments is { } supplied)
         {
             foreach (var argument in supplied)
             {

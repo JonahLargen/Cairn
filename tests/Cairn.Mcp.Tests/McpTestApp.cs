@@ -92,6 +92,11 @@ internal static class McpTestApp
 
         app.MapPost("/orders", (CreateOrderRequest request, OrderStore store) =>
         {
+            if (string.IsNullOrEmpty(request.Item))
+            {
+                return Results.BadRequest("item is required");
+            }
+
             var order = store.Create(request.Item);
             return Results.Created($"/orders/{order.Id}", order);
         }).WithName("create-order");

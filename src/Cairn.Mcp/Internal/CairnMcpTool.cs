@@ -32,7 +32,7 @@ internal abstract class CairnMcpTool : McpServerTool
         string? id = null;
         if (Registration.RequiresId)
         {
-            if (ArgumentOf(request.Params?.Arguments, "id") is not { } supplied || string.IsNullOrWhiteSpace(supplied))
+            if (ArgumentOf(request.Params.Arguments, "id") is not { } supplied || string.IsNullOrWhiteSpace(supplied))
             {
                 return Error($"The 'id' argument identifying the {Registration.Name} is required.");
             }

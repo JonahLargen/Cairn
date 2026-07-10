@@ -77,7 +77,9 @@ internal static class CairnMcpInputSchema
         {
             foreach (var member in contract.Properties)
             {
-                if (member.AttributeProvider is PropertyInfo property && property.GetIndexParameters().Length == 0)
+                // Synthetic contract properties with no member behind them (e.g. Cairn's own injected
+                // hypermedia properties) are skipped; the contract never surfaces indexers.
+                if (member.AttributeProvider is PropertyInfo property)
                 {
                     yield return (property, member.Name);
                 }
@@ -192,14 +194,14 @@ internal static class CairnMcpInputSchema
         for (var i = 0; i < values.Length; i++)
         {
             var node = WireValueOf(Enum.ToObject(type, values.GetValue(i)!), type, serializer);
-            numeric |= node is not JsonValue value || value.GetValueKind() != JsonValueKind.String;
-            wire.Add(node);
+            numeric |= node.GetValueKind() != JsonValueKind.String;
+            wire.Add((JsonNode)node);
         }
 
         return new JsonObject { ["type"] = numeric ? "integer" : "string", ["enum"] = wire };
     }
 
-    private static JsonNode WireValueOf(object value, Type enumType, JsonSerializerOptions serializer)
+    private static JsonValue WireValueOf(object value, Type enumType, JsonSerializerOptions serializer)
     {
         try
         {
@@ -283,13 +285,9 @@ internal static class CairnMcpInputSchema
     private static int? MinLengthOf(StringLengthAttribute? stringLength)
         => stringLength?.MinimumLength is int value and > 0 ? value : null;
 
-    private static double? ToDouble(object? value)
+    // [Range] always carries non-null bounds; non-numeric ones ([Range(typeof(bool), ...)]) yield no constraint.
+    private static double? ToDouble(object value)
     {
-        if (value is null)
-        {
-            return null;
-        }
-
         try
         {
             return Convert.ToDouble(value, CultureInfo.InvariantCulture);
