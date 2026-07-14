@@ -1,15 +1,16 @@
 # Cairn — Action List
 
 Originally reviewed at `main` = `aba3217` (released `v0.6.6` = `3b9e051`).
-**Status re-checked at `main` = `444d13b`** — ~45 PRs past the original review, latest
+**Status re-checked at `main` = `48301c5`** — ~53 PRs past the original review, latest
 release `v0.10.0`. Each item is marked **done** / **partial** / **rejected**. Waves:
-#70 (release blockers, polymorphic links), #71 (server hardening/caching/HAL-FORMS),
-#72 (client/analyzer/generator/testing), #92 (trimming/AOT), **#98 (this review's own
-code-review findings)**, **#99/#101 (the two leftover nits)**, **#102–#110 (the entire
-Features backlog)**, and **#111–#113 (HAL Explorer + precondition/formatter docs)**,
-plus supply-chain PRs #73/#93/#95 and coverage PRs #94/#97/#98. **The whole original
-list plus all nine Features are done; Ecosystem is now underway (HAL Explorer shipped).
-Remaining open work: the rest of the Ecosystem projects and the v2 cleanup.**
+#70/#71/#72 (release blockers + server/client/tooling fixes), #92 (trimming/AOT),
+**#98 (this review's own code-review findings)**, **#99/#101 (leftover nits)**,
+**#102–#110 (the entire Features backlog)**, **#111–#114 (HAL Explorer + OpenAPI
+precondition/deprecation docs)**, and **#115–#121 (the rest of the Ecosystem —
+template, ALPS, Traverson, docs, query binding, MCP)**, plus supply-chain and coverage
+PRs. **The whole original list, all nine Features, and seven of eight Ecosystem
+projects are done. The only open work left is the Siren package (parked by design,
+#113) and the v2 breaking-window cleanup.**
 
 > Also shipped, *not* from this list: **#100** added client-opt-in hypermedia via
 > `HypermediaFormat.None` (plain `application/json` → bare resource) + an
@@ -184,11 +185,10 @@ v0.9.0). All nine below are done.
 - [x] **Done** — OpenAPI enhancements: per-format schema variants (`allOf` layering
   `_actions`/`_templates`), typed `_embedded` schemas, `operation.deprecated`,
   `ETagMetadata` on `WithETag` (ETag header + 304), and `IEndpointMetadataProvider` on
-  `HypermediaProblem` (problem+json response) (#110); plus `WithPreconditions()`
-  documenting the `412`/`428` write-precondition responses (#112).
-  - [ ] Only sliver left: documenting the `Deprecation`/`Sunset` **response headers**
-    (the `operation.deprecated` flag is set, but the headers themselves aren't in the
-    document).
+  `HypermediaProblem` (problem+json response) (#110); `WithPreconditions()` documenting
+  the `412`/`428` write-precondition responses (#112); and the `Deprecation`/`Sunset`/
+  `Link` response headers documented on every response via `DocumentDeprecation` (#114).
+  Fully complete.
 - [x] **Done** — Cairn.Testing assertions: `NotHaveTemplate`, `HaveEmbedded(rel,count)`
   /`NotHaveEmbedded`, `.And` continuity across the `_embedded` boundary,
   `HttpResponseMessage.Should()` transport helpers (`HaveStatusCode`/`HaveContentType`
@@ -196,24 +196,34 @@ v0.9.0). All nine below are done.
 
 ## Ecosystem
 
-*The frontier — HAL Explorer is now shipped; the rest are still open.*
+**Seven of eight ecosystem projects shipped in #111 and #115–#121.** Only the Siren
+package remains, and #113 explained why it's parked.
 
-- [x] **Done** — HAL Explorer middleware + browsable sample API: new
-  `Cairn.AspNetCore.Explorer` package with `UseCairnExplorer()` (default `/explorer`,
-  Development-only unless opted in), a single embedded no-CDN HTML UI that renders
-  `_links`/`_embedded`/`_templates` as real forms and negotiates format from
-  `CairnOptions.MediaTypes`; the `Cairn.Sample.Api` was fleshed out as the browsable
+- [x] **Done** — HAL Explorer middleware + browsable sample API:
+  `Cairn.AspNetCore.Explorer` (`UseCairnExplorer()`, embedded no-CDN HTML UI rendering
+  `_links`/`_embedded`/`_templates` as real forms) + the fleshed-out `Cairn.Sample.Api`
   host. Trim/AOT-clean. (#111)
-- [ ] **Open** — `dotnet new cairn-api` template.
-- [ ] **Open** — Siren formatter package (`application/vnd.siren+json`). Note: #113
-  documented that the `IHypermediaFormatter` extension point can't express enveloping
-  formats, so a real Siren package would be format-first (or needs the V3 reshaping
-  seam), not an `IHypermediaFormatter`.
-- [ ] **Open** — ALPS profile documents from registered `LinkConfig<T>`s.
-- [ ] **Open** — Traverson-style multi-hop client sugar (`Follow("orders","next","item")`).
-- [ ] **Open** — Ketting-interop docs page and a "Cairn vs GraphQL vs OData" page.
-- [ ] **Open** — Opt-in query-parameter → pagination-envelope binding.
-- [ ] **Open** — `Cairn.Mcp`: expose state/auth-gated affordances as MCP tools.
+- [x] **Done** — `dotnet new cairn-api` template: `Cairn.Templates` pack
+  (`templates/CairnApi/.template.config/`) scaffolding a minimal API pre-wired for
+  Cairn, with `--framework`/`--explorer`/`--openapi` options. (#115)
+- [ ] **Open** — Siren formatter package (`application/vnd.siren+json`). Parked by
+  design: #113 documented that the `IHypermediaFormatter` extension point can't express
+  enveloping formats, so a real Siren package needs a format-first design (or the V3
+  reshaping seam) — not an `IHypermediaFormatter`. **The only open Ecosystem item.**
+- [x] **Done** — ALPS profile documents: `MapCairnAlps()` serves an index plus one
+  `application/alps+json` document per registered `LinkConfig<T>` (fields→descriptors,
+  affordances typed by HTTP safety), on a new `IDeclarationReportingConfig` seam. (#119)
+- [x] **Done** — Traverson-style multi-hop: `TraverseAsync<TNext>("orders","next","item")`
+  on `CairnClient`/`Resource<T>`/`CollectionResource<TItem>`, reading intermediate hops
+  for hypermedia only and binding the final response, under one timeout budget. (#118)
+- [x] **Done** — Ketting-interop guide (`ketting.md`) and a "Cairn vs GraphQL vs OData"
+  comparison (`comparison.md`), both wired into the docs. (#120)
+- [x] **Done** — Opt-in query-parameter → pagination binding: a `PageRequest`/
+  `CursorRequest` handler parameter binds the same configured query names the links use,
+  with `DefaultPageSize`/`MaxPageSize` clamping and `ToResource` round-tripping. (#117)
+- [x] **Done** — `Cairn.Mcp`: each affordance becomes an MCP tool (`{resource}_{affordance}`
+  + a `{resource}_get`), `tools/list` filtered per caller by auth policy, every call
+  re-running the link-engine gates before invoking via a pluggable invoker. (#121)
 
 ## v2 (breaking window)
 
@@ -299,26 +309,22 @@ Kept here as a record — every box below is checked.
 
 ## Suggested next steps
 
-The original list, the code-review appendix, both leftover nits, **the entire Features
-backlog (#102–#110), and the first Ecosystem project (HAL Explorer, #111)** are now
-done. Open work is the rest of the Ecosystem projects and the v2 cleanup — neither
-blocks a release.
+Everything is done except **the Siren package (E3, parked by design)** and the **v2
+breaking-window cleanup**. There is no correctness, feature, or (non-Siren) ecosystem
+debt left — the library is functionally complete for a 1.0.
 
-1. **Cut the 1.0 release — this is the move.** No correctness or feature debt remains:
-   AOT-annotated, 95% line+branch+patch coverage, supply-chain hardened, docs complete.
-   One concrete release chore first: #104/#109 staged intentional binary breaks in
-   `src/Cairn.Core/CompatibilitySuppressions.xml` — after tagging, bump
-   `PackageValidationBaselineVersion` to the new version and delete the suppressions so
-   the baseline tracks the real surface again (procedure is in RELEASING.md).
-2. **One doc sliver, whenever convenient (not a blocker):** document the
-   `Deprecation`/`Sunset` response headers in OpenAPI — the `412`/`428` half shipped in
-   #112 and the rest of F8 in #110, so only the deprecation headers remain.
-3. **Run the v2 breaking window as one major bump.** V1 is half-done (the resource
-   parameter exists as a non-breaking default-interface method); V2–V4 (async
+1. **Cut the 1.0 release — this is the move, and it's overdue.** The only gating chore:
+   #104/#109 staged intentional binary breaks in `src/Cairn.Core/CompatibilitySuppressions.xml`
+   — after tagging, bump `PackageValidationBaselineVersion` to the new version and delete
+   the suppressions so the baseline tracks the real surface again (procedure in
+   RELEASING.md). `main` is also ~9 PRs above the last tag (v0.10.0), so a release is
+   the natural next action regardless.
+2. **Run the v2 breaking window as one major bump** (post-1.0). V1 is half-done (the
+   resource parameter exists as a non-breaking default-interface method); V2–V4 (async
    `ILinkUrlResolver`, `IHypermediaFormatter` reshaping + `DefaultFormat` decoupling,
    default `UrlStyle` → `PathRelative`) are still breaking — do them together for a
-   single migration. #113 already documented the formatter-reshaping gap V3 closes.
-4. **Ecosystem is the remaining frontier**, and it's adoption-driven: with HAL Explorer
-   (E1) shipped, a `dotnet new cairn-api` template (E2) is the next highest-leverage for
-   growth; a Siren package (E3) and `Cairn.Mcp` (E8) are bigger differentiator bets
-   (Siren now needs a format-first design or the V3 seam, per #113).
+   single migration. This also unlocks a wire-conformant Siren (E3), whose parking note
+   (#113) points at exactly the V3 reshaping seam.
+3. **Siren (E3) is the only remaining feature call** — and it's optional. Ship it either
+   as a format-first package or on the back of the V3 reshaping work; there's no reason
+   to hold 1.0 for it.
