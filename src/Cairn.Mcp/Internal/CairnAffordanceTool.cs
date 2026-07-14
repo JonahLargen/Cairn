@@ -15,9 +15,9 @@ namespace Cairn.Mcp.Internal;
 /// </summary>
 internal sealed class CairnAffordanceTool : CairnMcpTool
 {
-    private readonly AffordanceSchema _schema;
+    private readonly DeclaredAffordance _schema;
 
-    public CairnAffordanceTool(CairnMcpResourceRegistration registration, AffordanceSchema schema, JsonSerializerOptions serializer)
+    public CairnAffordanceTool(CairnMcpResourceRegistration registration, DeclaredAffordance schema, JsonSerializerOptions serializer)
         : base(registration)
     {
         _schema = schema;
@@ -28,7 +28,7 @@ internal sealed class CairnAffordanceTool : CairnMcpTool
             Description = Describe(registration, schema),
             InputSchema = CairnMcpInputSchema.Build(
                 registration.RequiresId ? CairnMcpToolName.IdDescription(registration.Name) : null,
-                schema.Input,
+                schema.InputType,
                 serializer),
         };
     }
@@ -98,7 +98,7 @@ internal sealed class CairnAffordanceTool : CairnMcpTool
             : result.Content);
     }
 
-    private static string Describe(CairnMcpResourceRegistration registration, AffordanceSchema schema)
+    private static string Describe(CairnMcpResourceRegistration registration, DeclaredAffordance schema)
     {
         var description = new StringBuilder();
         description.Append(System.Globalization.CultureInfo.InvariantCulture, $"Invokes the '{schema.Name.Value}' action on the {registration.Name} resource");

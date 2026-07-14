@@ -42,6 +42,10 @@ var app = builder.Build();
 // start from the API root, then navigate entirely by following links and running the forms.
 app.UseCairnExplorer(options => options.Title = "Cairn Sample API Explorer");
 
+// ALPS profile documents generated from the link configs above: an index at /alps, and one
+// application/alps+json document per resource type (e.g. /alps/order-dto).
+app.MapCairnAlps();
+
 // Controllers opt in the same way — see CustomersController and its [CairnLinks].
 app.MapControllers();
 

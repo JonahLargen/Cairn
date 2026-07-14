@@ -11,11 +11,12 @@ internal interface IPolicyReportingConfig
 /// A <see cref="LinkConfig{T}"/> compiled once into its specs, able to build a <see cref="LinkSet"/>
 /// for an instance supplied as <see cref="object"/> (enabling runtime-type dispatch).
 /// </summary>
-internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReportingConfig, IEmbeddedResourceReportingConfig, IAffordanceReportingConfig
+internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReportingConfig, IEmbeddedResourceReportingConfig, IDeclarationReportingConfig
 {
     private readonly LinkBuilder<T> _builder;
     private IReadOnlyList<EmbeddedResourceSchema>? _embeddedResources;
-    private IReadOnlyList<AffordanceSchema>? _affordances;
+    private IReadOnlyList<DeclaredLink>? _declaredLinks;
+    private IReadOnlyList<DeclaredAffordance>? _declaredAffordances;
 
     private CompiledLinkConfig(LinkBuilder<T> builder) => _builder = builder;
 
@@ -123,39 +124,75 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReport
         }
     }
 
-    // The declared affordances are fixed once the config is compiled; project them once (lazily) into the
-    // public descriptor tool generators read to describe actions without a resource instance.
-    public IReadOnlyList<AffordanceSchema> Affordances
+    // Like EmbeddedResources: the declarations are fixed once the config is compiled, so project them once
+    // (lazily) into the public descriptors document generators read.
+    public IReadOnlyList<DeclaredLink> DeclaredLinks
     {
         get
         {
-            if (_affordances is not null)
+            if (_declaredLinks is not null)
             {
-                return _affordances;
+                return _declaredLinks;
+            }
+
+            if (_builder.LinkSpecs.Count == 0)
+            {
+                return _declaredLinks = Array.Empty<DeclaredLink>();
+            }
+
+            var links = new DeclaredLink[_builder.LinkSpecs.Count];
+            for (var i = 0; i < links.Length; i++)
+            {
+                var spec = _builder.LinkSpecs[i];
+                links[i] = new DeclaredLink(spec.Relation)
+                {
+                    Title = spec.TitleText,
+                    Type = spec.TypeText,
+                    Name = spec.NameText,
+                    Deprecation = spec.DeprecationText,
+                    Hreflang = spec.HreflangText,
+                    Profile = spec.ProfileText,
+                    Multi = spec.Targets is not null,
+                    Conditional = spec.Condition is not null || spec.Policy is not null,
+                };
+            }
+
+            return _declaredLinks = links;
+        }
+    }
+
+    public IReadOnlyList<DeclaredAffordance> DeclaredAffordances
+    {
+        get
+        {
+            if (_declaredAffordances is not null)
+            {
+                return _declaredAffordances;
             }
 
             if (_builder.AffordanceSpecs.Count == 0)
             {
-                return _affordances = Array.Empty<AffordanceSchema>();
+                return _declaredAffordances = Array.Empty<DeclaredAffordance>();
             }
 
-            var affordances = new AffordanceSchema[_builder.AffordanceSpecs.Count];
+            var affordances = new DeclaredAffordance[_builder.AffordanceSpecs.Count];
             for (var i = 0; i < affordances.Length; i++)
             {
                 var spec = _builder.AffordanceSpecs[i];
-                affordances[i] = new AffordanceSchema(spec.Relation, spec.HttpMethod)
+                affordances[i] = new DeclaredAffordance(spec.Relation, spec.HttpMethod)
                 {
-                    Input = spec.InputType,
                     Title = spec.TitleText,
+                    InputType = spec.InputType,
                     ContentType = spec.ContentTypeText,
                     IsDefault = spec.IsDefault,
+                    Conditional = spec.Condition is not null || spec.Policy is not null,
+                    HasCondition = spec.Condition is not null,
                     Policy = spec.Policy,
                     PolicyIsResourceBased = spec.PolicyResource is not null,
-                    HasCondition = spec.Condition is not null,
                 };
             }
 
-            return _affordances = affordances;
+            return _declaredAffordances = affordances;
         }
     }
 

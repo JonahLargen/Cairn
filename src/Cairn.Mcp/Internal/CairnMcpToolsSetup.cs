@@ -42,10 +42,10 @@ internal sealed class CairnMcpToolsSetup : IConfigureOptions<McpServerOptions>
                 ?? throw new InvalidOperationException(
                     $"No link configuration is registered for {registration.ResourceType.Name}. Register one with options.AddLinks(...) in AddCairn, or remove AddResource<{registration.ResourceType.Name}>(\"{registration.Name}\", ...).");
 
-            if (config is not IAffordanceReportingConfig reporting)
+            if (config is not IDeclarationReportingConfig reporting)
             {
                 throw new InvalidOperationException(
-                    $"The link configuration for {registration.ResourceType.Name} ({config.GetType().Name}) does not implement {nameof(IAffordanceReportingConfig)}, so its declared affordances cannot be described as MCP tools.");
+                    $"The link configuration for {registration.ResourceType.Name} ({config.GetType().Name}) does not implement {nameof(IDeclarationReportingConfig)}, so its declared affordances cannot be described as MCP tools.");
             }
 
             if (options.IncludeGetTools)
@@ -53,7 +53,7 @@ internal sealed class CairnMcpToolsSetup : IConfigureOptions<McpServerOptions>
                 Add(tools, new CairnResourceGetTool(registration, serializer));
             }
 
-            foreach (var schema in reporting.Affordances)
+            foreach (var schema in reporting.DeclaredAffordances)
             {
                 Add(tools, new CairnAffordanceTool(registration, schema, serializer));
             }

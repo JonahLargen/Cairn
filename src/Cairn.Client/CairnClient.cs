@@ -116,6 +116,139 @@ public sealed class CairnClient
         }, cancellationToken);
 
     /// <summary>
+    /// Traverson-style multi-hop navigation: gets <paramref name="url"/>, follows the first relation from the
+    /// resource it returns, the next relation from where that link leads, and so on — binding only the final
+    /// response to <typeparamref name="TNext"/>. Does not throw on an HTTP error status: a failing hop (an error
+    /// status, or a body that is not valid JSON) ends the traversal with that hop's failure result.
+    /// </summary>
+    /// <remarks>
+    /// Intermediate hops are plain GETs read for hypermedia only — nothing but the final response binds to a
+    /// type. A templated link along the chain expands with no variables, so its optional expressions collapse
+    /// per RFC 6570 (a templated <c>next</c> of <c>/orders{?page}</c> follows as <c>/orders</c>); a hop that
+    /// needs variables must be followed hop-by-hop via <see cref="FollowAsync{T}(Link, object, CancellationToken)"/>.
+    /// The configured link policy is enforced on every hop after the first request, and the
+    /// <see cref="HttpClient.Timeout"/> budget spans the whole traversal.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="url"/> or <paramref name="relations"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="relations"/> is empty, or contains a null or empty relation.</exception>
+    /// <exception cref="InvalidOperationException">A resource along the chain has no link with the next relation, or a link target is rejected by the configured link policy.</exception>
+    public Task<ClientResult<TNext>> TraverseAsync<TNext>(string url, params string[] relations)
+        => TraverseAsync<TNext>(url, relations, CancellationToken.None);
+
+    /// <summary>Traverson-style multi-hop navigation with a <see cref="CancellationToken"/>: see <see cref="TraverseAsync{TNext}(string, string[])"/>.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="url"/> or <paramref name="relations"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="relations"/> is empty, or contains a null or empty relation.</exception>
+    /// <exception cref="InvalidOperationException">A resource along the chain has no link with the next relation, or a link target is rejected by the configured link policy.</exception>
+    public Task<ClientResult<TNext>> TraverseAsync<TNext>(string url, string[] relations, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(url);
+        ValidateRelations(relations);
+
+        // The caller supplied the start URL, so it is not run through the link policy — matching GetAsync;
+        // every target discovered from a response is authorized inside the loop.
+        return TimeboxedAsync(
+            token => TraverseCoreAsync<TNext>(new Uri(url, UriKind.RelativeOrAbsolute), relations, next: 0, token),
+            cancellationToken);
+    }
+
+    // A traversal that Resource<T>/CollectionResource<TItem>.TraverseAsync started: relations[0] was already
+    // resolved against the in-hand resource's links, so the chain continues from that link with relations[1..].
+    internal Task<ClientResult<TNext>> TraverseFromAsync<TNext>(Link start, string[] relations, CancellationToken cancellationToken)
+        => TimeboxedAsync(
+            token => TraverseCoreAsync<TNext>(Authorize(ResolveHref(start)), relations, next: 1, token),
+            cancellationToken);
+
+    internal static void ValidateRelations(string[] relations)
+    {
+        ArgumentNullException.ThrowIfNull(relations);
+        if (relations.Length == 0)
+        {
+            throw new ArgumentException("At least one relation is required.", nameof(relations));
+        }
+
+        foreach (var relation in relations)
+        {
+            if (string.IsNullOrEmpty(relation))
+            {
+                throw new ArgumentException("Every relation must be a non-empty string.", nameof(relations));
+            }
+        }
+    }
+
+    // The traversal loop: `target` is the hop about to be fetched, and relations[next..] remain to be resolved
+    // from fetched documents (relations[..next] were resolved by the caller and give a missing relation its
+    // "which hop" context). Every hop before the last relation's target is read hypermedia-only.
+    private async Task<ClientResult<TNext>> TraverseCoreAsync<TNext>(Uri target, string[] relations, int next, CancellationToken cancellationToken)
+    {
+        for (var i = next; i < relations.Length; i++)
+        {
+            int status;
+            IReadOnlyDictionary<string, IReadOnlyList<Link>> links;
+            Problem? problem;
+            using (var request = CreateRequest(HttpMethod.Get, target))
+            {
+                using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                (status, links, problem) = await ReadHopAsync(response, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (problem is not null)
+            {
+                return ClientResult<TNext>.Failure(status, problem);
+            }
+
+            if (!links.TryGetValue(relations[i], out var candidates))
+            {
+                throw MissingHopLink(relations, i);
+            }
+
+            target = Authorize(ResolveHref(candidates[0]));
+        }
+
+        using var finalRequest = CreateRequest(HttpMethod.Get, target);
+        using var finalResponse = await _http.SendAsync(finalRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        return await ReadResultAsync<TNext>(finalResponse, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Reads an intermediate hop's hypermedia only — its links decide the next hop; the body never binds to a
+    // caller type. Mirrors ReadResultAsync's failure surface: an HTTP error status or an unparsable success
+    // body becomes a Problem, so a broken hop fails the whole traversal as a result, not an exception.
+    private async Task<(int Status, IReadOnlyDictionary<string, IReadOnlyList<Link>> Links, Problem? Problem)> ReadHopAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var status = (int)response.StatusCode;
+        if (!response.IsSuccessStatusCode)
+        {
+            return (status, Empty<IReadOnlyList<Link>>(), await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
+        }
+
+        var (document, problem) = await ParseBodyAsync(response, cancellationToken).ConfigureAwait(false);
+        if (problem is not null)
+        {
+            return (status, Empty<IReadOnlyList<Link>>(), problem);
+        }
+
+        if (document is null)
+        {
+            // A blank hop body is a linkless success: the traversal fails on the next relation lookup, with
+            // the message naming the hop, rather than here with a less specific parse error.
+            return (status, Empty<IReadOnlyList<Link>>(), null);
+        }
+
+        using (document)
+        {
+            return (status, HypermediaParser.Parse(document.RootElement).Links, null);
+        }
+    }
+
+    // Names the failing relation and the path that led to it, so a broken chain reads as "which hop".
+    private static InvalidOperationException MissingHopLink(string[] relations, int index)
+    {
+        var reached = index == 0
+            ? "The starting resource"
+            : $"The resource reached by following '{string.Join("' -> '", relations[..index])}'";
+        return new InvalidOperationException($"{reached} has no '{relations[index]}' link.");
+    }
+
+    /// <summary>
     /// Gets a collection from <paramref name="url"/>, with each item as a navigable resource. <paramref name="itemsProperty"/>
     /// names the array property on an envelope (default <c>items</c>); a bare JSON array is read directly. Does not throw on an HTTP error status.
     /// </summary>
