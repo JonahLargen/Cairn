@@ -1,5 +1,7 @@
 - name: What is HATEOAS?
   href: hateoas.md
+- name: Cairn vs GraphQL vs OData
+  href: comparison.md
 - name: Getting started
   href: getting-started.md
 - name: Project template
@@ -34,12 +36,18 @@
   href: controllers.md
 - name: The typed client
   href: client.md
+- name: Consuming with Ketting (JavaScript)
+  href: ketting.md
 - name: Route safety
   href: route-safety.md
 - name: OpenAPI &amp; Swagger
   href: openapi.md
+- name: ALPS profiles
+  href: alps.md
 - name: Browsable API explorer
   href: explorer.md
+- name: MCP server for AI agents
+  href: mcp.md
 - name: Testing
   href: testing.md
 - name: Packages

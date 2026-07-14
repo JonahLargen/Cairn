@@ -69,6 +69,8 @@ Read these three in order — they build on each other:
 2. **[Getting started](articles/getting-started.md)** — a ten-minute walkthrough: install, declare, opt in, and watch a `cancel` action appear and disappear with order state. Includes troubleshooting.
 3. **[Link configurations](articles/link-configs.md)** — the full builder: conditions, service-aware and async targets, authorization, titles.
 
+Weighing hypermedia against other API styles? [Cairn vs GraphQL vs OData](articles/comparison.md) compares the three contract models honestly — including where Cairn is the wrong tool.
+
 ## Guide by topic
 
 **Shaping responses**
@@ -91,6 +93,7 @@ Read these three in order — they build on each other:
 
 - [Controllers (MVC)](articles/controllers.md) — the same model with `[CairnLinks]`.
 - [The typed client](articles/client.md) — `CairnClient`, following links, invoking actions, submitting forms.
+- [Consuming with Ketting (JavaScript)](articles/ketting.md) — Cairn APIs work with the standard JS hypermedia client out of the box.
 
 **Tooling & quality**
 
@@ -108,5 +111,6 @@ Read these three in order — they build on each other:
 | `Cairn.Testing` | `HypermediaResponse`, `.Should()` assertions, and `HypermediaSnapshot`. |
 | `Cairn.OpenApi` | `AddCairnHypermedia()` for the built-in OpenAPI generator (.NET 10 only). |
 | `Cairn.Swashbuckle` | `AddCairnHypermedia()` for Swashbuckle/Swagger. |
+| `Cairn.Mcp` | `WithCairnAffordances()` — state/auth-gated affordances as Model Context Protocol tools for AI agents. |
 
 Most apps start with just `Cairn.AspNetCore` (it references `Cairn.Core`). Details and framework targets are in [Packages](articles/packages.md).

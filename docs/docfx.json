@@ -9,6 +9,7 @@
             "Cairn.Core/Cairn.Core.csproj",
             "Cairn.AspNetCore/Cairn.AspNetCore.csproj",
             "Cairn.Client/Cairn.Client.csproj",
+            "Cairn.Mcp/Cairn.Mcp.csproj",
             "Cairn.Testing/Cairn.Testing.csproj",
             "Cairn.OpenApi/Cairn.OpenApi.csproj",
             "Cairn.Swashbuckle/Cairn.Swashbuckle.csproj"

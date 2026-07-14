@@ -16,6 +16,9 @@
     <!-- Transitive pin: Microsoft.AspNetCore.OpenApi floors this at 2.0.0, which has a known
          vulnerability (GHSA-v5pm-xwqc-g5wc / NU1903). -->
     <PackageVersion Include="Microsoft.OpenApi" Version="[2.9.0]" />
+    <!-- Official MCP C# SDK: server plumbing for Cairn.Mcp; the client half is used by its tests. -->
+    <PackageVersion Include="ModelContextProtocol" Version="[1.4.1]" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="[1.4.1]" />
     <!-- Floor at the .NET 8 GA Roslyn (4.8.0) so the shipped analyzers/generators load on every SDK
          that can build the lowest supported TFM (net8.0). Analyzers built against 4.8 load fine on
          newer compilers, including the .NET 10 SDK's Roslyn 5. -->
