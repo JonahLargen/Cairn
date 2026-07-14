@@ -24,6 +24,9 @@ public sealed class CairnOptions
     private readonly Dictionary<string, string> _curies = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<IHypermediaFormatter> _formatters = [];
     private Uri? _publicBaseUri;
+    private int _defaultPageSize = PaginationBinding.DefaultPageSize;
+    private bool _defaultPageSizeConfigured;
+    private int? _maxPageSize;
     private bool _frozen;
 
     internal LinkConfigRegistry Registry { get; } = new();
@@ -126,11 +129,61 @@ public sealed class CairnOptions
     /// </summary>
     public bool ValidateAuthorizationPolicies { get; set; } = true;
 
-    /// <summary>The query string parameter swapped by the default offset pagination links (default <c>page</c>).</summary>
-    public string PageQueryParameter { get; set; } = "page";
+    /// <summary>
+    /// The query string parameter swapped by the default offset pagination links, and bound as the page
+    /// number by <see cref="PageRequest"/> (default <c>page</c>).
+    /// </summary>
+    public string PageQueryParameter { get; set; } = PaginationBinding.PageParameter;
 
-    /// <summary>The query string parameter swapped by the default cursor pagination links (default <c>cursor</c>).</summary>
-    public string CursorQueryParameter { get; set; } = "cursor";
+    /// <summary>
+    /// The query string parameter swapped by the default cursor pagination links, and bound as the cursor
+    /// by <see cref="CursorRequest"/> (default <c>cursor</c>).
+    /// </summary>
+    public string CursorQueryParameter { get; set; } = PaginationBinding.CursorParameter;
+
+    /// <summary>The query string parameter <see cref="PageRequest"/> binds the page size from (default <c>pageSize</c>).</summary>
+    public string PageSizeQueryParameter { get; set; } = PaginationBinding.PageSizeParameter;
+
+    /// <summary>The query string parameter <see cref="CursorRequest"/> binds the limit from (default <c>limit</c>).</summary>
+    public string LimitQueryParameter { get; set; } = PaginationBinding.LimitParameter;
+
+    /// <summary>
+    /// The page size <see cref="PageRequest"/> and <see cref="CursorRequest"/> bind when the request doesn't
+    /// supply one (default 20). When only <see cref="MaxPageSize"/> is configured and it is lower, the
+    /// default clamps to the cap; explicitly setting both to contradictory values fails at startup instead.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is below 1.</exception>
+    public int DefaultPageSize
+    {
+        get => _maxPageSize is { } cap && cap < _defaultPageSize ? cap : _defaultPageSize;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+            _defaultPageSize = value;
+            _defaultPageSizeConfigured = true;
+        }
+    }
+
+    /// <summary>
+    /// The cap a page size or limit bound by <see cref="PageRequest"/>/<see cref="CursorRequest"/> is clamped
+    /// to when the request asks for more (default <see langword="null"/> — uncapped). Set it so a client
+    /// can't dictate an unbounded fetch; the envelope echoes the clamped size, so the response metadata and
+    /// pagination links stay truthful about the page actually served.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is below 1.</exception>
+    public int? MaxPageSize
+    {
+        get => _maxPageSize;
+        set
+        {
+            if (value is { } cap)
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThan(cap, 1, nameof(value));
+            }
+
+            _maxPageSize = value;
+        }
+    }
 
     /// <summary>
     /// App-wide builder for a page number's URL, derived from the request (override per route with
@@ -161,7 +214,22 @@ public sealed class CairnOptions
     internal void Freeze()
     {
         ValidateMediaTypes();
+        ValidatePageSizeBounds();
         _frozen = true;
+    }
+
+    // Each bound of the page-size binding is valid on its own (the setters check that), but explicitly
+    // configuring a default above the cap is a contradiction: a request that omits the parameter would ask
+    // for a size the cap forbids. Checked when the options freeze at startup, so it fails the host boot
+    // rather than being silently clamped. Only an explicit DefaultPageSize is judged — configuring just
+    // MaxPageSize below the built-in 20 is the ordinary "small pages" case, and the default clamps to it.
+    private void ValidatePageSizeBounds()
+    {
+        if (_defaultPageSizeConfigured && _maxPageSize is { } cap && cap < _defaultPageSize)
+        {
+            throw new InvalidOperationException(
+                $"Cairn: DefaultPageSize ({_defaultPageSize}) is above MaxPageSize ({cap}), so a request that omits the page-size parameter would ask for a size the cap forbids. Set DefaultPageSize at or below MaxPageSize.");
+        }
     }
 
     // The negotiation candidate set (the four built-in tokens plus every custom formatter) must have distinct
