@@ -15,6 +15,7 @@
     <Project Path="src/Cairn.Client/Cairn.Client.csproj" />
     <Project Path="src/Cairn.CodeFixes/Cairn.CodeFixes.csproj" />
     <Project Path="src/Cairn.Core/Cairn.Core.csproj" />
+    <Project Path="src/Cairn.Mcp/Cairn.Mcp.csproj" />
     <Project Path="src/Cairn.OpenApi/Cairn.OpenApi.csproj" />
     <Project Path="src/Cairn.SourceGenerators/Cairn.SourceGenerators.csproj" />
     <Project Path="src/Cairn.Swashbuckle/Cairn.Swashbuckle.csproj" />
@@ -25,5 +26,6 @@
     <Project Path="tests/Cairn.AspNetCore.Tests/Cairn.AspNetCore.Tests.csproj" />
     <Project Path="tests/Cairn.AspNetCore.Explorer.Tests/Cairn.AspNetCore.Explorer.Tests.csproj" />
     <Project Path="tests/Cairn.Core.Tests/Cairn.Core.Tests.csproj" />
+    <Project Path="tests/Cairn.Mcp.Tests/Cairn.Mcp.Tests.csproj" />
   </Folder>
 </Solution>

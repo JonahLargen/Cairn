@@ -67,6 +67,34 @@ public class DeclarationReportingTests
     }
 
     [Fact]
+    public void Reports_affordance_gates_distinguishing_state_from_policy()
+    {
+        var config = new LinkConfigRegistry().Add(new GatedActionLinks()).GetConfig(typeof(Order));
+
+        var reporting = Assert.IsAssignableFrom<IDeclarationReportingConfig>(config);
+        var affordances = reporting.DeclaredAffordances;
+
+        // A When predicate is a state gate; it carries no policy.
+        Assert.True(affordances[0].HasCondition);
+        Assert.Null(affordances[0].Policy);
+        Assert.False(affordances[0].PolicyIsResourceBased);
+
+        // A caller-only policy names itself and needs no resource.
+        Assert.False(affordances[1].HasCondition);
+        Assert.Equal("manager", affordances[1].Policy);
+        Assert.False(affordances[1].PolicyIsResourceBased);
+        Assert.True(affordances[1].Conditional);
+
+        // A resource-based policy cannot be decided from the caller alone.
+        Assert.Equal("manager", affordances[2].Policy);
+        Assert.True(affordances[2].PolicyIsResourceBased);
+
+        // The parameterless overload reports the default-policy sentinel (the empty string).
+        Assert.Equal(string.Empty, affordances[3].Policy);
+        Assert.False(affordances[3].PolicyIsResourceBased);
+    }
+
+    [Fact]
     public void A_link_gated_by_a_policy_is_reported_as_conditional()
     {
         var config = new LinkConfigRegistry().Add(new GatedLinks()).GetConfig(typeof(Order));
@@ -123,6 +151,17 @@ public class DeclarationReportingTests
     {
         public override void Configure(ILinkBuilder<Order> builder)
             => builder.Self(o => LinkTarget.Uri($"/orders/{o.Id}")).RequireAuthorization("CanSee");
+    }
+
+    private sealed class GatedActionLinks : LinkConfig<Order>
+    {
+        public override void Configure(ILinkBuilder<Order> builder)
+        {
+            builder.Affordance("cancel", o => LinkTarget.Uri($"/orders/{o.Id}/cancel")).When(o => o.Status == "Pending");
+            builder.Affordance("approve", o => LinkTarget.Uri($"/orders/{o.Id}/approve")).RequireAuthorization("manager");
+            builder.Affordance("audit", o => LinkTarget.Uri($"/orders/{o.Id}/audit")).RequireAuthorization("manager", o => o);
+            builder.Affordance("note", o => LinkTarget.Uri($"/orders/{o.Id}/note")).RequireAuthorization();
+        }
     }
 
     private sealed class EmbedOnlyLinks : LinkConfig<Order>

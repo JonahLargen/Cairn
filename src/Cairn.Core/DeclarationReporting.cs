@@ -59,6 +59,21 @@ public sealed record DeclaredAffordance(LinkRelation Name, string HttpMethod)
 
     /// <summary>Whether the affordance is gated by <c>When</c> or <c>RequireAuthorization</c>, so it may be absent from any given response.</summary>
     public bool Conditional { get; init; }
+
+    /// <summary>Whether the affordance is gated by a <c>When</c> predicate (its availability depends on resource state).</summary>
+    public bool HasCondition { get; init; }
+
+    /// <summary>
+    /// The authorization policy gating the affordance, or <see langword="null"/> when it has no policy gate.
+    /// The empty string is the sentinel for the host's default policy (<c>RequireAuthorization()</c>).
+    /// </summary>
+    public string? Policy { get; init; }
+
+    /// <summary>
+    /// Whether <see cref="Policy"/> is evaluated against a resource object (resource-based authorization) and
+    /// therefore cannot be decided from the caller alone.
+    /// </summary>
+    public bool PolicyIsResourceBased { get; init; }
 }
 
 /// <summary>
