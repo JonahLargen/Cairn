@@ -154,6 +154,37 @@ public sealed class Resource<T>
             ? _client.FollowAsync<TNext>(link, variables, cancellationToken)
             : throw new InvalidOperationException($"The resource has no '{relation}' link.");
 
+    /// <summary>
+    /// Traverson-style multi-hop navigation: follows each relation in <paramref name="relations"/> in turn —
+    /// the first from this resource, each subsequent one from the resource the previous link led to — binding
+    /// only the final response to <typeparamref name="TNext"/>, e.g.
+    /// <c>TraverseAsync&lt;OrderItem&gt;("orders", "next", "item")</c>. Does not throw on an HTTP error status:
+    /// a failing hop ends the traversal with that hop's failure result.
+    /// </summary>
+    /// <remarks>
+    /// Intermediate hops are read for hypermedia only. A templated link along the chain expands with no
+    /// variables, so its optional expressions collapse per RFC 6570; a hop that needs variables must be
+    /// followed hop-by-hop via <see cref="FollowAsync{TNext}(string, object, CancellationToken)"/>. The
+    /// configured link policy is enforced on every hop.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="relations"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="relations"/> is empty, or contains a null or empty relation.</exception>
+    /// <exception cref="InvalidOperationException">This resource, or a resource along the chain, has no link with the next relation.</exception>
+    public Task<ClientResult<TNext>> TraverseAsync<TNext>(params string[] relations)
+        => TraverseAsync<TNext>(relations, CancellationToken.None);
+
+    /// <summary>Traverson-style multi-hop navigation with a <see cref="CancellationToken"/>: see <see cref="TraverseAsync{TNext}(string[])"/>.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="relations"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="relations"/> is empty, or contains a null or empty relation.</exception>
+    /// <exception cref="InvalidOperationException">This resource, or a resource along the chain, has no link with the next relation.</exception>
+    public Task<ClientResult<TNext>> TraverseAsync<TNext>(string[] relations, CancellationToken cancellationToken)
+    {
+        CairnClient.ValidateRelations(relations);
+        return Links.TryGetValue(relations[0], out var link)
+            ? _client.TraverseFromAsync<TNext>(link, relations, cancellationToken)
+            : throw new InvalidOperationException($"The resource has no '{relations[0]}' link.");
+    }
+
     /// <summary>Invokes the named affordance, optionally with a request body and an <c>ifMatch</c> ETag for optimistic concurrency.</summary>
     /// <exception cref="InvalidOperationException">The resource has no affordance with that name.</exception>
     public Task<ClientResult> InvokeAsync(string name, object? body = null, string? ifMatch = null, CancellationToken cancellationToken = default)
