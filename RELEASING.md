@@ -25,11 +25,18 @@ Versioning and publishing are fully tag-driven. There is no version number in th
    - generates signed [SLSA build provenance](https://slsa.dev/spec/v1.0/provenance) for the
      packages, records it in GitHub's attestation store, and attaches it to the release as
      `multiple.intoto.jsonl` / `multiple.sigstore.json` (see below).
-4. **Move the compatibility baseline forward.** After the packages are live, set
-   `PackageValidationBaselineVersion` in `src/Directory.Build.props` to the version you just shipped, so
-   the next cycle's builds validate against it. If last cycle carried a `CompatibilitySuppressions.xml` for
-   an intentional break, delete it now — the new baseline contains that API, so the entries are stale. Commit
-   both as the first change of the new cycle.
+4. **Move the compatibility baseline forward — after, and only after, the packages are live.** Once the
+   Release workflow is green and `0.6.0` is on NuGet.org, open a follow-up PR that sets
+   `PackageValidationBaselineVersion` in `src/Directory.Build.props` to the version you just shipped and
+   merge it to `main`. This PR ships nothing — it is bookkeeping that points the *next* cycle's builds at the
+   release you just made, so an accidental binary break is caught against it.
+
+   **Order matters.** The baseline must name an already-published package, so the sequence is always: push
+   the tag → wait for the release to finish publishing → *then* open the baseline PR. Opening it earlier
+   makes its own CI pack against a version NuGet cannot download yet, which fails with `NU1011`.
+
+   If last cycle carried a `CompatibilitySuppressions.xml` for an intentional break, delete it in this same
+   PR — the new baseline already contains that API, so the entries are stale.
 
 Aside from that one tracked edit (the baseline bump), a release is just a tag — no version numbers in
 csproj, no manual GitHub release, no separate "bump version" commit.
