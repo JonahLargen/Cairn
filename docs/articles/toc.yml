@@ -38,6 +38,8 @@
   href: route-safety.md
 - name: OpenAPI &amp; Swagger
   href: openapi.md
+- name: ALPS profiles
+  href: alps.md
 - name: Browsable API explorer
   href: explorer.md
 - name: Testing
