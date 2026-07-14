@@ -298,6 +298,7 @@ One structural caveat: **streaming responses (`IAsyncEnumerable<T>`) don't get l
 | [`Cairn.Swashbuckle`](https://www.nuget.org/packages/Cairn.Swashbuckle) | Hypermedia in Swashbuckle Swagger documents. | net8.0 · net9.0 · net10.0 |
 | [`Cairn.OpenApi`](https://www.nuget.org/packages/Cairn.OpenApi) | Hypermedia in `Microsoft.AspNetCore.OpenApi` documents. | net10.0 |
 | [`Cairn.AspNetCore.Explorer`](https://www.nuget.org/packages/Cairn.AspNetCore.Explorer) | A browsable HAL Explorer UI (`UseCairnExplorer()`), served from the app. Development-only by default. | net8.0 · net9.0 · net10.0 |
+| [`Cairn.Mcp`](https://www.nuget.org/packages/Cairn.Mcp) | Exposes state/auth-gated affordances as Model Context Protocol tools for AI agents. | net8.0 · net9.0 · net10.0 |
 | [`Cairn.Templates`](https://www.nuget.org/packages/Cairn.Templates) | `dotnet new cairn-api` — scaffolds a minimal API wired for hypermedia. Installed with `dotnet new install`. | scaffolds net8.0 · net9.0 · net10.0 |
 
 `Cairn.OpenApi` builds on the schema-transformer pipeline that only exists in this shape on .NET 10; on .NET 8/9, use `Cairn.Swashbuckle` instead. Details in [Packages](https://jonahlargen.github.io/Cairn/articles/packages.html).

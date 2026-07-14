@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Cairn.AspNetCore;
 using Cairn.AspNetCore.Explorer;
 using Cairn.Sample.Api;
+using Cairn.Mcp;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +22,19 @@ builder.Services.AddCairn(options =>
     options.AddLinks(new CustomerLinks());
     options.AddLinks(new CustomersLinks());
 });
+
+// The MCP surface for AI agents: each affordance declared above becomes a tool (order_cancel, orders_create),
+// gated by the same state and authorization rules as the hypermedia, plus order_get/orders_get for discovery.
+// Point an MCP client at /mcp to try it.
+builder.Services.AddMcpServer()
+    .WithHttpTransport(options => options.Stateless = true)
+    .WithCairnAffordances(mcp =>
+    {
+        mcp.AddResource<OrderDto>("order", (id, services, _) =>
+            new ValueTask<OrderDto?>(int.TryParse(id, out var orderId) ? services.GetRequiredService<Store>().Order(orderId) : null));
+        mcp.AddResource<OrdersResource>("orders", (services, _) =>
+            new ValueTask<OrdersResource?>(new OrdersResource(services.GetRequiredService<Store>().Orders())));
+    });
 
 var app = builder.Build();
 
@@ -72,5 +86,8 @@ orders.MapPost("/{id:int}/cancel", Results<NoContent, NotFound> (int id, CancelO
 app.MapGet("/customers", (Store store) => TypedResults.Ok(new CustomersResource(store.Customers())))
     .WithName("GetCustomers")
     .WithLinks();
+
+// The Model Context Protocol endpoint — agents list and call the affordance tools here.
+app.MapMcp("/mcp");
 
 app.Run();

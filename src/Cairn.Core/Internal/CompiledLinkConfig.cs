@@ -186,6 +186,9 @@ internal sealed class CompiledLinkConfig<T> : ICompiledLinkConfig, IPolicyReport
                     ContentType = spec.ContentTypeText,
                     IsDefault = spec.IsDefault,
                     Conditional = spec.Condition is not null || spec.Policy is not null,
+                    HasCondition = spec.Condition is not null,
+                    Policy = spec.Policy,
+                    PolicyIsResourceBased = spec.PolicyResource is not null,
                 };
             }
 

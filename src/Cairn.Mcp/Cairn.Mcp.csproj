@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <Description>Model Context Protocol integration for Cairn — exposes the state- and authorization-gated affordances your link configurations declare as MCP tools, so AI agents can discover and invoke exactly the actions the current caller is allowed to see.</Description>
+    <!-- No baseline package is published yet; enable package validation against a baseline after the first
+         release (bump PackageValidationBaselineVersion in src/Directory.Build.props once this ships). -->
+    <EnablePackageValidation>false</EnablePackageValidation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cairn.AspNetCore\Cairn.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>
